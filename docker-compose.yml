@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  # 1. PostgreSQL 16 Primary Database
+  nexa-postgres:
+    image: postgres:16-alpine
+    container_name: nexa-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-nexa_db}
+      POSTGRES_USER: ${POSTGRES_USER:-nexa_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-NexaSecretRootPassword2026!}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/migrations/001_init_schema.sql:/docker-entrypoint-initdb.d/001_init_schema.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nexa_admin} -d ${POSTGRES_DB:-nexa_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 2. Redis 7 Cache & Presence Relay
+  nexa-redis:
+    image: redis:7-alpine
+    container_name: nexa-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:-NexaRedisToken456!}"]
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+
+  # 3. NATS JetStream Message Broker
+  nexa-nats:
+    image: nats:2.10-alpine
+    container_name: nexa-nats
+    restart: unless-stopped
+    command: ["-js", "-m", "8222"]
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+
+  # 4. Coturn STUN/TURN Media Relay for WebRTC
+  nexa-coturn:
+    image: coturn/coturn:latest
+    container_name: nexa-coturn
+    restart: unless-stopped
+    network_mode: host
+    command:
+      - "-n"
+      - "--log-file=stdout"
+      - "--min-port=49152"
+      - "--max-port=65535"
+      - "--realm=turn.nexa.im"
+      - "--use-auth-secret"
+      - "--static-auth-secret=${TURN_SECRET:-CoturnSecretKeyNexa2026}"
+
+volumes:
+  postgres_data:
+  redis_data:

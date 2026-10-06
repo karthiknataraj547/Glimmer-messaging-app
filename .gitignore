@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+.dart_tool/
+.packages
+
+# Build artifacts
+app/build/
+build/
+*.pyc
+
+# Environment & local secrets
+.env
+*.local
+*.log
+backend/logs/
+
+# IDE & OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
