@@ -60,25 +60,20 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
     return Scaffold(
       backgroundColor: NexaColors.canvasLight,
       body: SafeArea(
-        child: Column(
+        bottom: false,
+        child: IndexedStack(
+          index: _activeNav,
           children: [
-            // Active Tab Content
-            Expanded(
-              child: IndexedStack(
-                index: _activeNav,
-                children: [
-                  _buildChatsTab(),
-                  _buildCallsTab(),
-                  const ExploreCommunitiesScreen(isEmbedded: true),
-                  const PrivacyCenterScreen(isEmbedded: true),
-                ],
-              ),
-            ),
-
-            // Persistent Minimalist Focus Orbit Dock
-            _buildOrbitDock(context),
+            _buildChatsTab(),
+            _buildCallsTab(),
+            const ExploreCommunitiesScreen(isEmbedded: true),
+            const PrivacyCenterScreen(isEmbedded: true),
           ],
         ),
+      ),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: _buildOrbitDock(context),
       ),
     );
   }
@@ -680,42 +675,47 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
   // ==========================================
   Widget _buildOrbitDock(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      height: 64,
       decoration: BoxDecoration(
         color: NexaColors.surfaceLight,
-        borderRadius: BorderRadius.circular(30),
+        borderRadius: BorderRadius.circular(32),
         border: Border.all(color: NexaColors.borderLight),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.08),
-            blurRadius: 18,
+            color: Colors.black.withValues(alpha: 0.07),
+            blurRadius: 16,
             offset: const Offset(0, 4),
           ),
         ],
       ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          _buildDockButton(
-            icon: Icons.chat_bubble_outline,
-            activeIcon: Icons.chat_bubble,
-            label: 'Chats',
-            index: 0,
+          Expanded(
+            child: _buildDockButton(
+              icon: Icons.chat_bubble_outline,
+              activeIcon: Icons.chat_bubble,
+              label: 'Chats',
+              index: 0,
+            ),
           ),
-          _buildDockButton(
-            icon: Icons.call_outlined,
-            activeIcon: Icons.call,
-            label: 'Calls',
-            index: 1,
+          Expanded(
+            child: _buildDockButton(
+              icon: Icons.call_outlined,
+              activeIcon: Icons.call,
+              label: 'Calls',
+              index: 1,
+            ),
           ),
 
           // Central Quiet Intelligence Assistant Orb
           GestureDetector(
             onTap: () => _openAssistantModal(context),
             child: Container(
-              width: 48,
-              height: 48,
+              width: 44,
+              height: 44,
+              margin: const EdgeInsets.symmetric(horizontal: 4),
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 gradient: const RadialGradient(
@@ -727,26 +727,30 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                 boxShadow: [
                   BoxShadow(
                     color: NexaColors.primary.withValues(alpha: 0.35),
-                    blurRadius: 12,
-                    offset: const Offset(0, 3),
+                    blurRadius: 10,
+                    offset: const Offset(0, 2),
                   ),
                 ],
               ),
-              child: const Icon(Icons.auto_awesome, color: Colors.white, size: 22),
+              child: const Icon(Icons.auto_awesome, color: Colors.white, size: 20),
             ),
           ),
 
-          _buildDockButton(
-            icon: Icons.groups_outlined,
-            activeIcon: Icons.groups,
-            label: 'Communities',
-            index: 2,
+          Expanded(
+            child: _buildDockButton(
+              icon: Icons.groups_outlined,
+              activeIcon: Icons.groups,
+              label: 'Community',
+              index: 2,
+            ),
           ),
-          _buildDockButton(
-            icon: Icons.shield_outlined,
-            activeIcon: Icons.shield,
-            label: 'Security',
-            index: 3,
+          Expanded(
+            child: _buildDockButton(
+              icon: Icons.shield_outlined,
+              activeIcon: Icons.shield,
+              label: 'Security',
+              index: 3,
+            ),
           ),
         ],
       ),
@@ -762,10 +766,10 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
     final isActive = _activeNav == index;
     return InkWell(
       onTap: () => setState(() => _activeNav = index),
-      borderRadius: BorderRadius.circular(16),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      borderRadius: BorderRadius.circular(20),
+      child: Center(
         child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
@@ -773,13 +777,18 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
               color: isActive ? NexaColors.primary : NexaColors.textMuted,
               size: 22,
             ),
-            const SizedBox(height: 2),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 10,
-                fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
-                color: isActive ? NexaColors.primary : NexaColors.textMuted,
+            const SizedBox(height: 3),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                label,
+                maxLines: 1,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
+                  color: isActive ? NexaColors.primary : NexaColors.textMuted,
+                  letterSpacing: -0.1,
+                ),
               ),
             ),
           ],
