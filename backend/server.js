@@ -12,12 +12,38 @@ const http = require('http');
 const path = require('path');
 const { WebSocketServer } = require('ws');
 
+const crypto = require('crypto');
+const { Pool } = require('pg');
+
 const app = express();
 app.use(express.json({ limit: '10mb' }));
 
 // Host built Flutter Web application
 const staticWebPath = path.join(__dirname, '../app/build/web');
 app.use(express.static(staticWebPath));
+
+// Database Pool Connection (PostgreSQL 16)
+let dbPool = null;
+if (process.env.DATABASE_URL) {
+  try {
+    dbPool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      max: 10,
+      idleTimeoutMillis: 30000
+    });
+    dbPool.query('SELECT NOW()', (err, res) => {
+      if (err) {
+        console.warn('[NEXA] PostgreSQL connection check warning:', err.message);
+      } else {
+        console.log('[NEXA] PostgreSQL connected successfully at:', res.rows[0].now);
+      }
+    });
+  } catch (e) {
+    console.warn('[NEXA] PostgreSQL initialization error:', e.message);
+  }
+} else {
+  console.log('[NEXA] Operating in ephemeral in-memory zero-knowledge mode (DATABASE_URL not set).');
+}
 
 // In-Memory Zero-Knowledge Stores (Backed by PostgreSQL / Redis in production)
 const userDevices = new Map();       // user_id -> Map(device_id -> { identity_key, ... })
@@ -31,9 +57,48 @@ app.get('/health', (req, res) => {
     status: 'ok',
     security_mode: 'zero_knowledge_e2ee',
     crypto_standard: 'X3DH_DoubleRatchet_AES256GCM',
+    database_connected: dbPool !== null,
     active_devices: userDevices.size,
     pending_envelopes: Array.from(mailboxQueue.values()).reduce((acc, q) => acc + q.length, 0),
     timestamp: Date.now()
+  });
+});
+
+// --- 1.1 WebRTC ICE & TURN EPHEMERAL CREDENTIALS ---
+app.get('/v1/calls/ice-servers', (req, res) => {
+  const turnSecret = process.env.TURN_SECRET || 'nexa_ephemeral_turn_secret_2026';
+  const ttl = 86400; // 24 hours
+  const expiry = Math.floor(Date.now() / 1000) + ttl;
+  const username = `${expiry}:${req.query.user_id || 'nexa-anonymous-peer'}`;
+  const hmac = crypto.createHmac('sha1', turnSecret);
+  hmac.update(username);
+  const credential = hmac.digest('base64');
+
+  const turnHost = process.env.TURN_HOST || '127.0.0.1';
+  const turnPort = process.env.TURN_PORT || '3478';
+  const turnsPort = process.env.TURNS_PORT || '5349';
+
+  res.json({
+    iceServers: [
+      {
+        urls: [
+          'stun:stun.l.google.com:19302',
+          'stun:stun1.l.google.com:19302',
+          `stun:${turnHost}:${turnPort}`
+        ]
+      },
+      {
+        urls: [
+          `turn:${turnHost}:${turnPort}?transport=udp`,
+          `turn:${turnHost}:${turnPort}?transport=tcp`,
+          `turns:${turnHost}:${turnsPort}?transport=tcp`
+        ],
+        username: username,
+        credential: credential
+      }
+    ],
+    ttl: ttl,
+    security: 'DTLS-SRTP-Direct-P2P'
   });
 });
 

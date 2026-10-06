@@ -20,6 +20,15 @@ async function runTests() {
     assert.strictEqual(healthRes.security_mode, 'zero_knowledge_e2ee');
     console.log('✓ Health check passed');
 
+    // 1.1 WebRTC ICE Servers Check
+    const iceRes = await fetch(`${baseUrl}/v1/calls/ice-servers?user_id=NX-ALICE-1234`).then(r => r.json());
+    assert(Array.isArray(iceRes.iceServers));
+    assert(iceRes.iceServers.length >= 2);
+    assert.strictEqual(iceRes.security, 'DTLS-SRTP-Direct-P2P');
+    assert(iceRes.iceServers[1].username.includes('NX-ALICE-1234'));
+    assert(typeof iceRes.iceServers[1].credential === 'string');
+    console.log('✓ WebRTC ICE/TURN ephemeral credentials passed');
+
     // 2. Register Devices for Alice and Bob
     const aliceDevice = {
       nexa_id: 'NX-ALICE-1234',
