@@ -3,7 +3,8 @@ import '../../../core/theme/nexa_theme.dart';
 import 'community_channel_screen.dart';
 
 class ExploreCommunitiesScreen extends StatefulWidget {
-  const ExploreCommunitiesScreen({super.key});
+  final bool isEmbedded;
+  const ExploreCommunitiesScreen({super.key, this.isEmbedded = false});
 
   @override
   State<ExploreCommunitiesScreen> createState() => _ExploreCommunitiesScreenState();
@@ -59,13 +60,59 @@ class _ExploreCommunitiesScreenState extends State<ExploreCommunitiesScreen> {
 
     return Scaffold(
       backgroundColor: NexaColors.canvas,
-      appBar: AppBar(
-        title: const Text('Explore Communities'),
-      ),
+      appBar: widget.isEmbedded
+          ? null
+          : AppBar(
+              title: const Text('Explore Communities'),
+            ),
       body: SafeArea(
+        top: !widget.isEmbedded,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (widget.isEmbedded)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 14),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Explore Communities',
+                          style: TextStyle(
+                            color: NexaColors.textPrimary,
+                            fontSize: 22,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.4,
+                          ),
+                        ),
+                        SizedBox(height: 2),
+                        Text(
+                          'Intent-based private communities',
+                          style: TextStyle(color: NexaColors.textSecondary, fontSize: 13),
+                        ),
+                      ],
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: NexaColors.elevated,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: NexaColors.border),
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(Icons.public, color: NexaColors.cyanAccent, size: 14),
+                          SizedBox(width: 6),
+                          Text('Curated', style: TextStyle(color: NexaColors.textPrimary, fontSize: 12, fontWeight: FontWeight.w600)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             // Category Filter Bar
             SizedBox(
               height: 44,

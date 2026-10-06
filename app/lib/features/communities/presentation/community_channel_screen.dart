@@ -191,7 +191,7 @@ class _CommunityChannelScreenState extends State<CommunityChannelScreen> {
                     backgroundColor: NexaColors.cyanAccent,
                     radius: 20,
                     child: IconButton(
-                      icon: const Icon(Icons.send_rounded, color: Colors.black, size: 18),
+                      icon: const Icon(Icons.send_rounded, color: Colors.white, size: 18),
                       onPressed: _submitPost,
                     ),
                   ),

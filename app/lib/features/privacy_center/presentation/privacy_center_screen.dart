@@ -4,7 +4,8 @@ import '../../auth/presentation/device_link_qr_screen.dart';
 import '../../auth/presentation/recovery_key_vault_screen.dart';
 
 class PrivacyCenterScreen extends StatefulWidget {
-  const PrivacyCenterScreen({super.key});
+  final bool isEmbedded;
+  const PrivacyCenterScreen({super.key, this.isEmbedded = false});
 
   @override
   State<PrivacyCenterScreen> createState() => _PrivacyCenterScreenState();
@@ -23,25 +24,69 @@ class _PrivacyCenterScreenState extends State<PrivacyCenterScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: NexaColors.canvas,
-      appBar: AppBar(
-        title: const Text('Privacy Center'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.shield_outlined, color: NexaColors.emeraldSecure),
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Cryptographic health check: 100% Secure. All keys hardware-isolated.'),
-                  backgroundColor: NexaColors.elevated,
+      appBar: widget.isEmbedded
+          ? null
+          : AppBar(
+              title: const Text('Privacy Center'),
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.shield_outlined, color: NexaColors.emeraldSecure),
+                  onPressed: () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Cryptographic health check: 100% Secure. All keys hardware-isolated.'),
+                        backgroundColor: NexaColors.elevated,
+                      ),
+                    );
+                  },
                 ),
-              );
-            },
-          ),
-        ],
-      ),
+              ],
+            ),
       body: ListView(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
         children: [
+          if (widget.isEmbedded) ...[
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Security & Vault',
+                      style: TextStyle(
+                        color: NexaColors.textPrimary,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.4,
+                      ),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      'Zero-knowledge cryptography controls',
+                      style: TextStyle(color: NexaColors.textSecondary, fontSize: 13),
+                    ),
+                  ],
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: NexaColors.emeraldSecure.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: NexaColors.emeraldSecure.withValues(alpha: 0.3)),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(Icons.lock, color: NexaColors.emeraldSecure, size: 14),
+                      SizedBox(width: 6),
+                      Text('Enforced', style: TextStyle(color: NexaColors.emeraldSecure, fontSize: 12, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+          ],
           // Security Status Card
           Container(
             padding: const EdgeInsets.all(20),

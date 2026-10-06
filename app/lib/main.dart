@@ -15,7 +15,9 @@ class NexaApp extends StatelessWidget {
     return MaterialApp(
       title: 'NEXA',
       debugShowCheckedModeBanner: false,
-      theme: NexaTheme.darkTheme,
+      theme: NexaTheme.lightTheme,
+      darkTheme: NexaTheme.darkTheme,
+      themeMode: ThemeMode.light,
       home: const FocusOrbitScreen(),
     );
   }
