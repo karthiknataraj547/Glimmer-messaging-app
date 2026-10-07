@@ -196,41 +196,14 @@ app.post('/v1/auth/login-user', async (req, res) => {
   const user = await Database.findUser(username);
 
   if (!user) {
-    // Seamless simple login: If account is not registered yet, auto-provision on server and log in!
-    if (password.length >= 4) {
-      const nexaId = `NX-${crypto.randomBytes(2).toString('hex').toUpperCase()}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
-      const newUserRecord = {
-        username,
-        password_hash: passwordHash,
-        full_name: username,
-        about: 'Zero-knowledge encrypted peer.',
-        phone: '',
-        nexa_id: nexaId,
-        created_at: Date.now()
-      };
-      const savedUser = await Database.saveUser(newUserRecord);
-      Database.logActivity({
-        type: 'auth',
-        action: 'auto_provision_login',
-        target: savedUser.username,
-        actor: savedUser.username,
-        details: `Auto-provisioned account ${savedUser.nexa_id} via simple login`
-      });
-      console.log(`[NEXA] Seamlessly auto-provisioned user '@${username}' (${nexaId}) via simple login.`);
-      return res.json({
-        success: true,
-        message: 'Account provisioned and authenticated successfully.',
-        user: {
-          username: savedUser.username,
-          handle: `@${savedUser.username}`,
-          fullName: savedUser.full_name,
-          about: savedUser.about,
-          phone: savedUser.phone || '',
-          nexaId: savedUser.nexa_id
-        }
-      });
-    }
-    return res.status(401).json({ error: 'Password / Master PIN must be at least 4 digits.' });
+    Database.logActivity({
+      type: 'security',
+      action: 'login_denied_user_not_found',
+      target: username,
+      actor: username,
+      details: 'Login attempt for non-existent account'
+    });
+    return res.status(401).json({ error: 'Account does not exist. Please create an account first.' });
   }
 
   if (user.status === 'suspended') {
