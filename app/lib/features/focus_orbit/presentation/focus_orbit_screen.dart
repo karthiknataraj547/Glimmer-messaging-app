@@ -368,6 +368,7 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
       key: _scaffoldKey,
       backgroundColor: NexaColors.canvasLight,
       drawer: _buildAppDrawer(context),
+      endDrawer: _buildAppDrawer(context),
       body: Stack(
         children: [
           SafeArea(
@@ -383,38 +384,44 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
             ),
           ),
 
-          // Floating Bottom-Left "=" Widget
-          Positioned(
-            left: 20,
-            bottom: 82,
-            child: GestureDetector(
-              onTap: _showOrbitQuickFilters,
-              child: Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: _quietModeActive || _activeFilter != 'All' ? NexaColors.primary : NexaColors.surfaceLight,
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: _quietModeActive || _activeFilter != 'All' ? NexaColors.primary : NexaColors.borderLight,
-                    width: 1.5,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.1),
-                      blurRadius: 10,
-                      offset: const Offset(0, 3),
+          // Floating "=" Focus Orbit Widget (Shifted to right, placed directly above Calls tab, only visible in Chats tab)
+          if (_activeNav == 0)
+            Positioned(
+              right: 22,
+              bottom: 84,
+              child: Tooltip(
+                message: 'Focus Controls',
+                child: GestureDetector(
+                  onTap: _showOrbitQuickFilters,
+                  child: Container(
+                    width: 54,
+                    height: 54,
+                    decoration: BoxDecoration(
+                      color: _quietModeActive || _activeFilter != 'All' ? NexaColors.primary : NexaColors.surfaceLight,
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: _quietModeActive || _activeFilter != 'All' ? NexaColors.primary : NexaColors.borderLight,
+                        width: 1.5,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: (_quietModeActive || _activeFilter != 'All' ? NexaColors.primary : Colors.black).withValues(alpha: 0.16),
+                          blurRadius: 12,
+                          offset: const Offset(0, 3),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-                child: Icon(
-                  Icons.menu,
-                  size: 20,
-                  color: _quietModeActive || _activeFilter != 'All' ? Colors.white : NexaColors.textPrimary,
+                    child: Center(
+                      child: Icon(
+                        Icons.drag_handle,
+                        size: 28,
+                        color: _quietModeActive || _activeFilter != 'All' ? Colors.white : NexaColors.textPrimary,
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ),
-          ),
         ],
       ),
       bottomNavigationBar: SafeArea(
@@ -602,17 +609,17 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
     return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 20),
       children: [
-        const SizedBox(height: 10),
+        const SizedBox(height: 4),
         _buildQuietIntelligenceHeader(),
-        const SizedBox(height: 14),
+        const SizedBox(height: 10),
 
-        // Search Bar
+        // Compact Search Bar
         _buildSearchBar(),
-        const SizedBox(height: 16),
+        const SizedBox(height: 14),
 
         // Horizontally Scrollable Stories Bar
         _buildStoriesRow(),
-        const SizedBox(height: 20),
+        const SizedBox(height: 18),
 
         // Priority Pulse Card
         _buildPriorityCard(context),
@@ -829,72 +836,149 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
   }
 
   // ==========================================
-  // QUIET INTELLIGENCE TOP BAR WITH 3-LINE MENU
+  // COMPACT TOP NAVIGATION BAR & 3-DOT MENU
   // ==========================================
   Widget _buildQuietIntelligenceHeader() {
-    final avatarColor = _session.currentAvatarPreset['color'] as Color;
-    final avatarIcon = _session.currentAvatarPreset['icon'] as IconData;
-
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        Row(
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            // Three-line button to open drawer
-            IconButton(
-              icon: const Icon(Icons.menu, color: NexaColors.textPrimary, size: 26),
-              tooltip: 'Navigation Menu',
-              onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+            Text(
+              'Good evening, ${_session.name}',
+              style: const TextStyle(
+                color: NexaColors.textPrimary,
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+                letterSpacing: -0.2,
+              ),
             ),
-            const SizedBox(width: 4),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            const SizedBox(height: 2),
+            const Row(
               children: [
+                Icon(Icons.shield_outlined, color: NexaColors.emeraldSecure, size: 11),
+                SizedBox(width: 4),
                 Text(
-                  'Good evening, ${_session.name}',
-                  style: const TextStyle(
-                    color: NexaColors.textPrimary,
-                    fontSize: 19,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.3,
-                  ),
-                ),
-                const Row(
-                  children: [
-                    Icon(Icons.shield_outlined, color: NexaColors.emeraldSecure, size: 13),
-                    SizedBox(width: 4),
-                    Text(
-                      'Quiet Intelligence • Nothing urgent',
-                      style: TextStyle(color: NexaColors.textSecondary, fontSize: 12, fontWeight: FontWeight.w500),
-                    ),
-                  ],
+                  'Quiet Intelligence • Nothing urgent',
+                  style: TextStyle(color: NexaColors.textSecondary, fontSize: 11, fontWeight: FontWeight.w500),
                 ),
               ],
             ),
           ],
         ),
 
-        // User Profile Picture in Top Bar (Click opens Profile Screen!)
-        GestureDetector(
-          onTap: () => Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const UserProfileScreen()),
+        // Three-dot button on the right (replacing previous globe icon)
+        PopupMenuButton<String>(
+          icon: Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: NexaColors.elevatedLight,
+              shape: BoxShape.circle,
+              border: Border.all(color: NexaColors.borderLight),
+            ),
+            child: const Icon(Icons.more_vert, color: NexaColors.textPrimary, size: 20),
           ),
-          child: Tooltip(
-            message: 'View & Edit Profile',
-            child: Container(
-              padding: const EdgeInsets.all(2),
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: NexaColors.primary, width: 2),
-              ),
-              child: CircleAvatar(
-                radius: 18,
-                backgroundColor: avatarColor,
-                child: Icon(avatarIcon, color: Colors.white, size: 18),
+          tooltip: 'Options & Settings',
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          color: NexaColors.surfaceLight,
+          elevation: 6,
+          offset: const Offset(0, 42),
+          onSelected: (value) {
+            switch (value) {
+              case 'linked_devices':
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const DeviceLinkQrScreen()));
+                break;
+              case 'settings':
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Settings: All local telemetry and hardware isolated.')),
+                );
+                break;
+              case 'profile':
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const UserProfileScreen()));
+                break;
+              case 'security':
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const PrivacyCenterScreen()));
+                break;
+              case 'vault':
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const RecoveryKeyVaultScreen()));
+                break;
+              case 'lock':
+                _session.logout();
+                Navigator.pushAndRemoveUntil(
+                  context,
+                  MaterialPageRoute(builder: (_) => const AuthFlowScreen(isLoginInitial: true)),
+                  (route) => false,
+                );
+                break;
+            }
+          },
+          itemBuilder: (ctx) => [
+            const PopupMenuItem<String>(
+              value: 'linked_devices',
+              child: Row(
+                children: [
+                  Icon(Icons.devices, color: NexaColors.primary, size: 18),
+                  SizedBox(width: 12),
+                  Text('Linked Devices', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                ],
               ),
             ),
-          ),
+            const PopupMenuItem<String>(
+              value: 'settings',
+              child: Row(
+                children: [
+                  Icon(Icons.settings_outlined, color: NexaColors.textSecondary, size: 18),
+                  SizedBox(width: 12),
+                  Text('Settings', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                ],
+              ),
+            ),
+            const PopupMenuItem<String>(
+              value: 'profile',
+              child: Row(
+                children: [
+                  Icon(Icons.person_outline, color: NexaColors.textSecondary, size: 18),
+                  SizedBox(width: 12),
+                  Text('Profile & Avatar', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                ],
+              ),
+            ),
+            const PopupMenuItem<String>(
+              value: 'security',
+              child: Row(
+                children: [
+                  Icon(Icons.shield_outlined, color: NexaColors.emeraldSecure, size: 18),
+                  SizedBox(width: 12),
+                  Text('Security & Privacy', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                ],
+              ),
+            ),
+            const PopupMenuItem<String>(
+              value: 'vault',
+              child: Row(
+                children: [
+                  Icon(Icons.vpn_key_outlined, color: NexaColors.amberAttention, size: 18),
+                  SizedBox(width: 12),
+                  Text('Recovery Key Vault', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                ],
+              ),
+            ),
+            const PopupMenuDivider(),
+            const PopupMenuItem<String>(
+              value: 'lock',
+              child: Row(
+                children: [
+                  Icon(Icons.lock_outline, color: NexaColors.rubyDestructive, size: 18),
+                  SizedBox(width: 12),
+                  Text('Lock Vault', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: NexaColors.rubyDestructive)),
+                ],
+              ),
+            ),
+          ],
         ),
       ],
     );
@@ -902,10 +986,11 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
 
   Widget _buildSearchBar() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+      height: 40,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
         color: NexaColors.surfaceLight,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: NexaColors.borderLight),
         boxShadow: [
           BoxShadow(
@@ -918,21 +1003,24 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
       child: TextField(
         controller: _searchController,
         onChanged: (val) => setState(() => _searchQuery = val),
-        style: const TextStyle(fontSize: 14),
+        style: const TextStyle(fontSize: 13),
         decoration: InputDecoration(
-          icon: const Icon(Icons.search, color: NexaColors.textMuted, size: 20),
+          isDense: true,
+          contentPadding: const EdgeInsets.symmetric(vertical: 10),
+          icon: const Icon(Icons.search, color: NexaColors.textMuted, size: 18),
           hintText: 'Search chats, contacts, or messages...',
-          hintStyle: const TextStyle(color: NexaColors.textMuted, fontSize: 14),
+          hintStyle: const TextStyle(color: NexaColors.textMuted, fontSize: 13),
           border: InputBorder.none,
           suffixIcon: _searchQuery.isNotEmpty
-              ? IconButton(
-                  icon: const Icon(Icons.close, size: 18),
-                  onPressed: () {
+              ? GestureDetector(
+                  onTap: () {
                     _searchController.clear();
                     setState(() => _searchQuery = '');
                   },
+                  child: const Icon(Icons.close, size: 16, color: NexaColors.textMuted),
                 )
               : null,
+          suffixIconConstraints: const BoxConstraints(minWidth: 24, minHeight: 24),
         ),
       ),
     );
