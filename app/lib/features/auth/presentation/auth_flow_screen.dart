@@ -52,6 +52,7 @@ class _AuthFlowScreenState extends State<AuthFlowScreen> {
     _isLoginMode = widget.isLoginInitial;
     _loginHandleController.text = '';
     _loginPasswordController.text = '';
+    AuthService.instance.checkHealthAsync();
   }
 
   @override
@@ -407,7 +408,210 @@ class _AuthFlowScreenState extends State<AuthFlowScreen> {
             fontWeight: FontWeight.w500,
           ),
         ),
+        const SizedBox(height: 12),
+
+        // Live Server Connection Badge
+        GestureDetector(
+          onTap: _showServerConfigModal,
+          child: ValueListenableBuilder<bool>(
+            valueListenable: AuthService.instance.isConnectedNotifier,
+            builder: (context, isConnected, _) {
+              return Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                decoration: BoxDecoration(
+                  color: isConnected
+                      ? NexaColors.emeraldSecure.withValues(alpha: 0.1)
+                      : NexaColors.amberAttention.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: isConnected
+                        ? NexaColors.emeraldSecure.withValues(alpha: 0.3)
+                        : NexaColors.amberAttention.withValues(alpha: 0.3),
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: isConnected ? NexaColors.emeraldSecure : NexaColors.amberAttention,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      isConnected ? 'Online Database: Connected' : 'Database: Tap to Configure',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: isConnected ? NexaColors.emeraldSecure : NexaColors.amberAttention,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Icon(
+                      Icons.tune,
+                      size: 13,
+                      color: isConnected ? NexaColors.emeraldSecure : NexaColors.amberAttention,
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
       ],
+    );
+  }
+
+  void _showServerConfigModal() {
+    final customUrlCtrl = TextEditingController(
+      text: AuthService.instance.customServerUrl ?? AuthService.instance.currentResolvedUrl ?? '',
+    );
+    bool isTesting = false;
+    String? testResultMsg;
+    bool? testSuccess;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: NexaColors.surfaceLight,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return SafeArea(
+              child: Padding(
+                padding: EdgeInsets.only(
+                  left: 20,
+                  right: 20,
+                  top: 20,
+                  bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: NexaColors.borderLight,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    const Row(
+                      children: [
+                        Icon(Icons.dns_outlined, color: NexaColors.primary),
+                        SizedBox(width: 8),
+                        Text(
+                          'Database Connection Settings',
+                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: NexaColors.textPrimary),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Verify or customize the cloud database relay endpoint for mobile internet.',
+                      style: TextStyle(fontSize: 13, color: NexaColors.textSecondary),
+                    ),
+                    const SizedBox(height: 16),
+
+                    TextField(
+                      controller: customUrlCtrl,
+                      decoration: InputDecoration(
+                        labelText: 'Cloud Server URL',
+                        hintText: 'https://strategy-measurements-metric-retain.trycloudflare.com',
+                        prefixIcon: const Icon(Icons.link, color: NexaColors.primary),
+                        filled: true,
+                        fillColor: NexaColors.elevatedLight,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+
+                    if (testResultMsg != null) ...[
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: (testSuccess == true ? NexaColors.emeraldSecure : NexaColors.rubyDestructive).withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: (testSuccess == true ? NexaColors.emeraldSecure : NexaColors.rubyDestructive).withValues(alpha: 0.3),
+                          ),
+                        ),
+                        child: Text(
+                          testResultMsg!,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: testSuccess == true ? NexaColors.emeraldSecure : NexaColors.rubyDestructive,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: isTesting ? null : () async {
+                              setModalState(() {
+                                isTesting = true;
+                                testResultMsg = null;
+                              });
+                              final target = customUrlCtrl.text.trim();
+                              final diag = await AuthService.instance.testConnectionDiagnostic(
+                                target.isEmpty ? 'https://strategy-measurements-metric-retain.trycloudflare.com' : target,
+                              );
+                              setModalState(() {
+                                isTesting = false;
+                                testSuccess = diag['success'] == true;
+                                if (testSuccess == true) {
+                                  testResultMsg = 'Connected to database! Latency: ${diag['latencyMs']}ms';
+                                } else {
+                                  testResultMsg = 'Connection failed: ${diag['error']}';
+                                }
+                              });
+                            },
+                            child: isTesting
+                                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                                : const Text('Test Ping'),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: () {
+                              final text = customUrlCtrl.text.trim();
+                              AuthService.instance.setCustomServerUrl(text.isEmpty ? null : text);
+                              Navigator.pop(ctx);
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Server endpoint applied! Connecting...'),
+                                  backgroundColor: NexaColors.emeraldSecure,
+                                ),
+                              );
+                            },
+                            child: const Text('Save & Connect'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 
