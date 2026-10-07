@@ -13,7 +13,7 @@ const path = require('path');
 const { WebSocketServer } = require('ws');
 
 const crypto = require('crypto');
-const { Pool } = require('pg');
+const Database = require('./database/db');
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
@@ -33,49 +33,10 @@ app.use((req, res, next) => {
   next();
 });
 
-// Database Pool Connection (PostgreSQL 16)
-let dbPool = null;
-if (process.env.DATABASE_URL) {
-  try {
-    dbPool = new Pool({
-      connectionString: process.env.DATABASE_URL,
-      max: 10,
-      idleTimeoutMillis: 30000
-    });
-    dbPool.query('SELECT NOW()', (err, res) => {
-      if (err) {
-        console.warn('[NEXA] PostgreSQL connection check warning:', err.message);
-      } else {
-        console.log('[NEXA] PostgreSQL connected successfully at:', res.rows[0].now);
-        // Ensure users table exists in PostgreSQL
-        dbPool.query(`
-          CREATE TABLE IF NOT EXISTS users (
-            username TEXT PRIMARY KEY,
-            password_hash TEXT NOT NULL,
-            full_name TEXT NOT NULL,
-            about TEXT,
-            phone TEXT,
-            nexa_id TEXT NOT NULL,
-            created_at BIGINT NOT NULL
-          );
-        `, (err2) => {
-          if (err2) console.warn('[NEXA] Users table creation notice:', err2.message);
-        });
-      }
-    });
-  } catch (e) {
-    console.warn('[NEXA] PostgreSQL initialization error:', e.message);
-  }
-} else {
-  console.log('[NEXA] Operating in ephemeral in-memory zero-knowledge mode (DATABASE_URL not set).');
-}
-
-// In-Memory Zero-Knowledge & User Registry Stores
-const registeredUsers = new Map();   // username (lowercase) -> { username, password_hash, full_name, about, phone, nexa_id, created_at }
+const activeConnections = new Map(); // device_id -> WebSocket
 const userDevices = new Map();       // user_id -> Map(device_id -> { identity_key, ... })
 const prekeyBundles = new Map();     // `${user_id}:${device_id}` -> { signed_prekey, opks: [] }
 const mailboxQueue = new Map();      // device_id -> Array of encrypted envelopes
-const activeConnections = new Map(); // device_id -> WebSocket
 
 // Helper to clean username
 function sanitizeUsername(input) {
@@ -85,14 +46,26 @@ function sanitizeUsername(input) {
 
 // --- 1. HEALTH & METRICS ---
 app.get('/health', (req, res) => {
+  const dbStatus = Database.getStatus();
   res.json({
     status: 'ok',
     security_mode: 'zero_knowledge_e2ee',
     crypto_standard: 'X3DH_DoubleRatchet_AES256GCM',
-    database_connected: dbPool !== null,
-    registered_users_count: registeredUsers.size,
-    active_devices: userDevices.size,
-    pending_envelopes: Array.from(mailboxQueue.values()).reduce((acc, q) => acc + q.length, 0),
+    database_connected: true,
+    database_status: dbStatus,
+    registered_users_count: dbStatus.users_count,
+    active_devices: dbStatus.devices_count,
+    pending_envelopes: dbStatus.pending_envelopes,
+    timestamp: Date.now()
+  });
+});
+
+// Detailed Database Status Endpoint
+app.get('/v1/auth/db-status', (req, res) => {
+  res.json({
+    online: true,
+    server: 'NEXA Authentication & Relay Gateway',
+    database: Database.getStatus(),
     timestamp: Date.now()
   });
 });
@@ -122,24 +95,8 @@ app.get('/v1/auth/check-username/:username', async (req, res) => {
     });
   }
 
-  // Check PostgreSQL if connected
-  if (dbPool) {
-    try {
-      const dbResult = await dbPool.query('SELECT username FROM users WHERE LOWER(username) = LOWER($1)', [username]);
-      if (dbResult.rows.length > 0) {
-        return res.json({
-          available: false,
-          username,
-          message: `Username '@${username}' is already taken in the online database. Please choose another username.`
-        });
-      }
-    } catch (e) {
-      console.warn('[NEXA DB] PostgreSQL query error, falling back to cache:', e.message);
-    }
-  }
-
-  // Check In-Memory Database
-  if (registeredUsers.has(username)) {
+  const exists = await Database.userExists(username);
+  if (exists) {
     return res.json({
       available: false,
       username,
@@ -169,17 +126,7 @@ app.post('/v1/auth/register-user', async (req, res) => {
     return res.status(400).json({ error: 'Password / Master PIN must be at least 4 characters.' });
   }
 
-  // Online Database Uniqueness Verification
-  let exists = registeredUsers.has(username);
-  if (dbPool && !exists) {
-    try {
-      const dbResult = await dbPool.query('SELECT username FROM users WHERE LOWER(username) = LOWER($1)', [username]);
-      if (dbResult.rows.length > 0) exists = true;
-    } catch (e) {
-      console.warn('[NEXA DB] Check error:', e.message);
-    }
-  }
-
+  const exists = await Database.userExists(username);
   if (exists) {
     return res.status(409).json({
       error: `Username '@${username}' already exists in the online database. Please change your username.`
@@ -203,34 +150,19 @@ app.post('/v1/auth/register-user', async (req, res) => {
     created_at: now
   };
 
-  // Save to PostgreSQL if active
-  if (dbPool) {
-    try {
-      await dbPool.query(`
-        INSERT INTO users (username, password_hash, full_name, about, phone, nexa_id, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        ON CONFLICT (username) DO UPDATE
-        SET full_name = $3, about = $4, phone = $5;
-      `, [username, passwordHash, cleanFullName, cleanAbout, cleanPhone, nexaId, now]);
-    } catch (e) {
-      console.warn('[NEXA DB] Insert error:', e.message);
-    }
-  }
-
-  // Save to in-memory store
-  registeredUsers.set(username, newUserRecord);
-  console.log(`[NEXA] Registered new user '@${username}' (${nexaId}) in online database.`);
+  const savedUser = await Database.saveUser(newUserRecord);
+  console.log(`[NEXA] Registered new user '@${username}' (${nexaId}) in persistent online database.`);
 
   return res.status(201).json({
     success: true,
     message: 'User registered successfully in the online database.',
     user: {
-      username,
-      handle: `@${username}`,
-      fullName: cleanFullName,
-      about: cleanAbout,
-      phone: cleanPhone,
-      nexaId
+      username: savedUser.username,
+      handle: `@${savedUser.username}`,
+      fullName: savedUser.full_name,
+      about: savedUser.about,
+      phone: savedUser.phone,
+      nexaId: savedUser.nexa_id
     }
   });
 });
@@ -247,18 +179,7 @@ app.post('/v1/auth/login-user', async (req, res) => {
   }
 
   const passwordHash = crypto.createHash('sha256').update(password).digest('hex');
-  let user = registeredUsers.get(username);
-
-  if (!user && dbPool) {
-    try {
-      const dbResult = await dbPool.query('SELECT * FROM users WHERE LOWER(username) = LOWER($1)', [username]);
-      if (dbResult.rows.length > 0) {
-        user = dbResult.rows[0];
-      }
-    } catch (e) {
-      console.warn('[NEXA DB] Login query error:', e.message);
-    }
-  }
+  const user = await Database.findUser(username);
 
   if (!user) {
     return res.status(401).json({ error: `Account with username '@${username}' not found in online database.` });
@@ -285,17 +206,11 @@ app.post('/v1/auth/login-user', async (req, res) => {
 /**
  * List verified online directory users
  */
-app.get('/v1/auth/users', (req, res) => {
-  const list = Array.from(registeredUsers.values()).map(u => ({
-    username: u.username,
-    handle: `@${u.username}`,
-    fullName: u.full_name,
-    about: u.about,
-    phone: u.phone,
-    nexaId: u.nexa_id
-  }));
+app.get('/v1/auth/users', async (req, res) => {
+  const list = await Database.listUsers();
   res.json({ count: list.length, users: list });
 });
+
 
 // --- 1.1 WebRTC ICE & TURN EPHEMERAL CREDENTIALS ---
 app.get('/v1/calls/ice-servers', (req, res) => {
@@ -530,9 +445,10 @@ wss.on('connection', (ws, req) => {
 });
 
 const PORT = process.env.PORT || 8080;
+const HOST = '0.0.0.0';
 if (require.main === module) {
-  server.listen(PORT, () => {
-    console.log(`[NEXA] Zero-Knowledge Relay Gateway active on :${PORT}`);
+  server.listen(PORT, HOST, () => {
+    console.log(`[NEXA] Zero-Knowledge Relay Gateway active on http://${HOST}:${PORT}`);
   });
 }
 

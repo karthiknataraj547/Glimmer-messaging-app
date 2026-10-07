@@ -13,6 +13,7 @@ build/
 *.local
 *.log
 backend/logs/
+backend/data/
 
 # IDE & OS
 .vscode/

@@ -10,48 +10,121 @@ class AuthService {
   static final AuthService instance = AuthService._internal();
   AuthService._internal();
 
-  // Candidate server endpoints for emulator, physical device on Wi-Fi, and localhost
-  static const List<String> _candidateUrls = [
-    'http://10.0.2.2:8080',      // Android Emulator host loopback
+  // Candidate server endpoints for mobile Wi-Fi, Android emulator, and localhost
+  static const List<String> _defaultCandidateUrls = [
     'http://192.168.31.54:8080',  // Host LAN Wi-Fi IP for physical mobile phones
+    'http://10.0.2.2:8080',      // Android Emulator host loopback
     'http://127.0.0.1:8080',     // Localhost loopback
     'http://localhost:8080',     // Desktop fallback
   ];
 
+  String? _customServerUrl;
   String? _resolvedBaseUrl;
 
-  /// Resolves the first active and reachable backend URL
-  Future<String> getBaseUrl() async {
-    if (_resolvedBaseUrl != null) return _resolvedBaseUrl!;
+  /// Custom server override
+  String? get customServerUrl => _customServerUrl;
+  String? get currentResolvedUrl => _resolvedBaseUrl;
 
-    for (final candidate in _candidateUrls) {
-      try {
-        final client = HttpClient();
-        client.connectionTimeout = const Duration(milliseconds: 1200);
-        final uri = Uri.parse('$candidate/health');
-        final request = await client.getUrl(uri);
-        final response = await request.close().timeout(const Duration(milliseconds: 1500));
-        client.close();
-        if (response.statusCode == 200) {
-          _resolvedBaseUrl = candidate;
-          return candidate;
-        }
-      } catch (_) {
-        // Try next candidate
+  void setCustomServerUrl(String? url) {
+    if (url == null || url.trim().isEmpty) {
+      _customServerUrl = null;
+    } else {
+      String clean = url.trim();
+      if (!clean.startsWith('http://') && !clean.startsWith('https://')) {
+        clean = 'http://$clean';
       }
+      if (clean.endsWith('/')) {
+        clean = clean.substring(0, clean.length - 1);
+      }
+      _customServerUrl = clean;
+    }
+    _resolvedBaseUrl = null; // Invalidate cache to force re-probe
+  }
+
+  /// Pings an endpoint to verify whether the backend and database are reachable
+  Future<bool> testServerHealth(String baseUrl) async {
+    try {
+      final client = HttpClient();
+      client.connectionTimeout = const Duration(milliseconds: 1500);
+      final clean = baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
+      final uri = Uri.parse('$clean/health');
+      final request = await client.getUrl(uri);
+      final response = await request.close().timeout(const Duration(milliseconds: 2000));
+      client.close();
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Resolves the first active and reachable backend URL using fast concurrent probing
+  Future<String> getBaseUrl({bool forceRecheck = false}) async {
+    if (!forceRecheck && _resolvedBaseUrl != null) return _resolvedBaseUrl!;
+
+    final candidateList = <String>[];
+    if (_customServerUrl != null && _customServerUrl!.isNotEmpty) {
+      candidateList.add(_customServerUrl!);
+    }
+    candidateList.addAll(_defaultCandidateUrls);
+
+    // Parallel fast probing: whichever responds first with 200 OK wins
+    final completer = Completer<String>();
+    int pending = candidateList.length;
+
+    for (final candidate in candidateList) {
+      testServerHealth(candidate).then((isHealthy) {
+        if (isHealthy && !completer.isCompleted) {
+          completer.complete(candidate);
+        } else {
+          pending--;
+          if (pending == 0 && !completer.isCompleted) {
+            completer.complete(candidateList.first);
+          }
+        }
+      }).catchError((_) {
+        pending--;
+        if (pending == 0 && !completer.isCompleted) {
+          completer.complete(candidateList.first);
+        }
+      });
     }
 
-    // Default to emulator/standard port if none answered immediately
-    _resolvedBaseUrl = _candidateUrls.first;
+    _resolvedBaseUrl = await completer.future.timeout(
+      const Duration(seconds: 3),
+      onTimeout: () => candidateList.first,
+    );
     return _resolvedBaseUrl!;
   }
 
+  /// Fetches live database health and connection status
+  Future<Map<String, dynamic>> getDatabaseStatus() async {
+    final baseUrl = await getBaseUrl();
+    final client = HttpClient();
+    client.connectionTimeout = const Duration(seconds: 3);
+
+    try {
+      final uri = Uri.parse('$baseUrl/v1/auth/db-status');
+      final request = await client.getUrl(uri);
+      final response = await request.close().timeout(const Duration(seconds: 4));
+      final responseBody = await response.transform(utf8.decoder).join();
+      final data = jsonDecode(responseBody) as Map<String, dynamic>;
+      return {
+        'online': true,
+        'baseUrl': baseUrl,
+        ...data,
+      };
+    } catch (e) {
+      return {
+        'online': false,
+        'baseUrl': baseUrl,
+        'error': e.toString(),
+      };
+    } finally {
+      client.close();
+    }
+  }
+
   /// Checks whether a username already exists in the online database.
-  /// 
-  /// Returns:
-  /// - `{'available': true, 'username': '...', 'message': '...'}` if unique
-  /// - `{'available': false, 'username': '...', 'message': '...'}` if taken
-  /// - `{'available': false, 'error': '...'}` on validation or network failure
   Future<Map<String, dynamic>> checkUsernameOnline(String rawUsername) async {
     final clean = rawUsername.trim().replaceFirst(RegExp(r'^@+'), '').toLowerCase();
     if (clean.length < 3) {
@@ -82,16 +155,15 @@ class AuthService {
 
       return data;
     } on SocketException catch (_) {
-      // Re-probe other candidate URLs if primary failed
       _resolvedBaseUrl = null;
       return {
         'available': false,
-        'error': 'Unable to connect to the online database. Please verify backend server is running.',
+        'error': 'Unable to connect to database at $baseUrl. Check Wi-Fi or tap Server Settings.',
       };
     } catch (e) {
       return {
         'available': false,
-        'error': 'Network error checking online database: $e',
+        'error': 'Database check failed ($baseUrl): $e',
       };
     } finally {
       client.close();
@@ -108,7 +180,7 @@ class AuthService {
   }) async {
     final baseUrl = await getBaseUrl();
     final client = HttpClient();
-    client.connectionTimeout = const Duration(seconds: 4);
+    client.connectionTimeout = const Duration(seconds: 5);
 
     try {
       final uri = Uri.parse('$baseUrl/v1/auth/register-user');
@@ -124,22 +196,28 @@ class AuthService {
       });
       request.write(payload);
 
-      final response = await request.close().timeout(const Duration(seconds: 5));
+      final response = await request.close().timeout(const Duration(seconds: 6));
       final responseBody = await response.transform(utf8.decoder).join();
       final data = jsonDecode(responseBody) as Map<String, dynamic>;
 
       if (response.statusCode == 201) {
-        return {'success': true, ...data};
+        return {'success': true, 'baseUrl': baseUrl, ...data};
       } else {
         return {
           'success': false,
-          'error': data['error'] ?? 'Registration rejected by online database (${response.statusCode}).',
+          'error': data['error'] ?? 'Registration rejected by database (${response.statusCode}).',
         };
       }
+    } on SocketException catch (_) {
+      _resolvedBaseUrl = null;
+      return {
+        'success': false,
+        'error': 'Cannot connect to database at $baseUrl. Ensure phone is on same Wi-Fi.',
+      };
     } catch (e) {
       return {
         'success': false,
-        'error': 'Online database connection failed: $e',
+        'error': 'Database connection error: $e',
       };
     } finally {
       client.close();
@@ -153,7 +231,7 @@ class AuthService {
   }) async {
     final baseUrl = await getBaseUrl();
     final client = HttpClient();
-    client.connectionTimeout = const Duration(seconds: 4);
+    client.connectionTimeout = const Duration(seconds: 5);
 
     try {
       final uri = Uri.parse('$baseUrl/v1/auth/login-user');
@@ -166,22 +244,28 @@ class AuthService {
       });
       request.write(payload);
 
-      final response = await request.close().timeout(const Duration(seconds: 5));
+      final response = await request.close().timeout(const Duration(seconds: 6));
       final responseBody = await response.transform(utf8.decoder).join();
       final data = jsonDecode(responseBody) as Map<String, dynamic>;
 
       if (response.statusCode == 200) {
-        return {'success': true, ...data};
+        return {'success': true, 'baseUrl': baseUrl, ...data};
       } else {
         return {
           'success': false,
-          'error': data['error'] ?? 'Login failed against online database (${response.statusCode}).',
+          'error': data['error'] ?? 'Login rejected by database (${response.statusCode}).',
         };
       }
+    } on SocketException catch (_) {
+      _resolvedBaseUrl = null;
+      return {
+        'success': false,
+        'error': 'Cannot connect to database at $baseUrl. Ensure phone is on same Wi-Fi.',
+      };
     } catch (e) {
       return {
         'success': false,
-        'error': 'Online database unreachable: $e',
+        'error': 'Database unreachable ($baseUrl): $e',
       };
     } finally {
       client.close();
