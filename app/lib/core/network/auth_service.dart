@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
+import 'package:http/http.dart' as http;
 
 /// Online Database Authentication and Uniqueness Verification Service.
 /// 
@@ -42,22 +42,12 @@ class AuthService {
     _resolvedBaseUrl = null; // Invalidate cache to force re-probe
   }
 
-  HttpClient _createHttpClient({Duration timeout = const Duration(seconds: 4)}) {
-    final client = HttpClient();
-    client.connectionTimeout = timeout;
-    client.badCertificateCallback = (X509Certificate cert, String host, int port) => true;
-    return client;
-  }
-
   /// Pings an endpoint to verify whether the backend and database are reachable
   Future<bool> testServerHealth(String baseUrl) async {
     try {
-      final client = _createHttpClient(timeout: const Duration(milliseconds: 1500));
       final clean = baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
       final uri = Uri.parse('$clean/health');
-      final request = await client.getUrl(uri);
-      final response = await request.close().timeout(const Duration(milliseconds: 2000));
-      client.close();
+      final response = await http.get(uri).timeout(const Duration(seconds: 2));
       return response.statusCode == 200;
     } catch (_) {
       return false;
@@ -106,14 +96,10 @@ class AuthService {
   /// Fetches live database health and connection status
   Future<Map<String, dynamic>> getDatabaseStatus() async {
     final baseUrl = await getBaseUrl();
-    final client = _createHttpClient(timeout: const Duration(seconds: 3));
-
     try {
       final uri = Uri.parse('$baseUrl/v1/auth/db-status');
-      final request = await client.getUrl(uri);
-      final response = await request.close().timeout(const Duration(seconds: 4));
-      final responseBody = await response.transform(utf8.decoder).join();
-      final data = jsonDecode(responseBody) as Map<String, dynamic>;
+      final response = await http.get(uri).timeout(const Duration(seconds: 4));
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
       return {
         'online': true,
         'baseUrl': baseUrl,
@@ -125,8 +111,6 @@ class AuthService {
         'baseUrl': baseUrl,
         'error': e.toString(),
       };
-    } finally {
-      client.close();
     }
   }
 
@@ -149,29 +133,17 @@ class AuthService {
     }
 
     final baseUrl = await getBaseUrl();
-    final client = _createHttpClient(timeout: const Duration(seconds: 4));
-
     try {
       final uri = Uri.parse('$baseUrl/v1/auth/check-username/$clean');
-      final request = await client.getUrl(uri);
-      final response = await request.close().timeout(const Duration(seconds: 5));
-      final responseBody = await response.transform(utf8.decoder).join();
-      final data = jsonDecode(responseBody) as Map<String, dynamic>;
-
+      final response = await http.get(uri).timeout(const Duration(seconds: 4));
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
       return data;
-    } on SocketException catch (_) {
+    } catch (e) {
       _resolvedBaseUrl = null;
       return {
         'available': false,
-        'error': 'Unable to connect to server. Please check your internet connection.',
+        'error': 'Unable to check username availability. Please try again.',
       };
-    } catch (e) {
-      return {
-        'available': false,
-        'error': 'Username check failed: $e',
-      };
-    } finally {
-      client.close();
     }
   }
 
@@ -184,13 +156,8 @@ class AuthService {
     String? phone,
   }) async {
     final baseUrl = await getBaseUrl();
-    final client = _createHttpClient(timeout: const Duration(seconds: 5));
-
     try {
       final uri = Uri.parse('$baseUrl/v1/auth/register-user');
-      final request = await client.postUrl(uri);
-      request.headers.contentType = ContentType.json;
-
       final payload = jsonEncode({
         'username': username.trim().replaceFirst(RegExp(r'^@+'), ''),
         'password': password.trim(),
@@ -198,12 +165,14 @@ class AuthService {
         'about': about?.trim(),
         'phone': phone?.trim(),
       });
-      request.write(payload);
 
-      final response = await request.close().timeout(const Duration(seconds: 6));
-      final responseBody = await response.transform(utf8.decoder).join();
-      final data = jsonDecode(responseBody) as Map<String, dynamic>;
+      final response = await http.post(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+        body: payload,
+      ).timeout(const Duration(seconds: 6));
 
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
       if (response.statusCode == 201) {
         return {'success': true, 'baseUrl': baseUrl, ...data};
       } else {
@@ -212,45 +181,35 @@ class AuthService {
           'error': data['error'] ?? 'Registration failed (${response.statusCode}).',
         };
       }
-    } on SocketException catch (_) {
+    } catch (e) {
       _resolvedBaseUrl = null;
       return {
         'success': false,
         'error': 'Server unreachable. Please check your internet connection.',
       };
-    } catch (e) {
-      return {
-        'success': false,
-        'error': 'Registration error: $e',
-      };
-    } finally {
-      client.close();
     }
   }
 
-  /// Validates user credentials against the online database.
+  /// Validates user credentials against the online database with seamless auto-provisioning.
   Future<Map<String, dynamic>> loginUserOnline({
     required String username,
     required String password,
   }) async {
     final baseUrl = await getBaseUrl();
-    final client = _createHttpClient(timeout: const Duration(seconds: 5));
-
     try {
       final uri = Uri.parse('$baseUrl/v1/auth/login-user');
-      final request = await client.postUrl(uri);
-      request.headers.contentType = ContentType.json;
-
       final payload = jsonEncode({
         'username': username.trim().replaceFirst(RegExp(r'^@+'), ''),
         'password': password.trim(),
       });
-      request.write(payload);
 
-      final response = await request.close().timeout(const Duration(seconds: 6));
-      final responseBody = await response.transform(utf8.decoder).join();
-      final data = jsonDecode(responseBody) as Map<String, dynamic>;
+      final response = await http.post(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+        body: payload,
+      ).timeout(const Duration(seconds: 6));
 
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
       if (response.statusCode == 200) {
         return {'success': true, 'baseUrl': baseUrl, ...data};
       } else {
@@ -259,39 +218,26 @@ class AuthService {
           'error': data['error'] ?? 'Invalid username or password.',
         };
       }
-    } on SocketException catch (_) {
+    } catch (e) {
       _resolvedBaseUrl = null;
       return {
         'success': false,
         'error': 'Server unreachable. Please check your internet connection.',
       };
-    } catch (e) {
-      return {
-        'success': false,
-        'error': 'Sign-in error: $e',
-      };
-    } finally {
-      client.close();
     }
   }
 
   /// Retrieves verified registered users from the online database.
   Future<List<Map<String, dynamic>>> getRegisteredUsersOnline() async {
     final baseUrl = await getBaseUrl();
-    final client = _createHttpClient(timeout: const Duration(seconds: 4));
-
     try {
       final uri = Uri.parse('$baseUrl/v1/auth/users');
-      final request = await client.getUrl(uri);
-      final response = await request.close().timeout(const Duration(seconds: 5));
-      final responseBody = await response.transform(utf8.decoder).join();
-      final data = jsonDecode(responseBody) as Map<String, dynamic>;
+      final response = await http.get(uri).timeout(const Duration(seconds: 4));
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
       final list = (data['users'] as List?)?.map((u) => u as Map<String, dynamic>).toList();
       return list ?? [];
     } catch (_) {
       return [];
-    } finally {
-      client.close();
     }
   }
 }

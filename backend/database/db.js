@@ -153,6 +153,9 @@ const Database = {
     }
 
     // Check persistent database store
+    if (!dbState.users[username]) {
+      loadFromDisk();
+    }
     return dbState.users[username] || null;
   },
 
