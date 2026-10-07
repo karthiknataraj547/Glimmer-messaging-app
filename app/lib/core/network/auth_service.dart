@@ -12,11 +12,11 @@ class AuthService {
 
   // Candidate server endpoints: Cloudflare HTTPS tunnel (works anywhere on 4G/5G/Wi-Fi), LAN IP, and loopback
   static const List<String> _defaultCandidateUrls = [
-    'https://absent-wise-chambers-could.trycloudflare.com', // Public secure HTTPS Cloudflare tunnel
-    'http://192.168.31.54:8080',                           // Host LAN Wi-Fi IP for physical mobile phones
-    'http://10.0.2.2:8080',                               // Android Emulator host loopback
-    'http://127.0.0.1:8080',                              // Localhost loopback
-    'http://localhost:8080',                              // Desktop fallback
+    'https://strategy-measurements-metric-retain.trycloudflare.com', // Public secure HTTPS Cloudflare tunnel
+    'http://192.168.31.54:8080',                                     // Host LAN Wi-Fi IP for physical mobile phones
+    'http://10.0.2.2:8080',                                         // Android Emulator host loopback
+    'http://127.0.0.1:8080',                                        // Localhost loopback
+    'http://localhost:8080',                                        // Desktop fallback
   ];
 
   String? _customServerUrl;
