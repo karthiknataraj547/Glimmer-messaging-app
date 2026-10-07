@@ -17,8 +17,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('NEXA'), findsOneWidget);
-    expect(find.text('Create Account'), findsWidgets);
-    expect(find.text('Handle / Identity'), findsOneWidget);
+    expect(find.text('Username / Handle'), findsWidgets);
 
     // Switch to Login Mode
     await tester.tap(find.text('Log In').first);

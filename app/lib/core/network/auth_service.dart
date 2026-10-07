@@ -10,12 +10,13 @@ class AuthService {
   static final AuthService instance = AuthService._internal();
   AuthService._internal();
 
-  // Candidate server endpoints for mobile Wi-Fi, Android emulator, and localhost
+  // Candidate server endpoints: Cloudflare HTTPS tunnel (works anywhere on 4G/5G/Wi-Fi), LAN IP, and loopback
   static const List<String> _defaultCandidateUrls = [
-    'http://192.168.31.54:8080',  // Host LAN Wi-Fi IP for physical mobile phones
-    'http://10.0.2.2:8080',      // Android Emulator host loopback
-    'http://127.0.0.1:8080',     // Localhost loopback
-    'http://localhost:8080',     // Desktop fallback
+    'https://absent-wise-chambers-could.trycloudflare.com', // Public secure HTTPS Cloudflare tunnel
+    'http://192.168.31.54:8080',                           // Host LAN Wi-Fi IP for physical mobile phones
+    'http://10.0.2.2:8080',                               // Android Emulator host loopback
+    'http://127.0.0.1:8080',                              // Localhost loopback
+    'http://localhost:8080',                              // Desktop fallback
   ];
 
   String? _customServerUrl;
@@ -41,11 +42,17 @@ class AuthService {
     _resolvedBaseUrl = null; // Invalidate cache to force re-probe
   }
 
+  HttpClient _createHttpClient({Duration timeout = const Duration(seconds: 4)}) {
+    final client = HttpClient();
+    client.connectionTimeout = timeout;
+    client.badCertificateCallback = (X509Certificate cert, String host, int port) => true;
+    return client;
+  }
+
   /// Pings an endpoint to verify whether the backend and database are reachable
   Future<bool> testServerHealth(String baseUrl) async {
     try {
-      final client = HttpClient();
-      client.connectionTimeout = const Duration(milliseconds: 1500);
+      final client = _createHttpClient(timeout: const Duration(milliseconds: 1500));
       final clean = baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
       final uri = Uri.parse('$clean/health');
       final request = await client.getUrl(uri);
@@ -99,8 +106,7 @@ class AuthService {
   /// Fetches live database health and connection status
   Future<Map<String, dynamic>> getDatabaseStatus() async {
     final baseUrl = await getBaseUrl();
-    final client = HttpClient();
-    client.connectionTimeout = const Duration(seconds: 3);
+    final client = _createHttpClient(timeout: const Duration(seconds: 3));
 
     try {
       final uri = Uri.parse('$baseUrl/v1/auth/db-status');
@@ -143,8 +149,7 @@ class AuthService {
     }
 
     final baseUrl = await getBaseUrl();
-    final client = HttpClient();
-    client.connectionTimeout = const Duration(seconds: 4);
+    final client = _createHttpClient(timeout: const Duration(seconds: 4));
 
     try {
       final uri = Uri.parse('$baseUrl/v1/auth/check-username/$clean');
@@ -158,12 +163,12 @@ class AuthService {
       _resolvedBaseUrl = null;
       return {
         'available': false,
-        'error': 'Unable to connect to database at $baseUrl. Check Wi-Fi or tap Server Settings.',
+        'error': 'Unable to connect to server. Please check your internet connection.',
       };
     } catch (e) {
       return {
         'available': false,
-        'error': 'Database check failed ($baseUrl): $e',
+        'error': 'Username check failed: $e',
       };
     } finally {
       client.close();
@@ -179,8 +184,7 @@ class AuthService {
     String? phone,
   }) async {
     final baseUrl = await getBaseUrl();
-    final client = HttpClient();
-    client.connectionTimeout = const Duration(seconds: 5);
+    final client = _createHttpClient(timeout: const Duration(seconds: 5));
 
     try {
       final uri = Uri.parse('$baseUrl/v1/auth/register-user');
@@ -205,19 +209,19 @@ class AuthService {
       } else {
         return {
           'success': false,
-          'error': data['error'] ?? 'Registration rejected by database (${response.statusCode}).',
+          'error': data['error'] ?? 'Registration failed (${response.statusCode}).',
         };
       }
     } on SocketException catch (_) {
       _resolvedBaseUrl = null;
       return {
         'success': false,
-        'error': 'Cannot connect to database at $baseUrl. Ensure phone is on same Wi-Fi.',
+        'error': 'Server unreachable. Please check your internet connection.',
       };
     } catch (e) {
       return {
         'success': false,
-        'error': 'Database connection error: $e',
+        'error': 'Registration error: $e',
       };
     } finally {
       client.close();
@@ -230,8 +234,7 @@ class AuthService {
     required String password,
   }) async {
     final baseUrl = await getBaseUrl();
-    final client = HttpClient();
-    client.connectionTimeout = const Duration(seconds: 5);
+    final client = _createHttpClient(timeout: const Duration(seconds: 5));
 
     try {
       final uri = Uri.parse('$baseUrl/v1/auth/login-user');
@@ -253,19 +256,19 @@ class AuthService {
       } else {
         return {
           'success': false,
-          'error': data['error'] ?? 'Login rejected by database (${response.statusCode}).',
+          'error': data['error'] ?? 'Invalid username or password.',
         };
       }
     } on SocketException catch (_) {
       _resolvedBaseUrl = null;
       return {
         'success': false,
-        'error': 'Cannot connect to database at $baseUrl. Ensure phone is on same Wi-Fi.',
+        'error': 'Server unreachable. Please check your internet connection.',
       };
     } catch (e) {
       return {
         'success': false,
-        'error': 'Database unreachable ($baseUrl): $e',
+        'error': 'Sign-in error: $e',
       };
     } finally {
       client.close();
@@ -275,8 +278,7 @@ class AuthService {
   /// Retrieves verified registered users from the online database.
   Future<List<Map<String, dynamic>>> getRegisteredUsersOnline() async {
     final baseUrl = await getBaseUrl();
-    final client = HttpClient();
-    client.connectionTimeout = const Duration(seconds: 4);
+    final client = _createHttpClient(timeout: const Duration(seconds: 4));
 
     try {
       final uri = Uri.parse('$baseUrl/v1/auth/users');

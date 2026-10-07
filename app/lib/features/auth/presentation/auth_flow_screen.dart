@@ -46,34 +46,12 @@ class _AuthFlowScreenState extends State<AuthFlowScreen> {
   bool _obscureLoginPin = true;
   bool _obscureRegPin = true;
 
-  // Backend Database Connection Status
-  bool _isDbConnected = false;
-  bool _isCheckingDb = true;
-  String? _activeDbHost;
-
   @override
   void initState() {
     super.initState();
     _isLoginMode = widget.isLoginInitial;
     _loginHandleController.text = '';
     _loginPasswordController.text = '';
-    _refreshDatabaseStatus();
-  }
-
-  Future<void> _refreshDatabaseStatus() async {
-    setState(() => _isCheckingDb = true);
-    final status = await AuthService.instance.getDatabaseStatus();
-    if (!mounted) return;
-    setState(() {
-      _isCheckingDb = false;
-      _isDbConnected = status['online'] == true;
-      if (_isDbConnected) {
-        final uri = Uri.tryParse(status['baseUrl'] ?? '');
-        _activeDbHost = uri != null ? '${uri.host}:${uri.port}' : 'Connected';
-      } else {
-        _activeDbHost = null;
-      }
-    });
   }
 
   @override
@@ -131,7 +109,7 @@ class _AuthFlowScreenState extends State<AuthFlowScreen> {
           });
         }
       } else {
-        // REJECT USERNAME - Exists in online database
+        // REJECT USERNAME - Already taken
         HapticFeedback.heavyImpact();
         setState(() {
           _isCheckingUsername = false;
@@ -139,14 +117,14 @@ class _AuthFlowScreenState extends State<AuthFlowScreen> {
           _validatedUsername = null;
           _usernameCheckError = result['message'] ??
               result['error'] ??
-              "Username '@$clean' already exists in the online database. Please choose another username.";
+              "Username '@$clean' is already taken. Please choose another username.";
         });
       }
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _isCheckingUsername = false;
-        _usernameCheckError = 'Error connecting to online database: $e';
+        _usernameCheckError = 'Unable to check username availability. Please try again.';
       });
     }
   }
@@ -215,14 +193,14 @@ class _AuthFlowScreenState extends State<AuthFlowScreen> {
       } else {
         setState(() {
           _isLoading = false;
-          _errorMessage = res['error'] ?? 'Registration rejected by online database.';
+          _errorMessage = res['error'] ?? 'Registration could not be completed. Please try again.';
         });
       }
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _isLoading = false;
-        _errorMessage = 'Connection failure: $e';
+        _errorMessage = 'Connection failure. Please check your network and try again.';
       });
     }
   }
@@ -280,7 +258,7 @@ class _AuthFlowScreenState extends State<AuthFlowScreen> {
           (route) => false,
         );
       } else {
-        // If login failed against online DB, show clear message
+        // If login failed, show clear message
         setState(() {
           _isLoading = false;
           _errorMessage = res['error'] ?? 'Invalid username or password.';
@@ -290,7 +268,7 @@ class _AuthFlowScreenState extends State<AuthFlowScreen> {
       if (!mounted) return;
       setState(() {
         _isLoading = false;
-        _errorMessage = 'Could not verify credentials with online database: $e';
+        _errorMessage = 'Unable to sign in. Please check your connection and try again.';
       });
     }
   }
@@ -429,262 +407,7 @@ class _AuthFlowScreenState extends State<AuthFlowScreen> {
             fontWeight: FontWeight.w500,
           ),
         ),
-        const SizedBox(height: 10),
-        _buildDatabaseConnectionBadge(),
       ],
-    );
-  }
-
-  Widget _buildDatabaseConnectionBadge() {
-    final bgColor = _isDbConnected
-        ? const Color(0xFFE8F5E9)
-        : (_isCheckingDb ? const Color(0xFFFFF8E1) : const Color(0xFFFFEBEE));
-    final borderColor = _isDbConnected
-        ? const Color(0xFFA5D6A7)
-        : (_isCheckingDb ? const Color(0xFFFFE082) : const Color(0xFFFFCDD2));
-    final dotColor = _isDbConnected
-        ? const Color(0xFF2E7D32)
-        : (_isCheckingDb ? const Color(0xFFF57F17) : const Color(0xFFC62828));
-    final textColor = _isDbConnected
-        ? const Color(0xFF1B5E20)
-        : (_isCheckingDb ? const Color(0xFFE65100) : const Color(0xFFB71C1C));
-
-    return InkWell(
-      onTap: _showServerConfigModal,
-      borderRadius: BorderRadius.circular(20),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: bgColor,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: borderColor),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 8,
-              height: 8,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: dotColor,
-              ),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              _isDbConnected
-                  ? 'Online DB: ${_activeDbHost ?? 'Connected'}'
-                  : (_isCheckingDb
-                      ? 'Connecting to Database...'
-                      : 'Database Offline • Tap to Connect'),
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: textColor,
-              ),
-            ),
-            const SizedBox(width: 6),
-            Icon(Icons.tune_rounded, size: 13, color: textColor),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _showServerConfigModal() {
-    final currentCustom = AuthService.instance.customServerUrl ?? AuthService.instance.currentResolvedUrl ?? 'http://192.168.31.54:8080';
-    final urlController = TextEditingController(text: currentCustom);
-    bool testing = false;
-    String? testResult;
-    bool? testSuccess;
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (modalCtx, setModalState) {
-            return Container(
-              padding: EdgeInsets.only(
-                left: 20,
-                right: 20,
-                top: 20,
-                bottom: MediaQuery.of(modalCtx).viewInsets.bottom + 20,
-              ),
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-              ),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Center(
-                      child: Container(
-                        width: 40,
-                        height: 4,
-                        decoration: BoxDecoration(
-                          color: Colors.grey.shade300,
-                          borderRadius: BorderRadius.circular(2),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    const Row(
-                      children: [
-                        Icon(Icons.dns_rounded, color: NexaColors.primary, size: 24),
-                        SizedBox(width: 10),
-                        Text(
-                          'Backend & Database Connection',
-                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Configure the server IP address to connect your phone with the backend and persistent database.',
-                      style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
-                    ),
-                    const SizedBox(height: 16),
-                    const Text('Quick Select Preset:', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        ActionChip(
-                          avatar: const Icon(Icons.wifi, size: 16),
-                          label: const Text('Wi-Fi LAN (192.168.31.54)'),
-                          onPressed: () {
-                            setModalState(() {
-                              urlController.text = 'http://192.168.31.54:8080';
-                              testResult = null;
-                            });
-                          },
-                        ),
-                        ActionChip(
-                          avatar: const Icon(Icons.phone_android, size: 16),
-                          label: const Text('Emulator (10.0.2.2)'),
-                          onPressed: () {
-                            setModalState(() {
-                              urlController.text = 'http://10.0.2.2:8080';
-                              testResult = null;
-                            });
-                          },
-                        ),
-                        ActionChip(
-                          avatar: const Icon(Icons.computer, size: 16),
-                          label: const Text('Localhost (127.0.0.1)'),
-                          onPressed: () {
-                            setModalState(() {
-                              urlController.text = 'http://127.0.0.1:8080';
-                              testResult = null;
-                            });
-                          },
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    TextField(
-                      controller: urlController,
-                      decoration: InputDecoration(
-                        labelText: 'Server URL or IP',
-                        hintText: 'http://192.168.31.54:8080',
-                        prefixIcon: const Icon(Icons.link),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    if (testResult != null) ...[
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: (testSuccess == true) ? const Color(0xFFE8F5E9) : const Color(0xFFFFEBEE),
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                            color: (testSuccess == true) ? const Color(0xFFA5D6A7) : const Color(0xFFFFCDD2),
-                          ),
-                        ),
-                        child: Text(
-                          testResult!,
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: (testSuccess == true) ? const Color(0xFF1B5E20) : const Color(0xFFB71C1C),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                    ],
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            icon: testing
-                                ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
-                                : const Icon(Icons.network_ping),
-                            label: const Text('Test Connection'),
-                            onPressed: testing ? null : () async {
-                              setModalState(() {
-                                testing = true;
-                                testResult = null;
-                              });
-                              final target = urlController.text.trim();
-                              final ok = await AuthService.instance.testServerHealth(target);
-                              if (ok) {
-                                AuthService.instance.setCustomServerUrl(target);
-                                final dbInfo = await AuthService.instance.getDatabaseStatus();
-                                setModalState(() {
-                                  testing = false;
-                                  testSuccess = true;
-                                  testResult = '✓ Connected! Database: ${dbInfo['database']?['storage_type'] ?? 'Active'} (Users in DB: ${dbInfo['database']?['users_count'] ?? 0})';
-                                });
-                              } else {
-                                setModalState(() {
-                                  testing = false;
-                                  testSuccess = false;
-                                  testResult = '✗ Cannot connect to $target. Verify laptop and phone are on same Wi-Fi.';
-                                });
-                              }
-                            },
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            icon: const Icon(Icons.check_circle_outline),
-                            label: const Text('Save & Apply'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: NexaColors.primary,
-                              foregroundColor: Colors.white,
-                            ),
-                            onPressed: () async {
-                              final target = urlController.text.trim();
-                              AuthService.instance.setCustomServerUrl(target);
-                              Navigator.pop(ctx);
-                              await _refreshDatabaseStatus();
-                              if (mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text('Backend configured: ${AuthService.instance.customServerUrl}'),
-                                    backgroundColor: NexaColors.primary,
-                                  ),
-                                );
-                              }
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
     );
   }
 
@@ -979,13 +702,13 @@ class _AuthFlowScreenState extends State<AuthFlowScreen> {
         ),
         const SizedBox(height: 6),
         const Text(
-          'Step 1: Choose your unique sovereign handle. Validated live with the online database.',
+          'Step 1: Choose your unique username.',
           style: TextStyle(fontSize: 13, color: NexaColors.textSecondary, height: 1.4),
         ),
         const SizedBox(height: 20),
 
         const Text(
-          'Handle / Identity',
+          'Username / Handle',
           style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: NexaColors.textMuted),
         ),
         const SizedBox(height: 6),
@@ -1029,7 +752,7 @@ class _AuthFlowScreenState extends State<AuthFlowScreen> {
         ),
         const SizedBox(height: 12),
 
-        // Live Online Database Feedback Badge
+        // Live Availability Feedback
         if (_usernameCheckError != null) ...[
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -1070,7 +793,7 @@ class _AuthFlowScreenState extends State<AuthFlowScreen> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    "Username '@$_validatedUsername' is unique & available in the online database!",
+                    "Username '@$_validatedUsername' is available!",
                     style: const TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w700,
@@ -1083,31 +806,9 @@ class _AuthFlowScreenState extends State<AuthFlowScreen> {
           ),
           const SizedBox(height: 14),
         ],
+        const SizedBox(height: 8),
 
-        // Online Database Status Callout
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: const Color(0xFFF8FAFC),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: NexaColors.borderLight),
-          ),
-          child: const Row(
-            children: [
-              Icon(Icons.cloud_done_outlined, color: NexaColors.primary, size: 18),
-              SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Checks live PostgreSQL / REST database before permitting registration.',
-                  style: TextStyle(fontSize: 11, color: NexaColors.textSecondary, fontWeight: FontWeight.w500),
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 20),
-
-        // Action Button: Check Online Database & Continue
+        // Action Button: Verify Username & Continue
         ElevatedButton(
           onPressed: _isCheckingUsername ? null : () => _checkUsernameOnline(autoAdvance: true),
           style: ElevatedButton.styleFrom(
@@ -1126,7 +827,7 @@ class _AuthFlowScreenState extends State<AuthFlowScreen> {
               : const Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Text('Check & Continue', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                    Text('Continue', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
                     SizedBox(width: 8),
                     Icon(Icons.arrow_forward, size: 18),
                   ],
