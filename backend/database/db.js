@@ -20,6 +20,7 @@ let dbState = {
   user_devices: {},    // userId -> { deviceId -> DeviceRecord }
   prekey_bundles: {},  // `${userId}:${deviceId}` -> BundleRecord
   mailbox_queue: {},   // deviceId -> [Envelope]
+  activity_logs: [],   // [AuditLogEntry]
   meta: {
     initialized_at: Date.now(),
     last_saved_at: Date.now(),
@@ -46,6 +47,7 @@ function loadFromDisk() {
         dbState.user_devices = parsed.user_devices || {};
         dbState.prekey_bundles = parsed.prekey_bundles || {};
         dbState.mailbox_queue = parsed.mailbox_queue || {};
+        dbState.activity_logs = parsed.activity_logs || [];
         dbState.meta = parsed.meta || dbState.meta;
         console.log(`[NEXA DB] Loaded persistent database from disk (${Object.keys(dbState.users).length} registered users).`);
       }
@@ -273,6 +275,168 @@ const Database = {
     dbState.mailbox_queue[deviceId] = [];
     saveToDiskSync();
     return list;
+  },
+
+  /**
+   * Activity & Security Audit Logging
+   */
+  logActivity(entry) {
+    if (!dbState.activity_logs) dbState.activity_logs = [];
+    const logItem = {
+      id: `LOG-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
+      timestamp: Date.now(),
+      type: entry.type || 'system', // 'auth' | 'security' | 'admin' | 'message' | 'system'
+      action: entry.action || 'event',
+      target: entry.target || null,
+      actor: entry.actor || 'system',
+      details: entry.details || '',
+      ip: entry.ip || '127.0.0.1'
+    };
+    dbState.activity_logs.unshift(logItem);
+    if (dbState.activity_logs.length > 500) {
+      dbState.activity_logs = dbState.activity_logs.slice(0, 500);
+    }
+    saveToDiskSync();
+    return logItem;
+  },
+
+  getActivityLogs(limit = 100, filterType = null) {
+    loadFromDisk();
+    let logs = dbState.activity_logs || [];
+    if (filterType && filterType !== 'all') {
+      logs = logs.filter(l => l.type === filterType);
+    }
+    return logs.slice(0, limit);
+  },
+
+  /**
+   * Detailed User Inspection for Admin Control Panel
+   */
+  getUsersDetailed() {
+    loadFromDisk();
+    return Object.values(dbState.users).map(u => {
+      const devices = dbState.user_devices[u.username] ? Object.keys(dbState.user_devices[u.username]).length : 0;
+      const latestLog = (dbState.activity_logs || []).find(l => l.target === u.username || l.actor === u.username);
+      return {
+        username: u.username,
+        handle: `@${u.username}`,
+        fullName: u.full_name || u.username,
+        about: u.about || '',
+        phone: u.phone || '',
+        nexaId: u.nexa_id,
+        role: u.role || (u.username === 'admin' ? 'admin' : 'user'),
+        status: u.status || 'active', // 'active' | 'suspended' | 'flagged'
+        createdAt: u.created_at,
+        devicesCount: devices,
+        lastActive: latestLog ? latestLog.timestamp : u.created_at
+      };
+    });
+  },
+
+  /**
+   * Admin User Management Operations
+   */
+  updateUserStatus(rawUsername, status) {
+    const username = rawUsername.trim().replace(/^@+/, '').toLowerCase();
+    loadFromDisk();
+    if (!dbState.users[username]) return null;
+    dbState.users[username].status = status;
+    saveToDiskSync();
+    this.logActivity({
+      type: 'admin',
+      action: 'update_status',
+      target: username,
+      actor: 'admin',
+      details: `User status changed to ${status}`
+    });
+    return dbState.users[username];
+  },
+
+  resetUserPin(rawUsername, newPin) {
+    const username = rawUsername.trim().replace(/^@+/, '').toLowerCase();
+    loadFromDisk();
+    if (!dbState.users[username]) return false;
+    const crypto = require('crypto');
+    const newHash = crypto.createHash('sha256').update(newPin).digest('hex');
+    dbState.users[username].password_hash = newHash;
+    saveToDiskSync();
+    this.logActivity({
+      type: 'admin',
+      action: 'reset_pin',
+      target: username,
+      actor: 'admin',
+      details: `Master PIN reset by administrator`
+    });
+    return true;
+  },
+
+  deleteUser(rawUsername) {
+    const username = rawUsername.trim().replace(/^@+/, '').toLowerCase();
+    loadFromDisk();
+    if (!dbState.users[username]) return false;
+    delete dbState.users[username];
+    if (dbState.user_devices[username]) delete dbState.user_devices[username];
+    for (const key of Object.keys(dbState.prekey_bundles)) {
+      if (key.startsWith(`${username}:`)) delete dbState.prekey_bundles[key];
+    }
+    saveToDiskSync();
+    this.logActivity({
+      type: 'admin',
+      action: 'delete_user',
+      target: username,
+      actor: 'admin',
+      details: `User account deleted permanently from database`
+    });
+    return true;
+  },
+
+  purgeExpiredEnvelopes() {
+    let totalPurged = 0;
+    for (const deviceId of Object.keys(dbState.mailbox_queue)) {
+      const q = dbState.mailbox_queue[deviceId] || [];
+      totalPurged += q.length;
+      dbState.mailbox_queue[deviceId] = [];
+    }
+    saveToDiskSync();
+    this.logActivity({
+      type: 'admin',
+      action: 'purge_queue',
+      target: 'mailbox_queue',
+      actor: 'admin',
+      details: `Purged ${totalPurged} pending message envelopes`
+    });
+    return totalPurged;
+  },
+
+  getSystemMetrics(activeWsCount = 0) {
+    loadFromDisk();
+    const mem = process.memoryUsage();
+    let dbSize = 0;
+    try {
+      if (fs.existsSync(DB_FILE)) dbSize = fs.statSync(DB_FILE).size;
+    } catch (_) {}
+
+    return {
+      uptime_seconds: Math.floor(process.uptime()),
+      node_version: process.version,
+      platform: process.platform,
+      active_connections: activeWsCount,
+      total_users: Object.keys(dbState.users).length,
+      active_users: Object.values(dbState.users).filter(u => u.status !== 'suspended').length,
+      suspended_users: Object.values(dbState.users).filter(u => u.status === 'suspended').length,
+      total_devices: Object.keys(dbState.user_devices).length,
+      registered_devices: Object.keys(dbState.user_devices).length,
+      queued_envelopes: Object.values(dbState.mailbox_queue).reduce((sum, q) => sum + (q ? q.length : 0), 0),
+      db_file_bytes: dbSize,
+      db_last_saved: dbState.meta.last_saved_at,
+      memory: {
+        heap_used_mb: (mem.heapUsed / 1024 / 1024).toFixed(2),
+        heap_total_mb: (mem.heapTotal / 1024 / 1024).toFixed(2),
+        rss_mb: (mem.rss / 1024 / 1024).toFixed(2)
+      },
+      security_mode: 'zero_knowledge_e2ee',
+      crypto_protocol: 'X3DH_DoubleRatchet_AES256GCM'
+    };
   }
 };
 

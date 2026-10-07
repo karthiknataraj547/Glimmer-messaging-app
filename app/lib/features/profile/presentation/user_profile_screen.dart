@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../../../core/session/user_session.dart';
 import '../../../core/theme/nexa_theme.dart';
 import '../../auth/presentation/device_link_qr_screen.dart';
+import '../../admin/presentation/admin_panel_screen.dart';
 
 class UserProfileScreen extends StatefulWidget {
   const UserProfileScreen({super.key});
@@ -531,6 +532,58 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
               onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const DeviceLinkQrScreen()),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          // Server Admin Control Center Tile
+          Material(
+            color: NexaColors.surfaceLight,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: BorderSide(
+                color: _session.handle.toLowerCase().contains('admin')
+                    ? Colors.purple.withValues(alpha: 0.5)
+                    : NexaColors.borderLight,
+              ),
+            ),
+            child: ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.purple.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.admin_panel_settings, color: Colors.purple, size: 20),
+              ),
+              title: Row(
+                children: [
+                  const Text('Admin Control Center', style: TextStyle(fontWeight: FontWeight.w600)),
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.purple.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: Colors.purple.withValues(alpha: 0.3)),
+                    ),
+                    child: const Text(
+                      'CONTROLLER',
+                      style: TextStyle(
+                        fontSize: 9,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.purple,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              subtitle: const Text('Users database, security logs & server telemetry'),
+              trailing: const Icon(Icons.chevron_right, color: NexaColors.textMuted),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const AdminPanelScreen()),
               ),
             ),
           ),

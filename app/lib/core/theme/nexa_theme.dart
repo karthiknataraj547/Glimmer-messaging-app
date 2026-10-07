@@ -26,7 +26,10 @@ class NexaColors {
   static const Color cyanAccent = Color(0xFF0284C7);      // Primary focus
   static const Color emeraldSecure = Color(0xFF059669);   // Verified E2E encryption
   static const Color amberAttention = Color(0xFFD97706);  // Reminders & pending actions
+  static const Color amberWarning = amberAttention;       // Semantic warning alias
   static const Color rubyDestructive = Color(0xFFE11D48); // Critical alert / block
+  static const Color error = rubyDestructive;             // Semantic error alias
+  static const Color backgroundLight = canvasLight;       // Semantic background alias
 
   // Typography Tokens - Light
   static const Color textPrimary = Color(0xFF0F172A);      // Slate 900

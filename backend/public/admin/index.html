@@ -1,0 +1,1047 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NEXA Sovereign Admin Control Center</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Outfit:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-base: #0B0F17;
+      --bg-surface: #111827;
+      --bg-elevated: #1F2937;
+      --bg-glass: rgba(17, 24, 39, 0.75);
+      --border-subtle: rgba(255, 255, 255, 0.08);
+      --border-accent: rgba(56, 189, 248, 0.25);
+      --accent-cyan: #38BDF8;
+      --accent-emerald: #10B981;
+      --accent-rose: #F43F5E;
+      --accent-amber: #F59E0B;
+      --accent-violet: #8B5CF6;
+      --text-main: #F9FAFB;
+      --text-muted: #9CA3AF;
+      --text-dim: #6B7280;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background: var(--bg-base);
+      color: var(--text-main);
+      font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+      background-image: 
+        radial-gradient(circle at 10% 20%, rgba(56, 189, 248, 0.06) 0%, transparent 40%),
+        radial-gradient(circle at 90% 80%, rgba(139, 92, 246, 0.06) 0%, transparent 40%);
+    }
+
+    /* TOP NAVBAR */
+    header {
+      background: var(--bg-glass);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border-subtle);
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      padding: 14px 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-icon {
+      width: 38px;
+      height: 38px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #0EA5E9, #6366F1);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 900;
+      font-size: 18px;
+      color: white;
+      box-shadow: 0 0 20px rgba(14, 165, 233, 0.4);
+    }
+
+    .brand-info h1 {
+      font-size: 17px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .brand-badge {
+      font-size: 10px;
+      padding: 2px 7px;
+      border-radius: 6px;
+      background: rgba(56, 189, 248, 0.15);
+      color: var(--accent-cyan);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      text-transform: uppercase;
+      font-weight: 700;
+    }
+
+    .brand-info p {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .nav-actions {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .live-indicator {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--accent-emerald);
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.25);
+      padding: 6px 14px;
+      border-radius: 20px;
+    }
+
+    .live-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent-emerald);
+      box-shadow: 0 0 8px var(--accent-emerald);
+      animation: pulse 1.8s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(1.2); }
+    }
+
+    .btn {
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 8px 16px;
+      border-radius: 8px;
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #0284C7, #4F46E5);
+      color: white;
+      box-shadow: 0 4px 12px rgba(14, 165, 233, 0.25);
+    }
+    .btn-primary:hover {
+      filter: brightness(1.1);
+      transform: translateY(-1px);
+    }
+
+    .btn-danger {
+      background: rgba(244, 63, 94, 0.15);
+      color: var(--accent-rose);
+      border-color: rgba(244, 63, 94, 0.3);
+    }
+    .btn-danger:hover {
+      background: rgba(244, 63, 94, 0.25);
+    }
+
+    .btn-secondary {
+      background: var(--bg-elevated);
+      color: var(--text-main);
+      border-color: var(--border-subtle);
+    }
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    /* MAIN CONTAINER */
+    main {
+      flex: 1;
+      padding: 28px;
+      max-width: 1440px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    /* KPI METRICS GRID */
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+
+    .metric-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 16px;
+      padding: 20px;
+      position: relative;
+      overflow: hidden;
+      transition: transform 0.2s ease, border-color 0.2s ease;
+    }
+
+    .metric-card:hover {
+      transform: translateY(-2px);
+      border-color: var(--border-accent);
+    }
+
+    .metric-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 4px;
+      height: 100%;
+      background: var(--card-accent, var(--accent-cyan));
+    }
+
+    .metric-title {
+      font-size: 12px;
+      text-transform: uppercase;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+
+    .metric-value {
+      font-size: 28px;
+      font-weight: 800;
+      color: var(--text-main);
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+    }
+
+    .metric-sub {
+      font-size: 12px;
+      color: var(--text-dim);
+      margin-top: 6px;
+    }
+
+    /* TABS */
+    .tabs-nav {
+      display: flex;
+      gap: 12px;
+      border-bottom: 1px solid var(--border-subtle);
+      margin-bottom: 24px;
+      padding-bottom: 8px;
+    }
+
+    .tab-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 700;
+      padding: 8px 16px;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .tab-btn.active {
+      color: var(--accent-cyan);
+      background: rgba(56, 189, 248, 0.12);
+    }
+
+    /* PANELS */
+    .tab-pane {
+      display: none;
+    }
+    .tab-pane.active {
+      display: block;
+    }
+
+    /* DATA TABLES */
+    .card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 18px;
+      padding: 24px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .card-title {
+      font-size: 18px;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .search-box {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      padding: 8px 14px;
+      color: white;
+      font-family: inherit;
+      font-size: 13px;
+      width: 260px;
+    }
+    .search-box:focus {
+      outline: none;
+      border-color: var(--accent-cyan);
+    }
+
+    .table-responsive {
+      overflow-x: auto;
+      border-radius: 12px;
+      border: 1px solid var(--border-subtle);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 13px;
+    }
+
+    th {
+      background: var(--bg-elevated);
+      padding: 12px 16px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      font-size: 11px;
+      letter-spacing: 0.5px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    td {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border-subtle);
+      vertical-align: middle;
+    }
+
+    tr:hover td {
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .user-pill {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .avatar-circle {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #3B82F6, #10B981);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 13px;
+      color: white;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .badge-active { background: rgba(16, 185, 129, 0.15); color: var(--accent-emerald); border: 1px solid rgba(16, 185, 129, 0.3); }
+    .badge-suspended { background: rgba(244, 63, 94, 0.15); color: var(--accent-rose); border: 1px solid rgba(244, 63, 94, 0.3); }
+    .badge-admin { background: rgba(139, 92, 246, 0.15); color: var(--accent-violet); border: 1px solid rgba(139, 92, 246, 0.3); }
+    .badge-user { background: rgba(255, 255, 255, 0.08); color: var(--text-muted); }
+
+    .action-btn-group {
+      display: flex;
+      gap: 6px;
+    }
+
+    .action-btn {
+      padding: 5px 10px;
+      font-size: 11px;
+      font-weight: 700;
+      border-radius: 6px;
+      border: 1px solid var(--border-subtle);
+      background: var(--bg-elevated);
+      color: var(--text-main);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .action-btn:hover {
+      background: rgba(255, 255, 255, 0.12);
+    }
+
+    .action-btn.suspend { color: var(--accent-amber); border-color: rgba(245, 158, 11, 0.3); }
+    .action-btn.activate { color: var(--accent-emerald); border-color: rgba(16, 185, 129, 0.3); }
+    .action-btn.delete { color: var(--accent-rose); border-color: rgba(244, 63, 94, 0.3); }
+    .action-btn.reset { color: var(--accent-cyan); border-color: rgba(56, 189, 248, 0.3); }
+
+    /* AUDIT LOG TIMELINE */
+    .timeline {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      max-height: 600px;
+      overflow-y: auto;
+      padding-right: 6px;
+    }
+
+    .timeline-item {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      padding: 14px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      transition: border-color 0.15s;
+    }
+
+    .timeline-item:hover {
+      border-color: rgba(255, 255, 255, 0.15);
+    }
+
+    .timeline-main {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .log-badge {
+      font-size: 10px;
+      font-weight: 800;
+      padding: 3px 7px;
+      border-radius: 5px;
+      text-transform: uppercase;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .log-type-auth { background: rgba(56, 189, 248, 0.2); color: var(--accent-cyan); }
+    .log-type-security { background: rgba(244, 63, 94, 0.2); color: var(--accent-rose); }
+    .log-type-admin { background: rgba(139, 92, 246, 0.2); color: var(--accent-violet); }
+    .log-type-message { background: rgba(16, 185, 129, 0.2); color: var(--accent-emerald); }
+    .log-type-system { background: rgba(245, 158, 11, 0.2); color: var(--accent-amber); }
+
+    .timeline-meta {
+      font-size: 11px;
+      color: var(--text-dim);
+      font-family: 'JetBrains Mono', monospace;
+      text-align: right;
+    }
+
+    /* AUTH LOGIN OVERLAY */
+    #authOverlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(11, 15, 23, 0.95);
+      backdrop-filter: blur(20px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      padding: 20px;
+    }
+
+    .login-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-accent);
+      border-radius: 24px;
+      padding: 36px;
+      width: 100%;
+      max-width: 420px;
+      box-shadow: 0 25px 60px rgba(0, 0, 0, 0.5);
+      text-align: center;
+    }
+
+    .login-icon {
+      width: 64px;
+      height: 64px;
+      border-radius: 18px;
+      background: linear-gradient(135deg, #0284C7, #6366F1);
+      margin: 0 auto 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 30px;
+      box-shadow: 0 0 30px rgba(14, 165, 233, 0.35);
+    }
+
+    .form-group {
+      margin-bottom: 16px;
+      text-align: left;
+    }
+
+    .form-group label {
+      display: block;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+
+    .form-control {
+      width: 100%;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      padding: 12px 14px;
+      color: white;
+      font-family: inherit;
+      font-size: 14px;
+    }
+
+    .form-control:focus {
+      outline: none;
+      border-color: var(--accent-cyan);
+    }
+
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      padding: 14px 20px;
+      font-size: 13px;
+      font-weight: 600;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+      z-index: 2000;
+      transform: translateY(100px);
+      opacity: 0;
+      transition: all 0.3s ease;
+    }
+    .toast.show {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ADMIN AUTH MODAL OVERLAY -->
+  <div id="authOverlay">
+    <div class="login-card">
+      <div class="login-icon">🛡️</div>
+      <h2 style="font-size: 22px; font-weight: 800; margin-bottom: 6px;">NEXA Admin Portal</h2>
+      <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 24px;">Enter administrator credentials or Master Key to access security controls.</p>
+      
+      <div id="loginError" style="display:none; color: var(--accent-rose); font-size: 12px; font-weight: bold; margin-bottom: 14px;"></div>
+
+      <div class="form-group">
+        <label>Admin Username / Handle</label>
+        <input type="text" id="adminUser" class="form-control" value="admin" placeholder="e.g. admin">
+      </div>
+
+      <div class="form-group">
+        <label>Master PIN / Password</label>
+        <input type="password" id="adminPin" class="form-control" placeholder="Default: 123456" autofocus>
+      </div>
+
+      <div style="font-size: 11px; color: var(--text-dim); margin-bottom: 20px; text-align: left;">
+        Or enter Admin Master Key directly.
+      </div>
+
+      <button class="btn btn-primary" style="width: 100%; justify-content: center; padding: 12px;" onclick="handleAdminLogin()">
+        Unlock Admin Center
+      </button>
+    </div>
+  </div>
+
+  <!-- TOP HEADER -->
+  <header>
+    <div class="brand">
+      <div class="brand-icon">NX</div>
+      <div class="brand-info">
+        <h1>NEXA Admin Center <span class="brand-badge">Sovereign Core</span></h1>
+        <p>Zero-Knowledge Database & Activity Inspector</p>
+      </div>
+    </div>
+
+    <div class="nav-actions">
+      <div class="live-indicator">
+        <div class="live-dot"></div>
+        <span id="liveStatusText">Live Relay Active</span>
+      </div>
+      <button class="btn btn-secondary" onclick="fetchFullDashboard(true)">↻ Refresh</button>
+      <button class="btn btn-danger" onclick="handleAdminLogout()">Lock / Log Out</button>
+    </div>
+  </header>
+
+  <!-- MAIN DASHBOARD -->
+  <main>
+    <!-- KPI METRICS -->
+    <div class="metrics-grid">
+      <div class="metric-card" style="--card-accent: var(--accent-cyan)">
+        <div class="metric-title">Total Registered Users</div>
+        <div class="metric-value" id="kpiUsers">0</div>
+        <div class="metric-sub" id="kpiUsersSub">0 active accounts</div>
+      </div>
+
+      <div class="metric-card" style="--card-accent: var(--accent-emerald)">
+        <div class="metric-title">Active Relays (Sockets)</div>
+        <div class="metric-value" id="kpiRelays">0</div>
+        <div class="metric-sub">Real-time WebSocket peers</div>
+      </div>
+
+      <div class="metric-card" style="--card-accent: var(--accent-amber)">
+        <div class="metric-title">Blind Mailbox Envelopes</div>
+        <div class="metric-value" id="kpiEnvelopes">0</div>
+        <div class="metric-sub">Zero-knowledge offline queue</div>
+      </div>
+
+      <div class="metric-card" style="--card-accent: var(--accent-violet)">
+        <div class="metric-title">Node Memory (Heap / RSS)</div>
+        <div class="metric-value" id="kpiMemory">0 <span style="font-size:14px; color:var(--text-muted)">MB</span></div>
+        <div class="metric-sub" id="kpiMemorySub">Server memory consumption</div>
+      </div>
+
+      <div class="metric-card" style="--card-accent: #EC4899">
+        <div class="metric-title">Server Uptime</div>
+        <div class="metric-value" id="kpiUptime">0<span style="font-size:14px; color:var(--text-muted)">s</span></div>
+        <div class="metric-sub">Continuous operation</div>
+      </div>
+    </div>
+
+    <!-- TABS NAVIGATION -->
+    <div class="tabs-nav">
+      <button class="tab-btn active" onclick="switchTab('usersTab', this)">👥 User Database Explorer</button>
+      <button class="tab-btn" onclick="switchTab('activityTab', this)">⚡ Security & Activity Timeline</button>
+      <button class="tab-btn" onclick="switchTab('systemTab', this)">🛠️ System Diagnostics</button>
+    </div>
+
+    <!-- TAB 1: USER DATABASE EXPLORER -->
+    <div id="usersTab" class="tab-pane active">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">
+            <span>Registered Directory Users</span>
+            <span id="userCountBadge" class="badge badge-user">0 Total</span>
+          </div>
+          <div>
+            <input type="text" id="userSearchInput" class="search-box" placeholder="Search by handle, name, or NEXA ID..." oninput="filterUserTable()">
+          </div>
+        </div>
+
+        <div class="table-responsive">
+          <table>
+            <thead>
+              <tr>
+                <th>User / Handle</th>
+                <th>Full Name</th>
+                <th>Sovereign NEXA ID</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th>Devices</th>
+                <th>Joined Date</th>
+                <th style="text-align: right;">Administrative Actions</th>
+              </tr>
+            </thead>
+            <tbody id="userTableBody">
+              <tr>
+                <td colspan="8" style="text-align:center; color: var(--text-muted); padding: 30px;">Loading registered directory...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 2: ACTIVITY & SECURITY AUDIT TIMELINE -->
+    <div id="activityTab" class="tab-pane">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">
+            <span>Real-Time Security & Activity Timeline</span>
+            <span id="logCountBadge" class="badge badge-user">0 Events</span>
+          </div>
+          <div style="display:flex; gap: 8px;">
+            <select id="logTypeFilter" class="search-box" style="width: 140px;" onchange="fetchActivityLogs()">
+              <option value="all">All Events</option>
+              <option value="auth">Auth & Logins</option>
+              <option value="security">Security Alerts</option>
+              <option value="admin">Admin Actions</option>
+              <option value="message">Messages</option>
+            </select>
+            <button class="btn btn-secondary" onclick="fetchActivityLogs()">Refresh Feed</button>
+          </div>
+        </div>
+
+        <div class="timeline" id="activityTimeline">
+          <div style="text-align:center; color: var(--text-muted); padding: 30px;">Loading security activity logs...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 3: SYSTEM DIAGNOSTICS & CONTROLS -->
+    <div id="systemTab" class="tab-pane">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Server Runtime & Storage Inspection</div>
+          <button class="btn btn-danger" onclick="purgeMailboxQueue()">Flush Mailbox Queue</button>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px;">
+          <div style="background: var(--bg-elevated); padding: 18px; border-radius: 12px;">
+            <h4 style="font-size: 13px; color: var(--text-muted); margin-bottom: 8px;">ZERO-KNOWLEDGE PROTOCOL</h4>
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--accent-cyan); font-weight: bold;">
+              X3DH + Double Ratchet + AES-256-GCM
+            </div>
+            <p style="font-size: 12px; color: var(--text-dim); margin-top: 6px;">Server acts as blind broker. Cannot decrypt message ciphertexts.</p>
+          </div>
+
+          <div style="background: var(--bg-elevated); padding: 18px; border-radius: 12px;">
+            <h4 style="font-size: 13px; color: var(--text-muted); margin-bottom: 8px;">PERSISTENT DATABASE STORE</h4>
+            <div id="diagDbFile" style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--accent-emerald);">
+              nexa_database.json
+            </div>
+            <div id="diagDbSize" style="font-size: 12px; color: var(--text-dim); margin-top: 6px;">Atomic flush on disk</div>
+          </div>
+
+          <div style="background: var(--bg-elevated); padding: 18px; border-radius: 12px;">
+            <h4 style="font-size: 13px; color: var(--text-muted); margin-bottom: 8px;">NODE ENGINE & RUNTIME</h4>
+            <div id="diagNodeVer" style="font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--text-main);">
+              Node.js v25.2.1 (win32)
+            </div>
+            <div id="diagUptimeFull" style="font-size: 12px; color: var(--text-dim); margin-top: 6px;">Uptime tracking active</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <div id="toast" class="toast">Action completed successfully</div>
+
+  <script>
+    let adminToken = sessionStorage.getItem('nexa_admin_token') || '';
+    let cachedUsers = [];
+    let refreshInterval = null;
+
+    // Check existing authentication
+    window.addEventListener('DOMContentLoaded', () => {
+      if (adminToken) {
+        document.getElementById('authOverlay').style.display = 'none';
+        startDashboard();
+      } else {
+        document.getElementById('authOverlay').style.display = 'flex';
+      }
+    });
+
+    async function handleAdminLogin() {
+      const username = document.getElementById('adminUser').value.trim();
+      const password = document.getElementById('adminPin').value.trim();
+      const errBox = document.getElementById('loginError');
+
+      try {
+        const res = await fetch('/v1/admin/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+        const data = await res.json();
+
+        if (res.ok && data.success) {
+          adminToken = data.token;
+          sessionStorage.setItem('nexa_admin_token', adminToken);
+          document.getElementById('authOverlay').style.display = 'none';
+          showToast('Welcome, Administrator!');
+          startDashboard();
+        } else {
+          errBox.style.display = 'block';
+          errBox.textContent = data.error || 'Authentication rejected.';
+        }
+      } catch (err) {
+        errBox.style.display = 'block';
+        errBox.textContent = 'Server connection failed: ' + err.message;
+      }
+    }
+
+    function handleAdminLogout() {
+      sessionStorage.removeItem('nexa_admin_token');
+      adminToken = '';
+      clearInterval(refreshInterval);
+      document.getElementById('authOverlay').style.display = 'flex';
+    }
+
+    function startDashboard() {
+      fetchFullDashboard(true);
+      if (refreshInterval) clearInterval(refreshInterval);
+      refreshInterval = setInterval(() => {
+        fetchFullDashboard(false);
+      }, 4000);
+    }
+
+    async function fetchFullDashboard(showFeedback) {
+      if (!adminToken) return;
+      try {
+        const [overviewRes, usersRes, activityRes] = await Promise.all([
+          fetch('/v1/admin/overview', { headers: { 'Authorization': 'Bearer ' + adminToken } }),
+          fetch('/v1/admin/users', { headers: { 'Authorization': 'Bearer ' + adminToken } }),
+          fetch('/v1/admin/activity?limit=50', { headers: { 'Authorization': 'Bearer ' + adminToken } })
+        ]);
+
+        if (overviewRes.status === 401 || overviewRes.status === 403) {
+          handleAdminLogout();
+          return;
+        }
+
+        const overview = await overviewRes.json();
+        const users = await usersRes.json();
+        const activity = await activityRes.json();
+
+        if (overview.success) renderMetrics(overview.metrics);
+        if (users.success) renderUsers(users.users);
+        if (activity.success) renderActivity(activity.logs);
+
+        if (showFeedback) showToast('Dashboard synchronized with server');
+      } catch (e) {
+        console.error('Dashboard sync error:', e);
+      }
+    }
+
+    function renderMetrics(m) {
+      document.getElementById('kpiUsers').textContent = m.total_users || 0;
+      document.getElementById('kpiUsersSub').textContent = `${m.active_users} active • ${m.suspended_users} suspended`;
+      document.getElementById('kpiRelays').textContent = m.active_connections || 0;
+      document.getElementById('kpiEnvelopes').textContent = m.queued_envelopes || 0;
+      document.getElementById('kpiMemory').innerHTML = `${m.memory?.heap_used_mb || 0} <span style="font-size:14px; color:var(--text-muted)">MB</span>`;
+      document.getElementById('kpiMemorySub').textContent = `RSS: ${m.memory?.rss_mb || 0} MB • Total: ${m.memory?.heap_total_mb || 0} MB`;
+      
+      const up = m.uptime_seconds || 0;
+      const hours = Math.floor(up / 3600);
+      const mins = Math.floor((up % 3600) / 60);
+      const secs = up % 60;
+      document.getElementById('kpiUptime').innerHTML = `${hours > 0 ? hours + 'h ' : ''}${mins}m ${secs}<span style="font-size:14px; color:var(--text-muted)">s</span>`;
+
+      document.getElementById('diagNodeVer').textContent = `${m.node_version} (${m.platform})`;
+      document.getElementById('diagDbSize').textContent = `Size: ${(m.db_file_bytes / 1024).toFixed(1)} KB • Atomic Flush Active`;
+    }
+
+    function renderUsers(users) {
+      cachedUsers = users || [];
+      document.getElementById('userCountBadge').textContent = `${cachedUsers.length} Total Users`;
+      filterUserTable();
+    }
+
+    function filterUserTable() {
+      const q = document.getElementById('userSearchInput').value.toLowerCase().trim();
+      const filtered = cachedUsers.filter(u => 
+        u.username.toLowerCase().includes(q) ||
+        u.fullName.toLowerCase().includes(q) ||
+        u.nexaId.toLowerCase().includes(q)
+      );
+
+      const tbody = document.getElementById('userTableBody');
+      if (filtered.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:30px; color:var(--text-muted)">No users found matching filter.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = filtered.map(u => {
+        const isSuspended = u.status === 'suspended';
+        const isAdmin = u.role === 'admin';
+        const dateStr = new Date(u.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+
+        return `
+          <tr>
+            <td>
+              <div class="user-pill">
+                <div class="avatar-circle">${u.username.substring(0,2).toUpperCase()}</div>
+                <div>
+                  <div style="font-weight: 700;">${u.handle}</div>
+                  <div style="font-size: 11px; color: var(--text-dim);">${u.phone || 'No phone'}</div>
+                </div>
+              </div>
+            </td>
+            <td><strong>${escapeHtml(u.fullName)}</strong></td>
+            <td><code style="font-family:'JetBrains Mono'; color:var(--accent-cyan); font-size:12px;">${u.nexaId}</code></td>
+            <td><span class="badge ${isAdmin ? 'badge-admin' : 'badge-user'}">${u.role}</span></td>
+            <td><span class="badge ${isSuspended ? 'badge-suspended' : 'badge-active'}">${u.status}</span></td>
+            <td><span style="font-weight:700;">${u.devicesCount}</span> device(s)</td>
+            <td style="color:var(--text-dim); font-size:12px;">${dateStr}</td>
+            <td style="text-align: right;">
+              <div class="action-btn-group" style="justify-content: flex-end;">
+                <button class="action-btn ${isSuspended ? 'activate' : 'suspend'}" onclick="toggleUserStatus('${u.username}', '${isSuspended ? 'active' : 'suspended'}')">
+                  ${isSuspended ? '✓ Reactivate' : '⊘ Suspend'}
+                </button>
+                <button class="action-btn reset" onclick="resetUserPinPrompt('${u.username}')">Reset PIN</button>
+                ${u.username !== 'admin' ? `
+                  <button class="action-btn delete" onclick="deleteUserPrompt('${u.username}')">Delete</button>
+                ` : ''}
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function renderActivity(logs) {
+      document.getElementById('logCountBadge').textContent = `${logs.length} Events`;
+      const container = document.getElementById('activityTimeline');
+      if (logs.length === 0) {
+        container.innerHTML = '<div style="text-align:center; padding:30px; color:var(--text-muted)">No activity recorded yet.</div>';
+        return;
+      }
+
+      container.innerHTML = logs.map(l => {
+        const timeStr = new Date(l.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        return `
+          <div class="timeline-item">
+            <div class="timeline-main">
+              <span class="log-badge log-type-${l.type}">${l.type}</span>
+              <div>
+                <div style="font-weight: 700; font-size: 13px;">${escapeHtml(l.action)} • <span style="color:var(--accent-cyan);">${escapeHtml(l.target || l.actor)}</span></div>
+                <div style="font-size: 12px; color: var(--text-muted);">${escapeHtml(l.details || '')}</div>
+              </div>
+            </div>
+            <div class="timeline-meta">
+              <div>${timeStr}</div>
+              <div style="font-size:10px;">actor: ${escapeHtml(l.actor)}</div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    async function toggleUserStatus(username, newStatus) {
+      try {
+        const res = await fetch('/v1/admin/users/status', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + adminToken },
+          body: JSON.stringify({ username, status: newStatus })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast(`User @${username} is now ${newStatus}`);
+          fetchFullDashboard(false);
+        } else {
+          alert(data.error);
+        }
+      } catch (err) {
+        alert('Action failed: ' + err.message);
+      }
+    }
+
+    async function resetUserPinPrompt(username) {
+      const pin = prompt(`Enter new Master PIN for @${username} (minimum 4 digits):`, "123456");
+      if (!pin) return;
+      if (pin.length < 4) {
+        alert("PIN must be at least 4 digits.");
+        return;
+      }
+      try {
+        const res = await fetch('/v1/admin/users/reset-pin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + adminToken },
+          body: JSON.stringify({ username, newPin: pin })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast(`Master PIN for @${username} reset successfully!`);
+          fetchFullDashboard(false);
+        } else {
+          alert(data.error);
+        }
+      } catch (err) {
+        alert('Reset failed: ' + err.message);
+      }
+    }
+
+    async function deleteUserPrompt(username) {
+      if (!confirm(`Are you sure you want to permanently delete user @${username}? This removes all keys and cannot be undone.`)) {
+        return;
+      }
+      try {
+        const res = await fetch(`/v1/admin/users/${username}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': 'Bearer ' + adminToken }
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast(`User @${username} deleted permanently`);
+          fetchFullDashboard(false);
+        } else {
+          alert(data.error);
+        }
+      } catch (err) {
+        alert('Deletion failed: ' + err.message);
+      }
+    }
+
+    async function purgeMailboxQueue() {
+      if (!confirm('Purge all pending zero-knowledge message envelopes in the blind mailbox queue?')) return;
+      try {
+        const res = await fetch('/v1/admin/purge-queue', {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + adminToken }
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast(data.message);
+          fetchFullDashboard(false);
+        }
+      } catch (err) {
+        alert('Purge failed: ' + err.message);
+      }
+    }
+
+    function switchTab(tabId, btn) {
+      document.querySelectorAll('.tab-pane').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+      document.getElementById(tabId).classList.add('active');
+      btn.classList.add('active');
+    }
+
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      toast.textContent = msg;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 2800);
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str).replace(/[&<>"']/g, m => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' })[m]);
+    }
+  </script>
+</body>
+</html>

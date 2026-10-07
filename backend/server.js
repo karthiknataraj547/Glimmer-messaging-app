@@ -22,6 +22,13 @@ app.use(express.json({ limit: '10mb' }));
 const staticWebPath = path.join(__dirname, '../app/build/web');
 app.use(express.static(staticWebPath));
 
+// Host Admin Control Center Web Application
+const adminWebPath = path.join(__dirname, 'public/admin');
+app.use('/admin', express.static(adminWebPath));
+app.get('/admin', (req, res) => {
+  res.sendFile(path.join(adminWebPath, 'index.html'));
+});
+
 // CORS Middleware for Mobile, Web, and Desktop Clients
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
@@ -151,6 +158,13 @@ app.post('/v1/auth/register-user', async (req, res) => {
   };
 
   const savedUser = await Database.saveUser(newUserRecord);
+  Database.logActivity({
+    type: 'auth',
+    action: 'user_register',
+    target: savedUser.username,
+    actor: savedUser.username,
+    details: `New account ${savedUser.nexa_id} registered successfully`
+  });
   console.log(`[NEXA] Registered new user '@${username}' (${nexaId}) in persistent online database.`);
 
   return res.status(201).json({
@@ -195,6 +209,13 @@ app.post('/v1/auth/login-user', async (req, res) => {
         created_at: Date.now()
       };
       const savedUser = await Database.saveUser(newUserRecord);
+      Database.logActivity({
+        type: 'auth',
+        action: 'auto_provision_login',
+        target: savedUser.username,
+        actor: savedUser.username,
+        details: `Auto-provisioned account ${savedUser.nexa_id} via simple login`
+      });
       console.log(`[NEXA] Seamlessly auto-provisioned user '@${username}' (${nexaId}) via simple login.`);
       return res.json({
         success: true,
@@ -212,9 +233,35 @@ app.post('/v1/auth/login-user', async (req, res) => {
     return res.status(401).json({ error: 'Password / Master PIN must be at least 4 digits.' });
   }
 
+  if (user.status === 'suspended') {
+    Database.logActivity({
+      type: 'security',
+      action: 'login_blocked_suspended',
+      target: user.username,
+      actor: user.username,
+      details: 'Suspended user account attempted to authenticate'
+    });
+    return res.status(403).json({ error: 'This account has been suspended by the administrator.' });
+  }
+
   if (user.password_hash !== passwordHash) {
+    Database.logActivity({
+      type: 'security',
+      action: 'login_failed',
+      target: user.username,
+      actor: user.username,
+      details: 'Incorrect password or Master PIN provided'
+    });
     return res.status(401).json({ error: 'Incorrect password or Master PIN.' });
   }
+
+  Database.logActivity({
+    type: 'auth',
+    action: 'login_success',
+    target: user.username,
+    actor: user.username,
+    details: 'User authenticated successfully'
+  });
 
   return res.json({
     success: true,
@@ -237,6 +284,210 @@ app.get('/v1/auth/users', async (req, res) => {
   const list = await Database.listUsers();
   res.json({ count: list.length, users: list });
 });
+
+
+// ============================================================================
+// --- 1.2 ADMIN CONTROL CENTER & COMPREHENSIVE SECURITY AUDIT SUITE ---
+// ============================================================================
+
+const ADMIN_MASTER_KEY = process.env.ADMIN_KEY || process.env.ADMIN_SECRET || 'nexa_admin_master_secret_2026';
+const adminSessions = new Map(); // token -> { username, created_at, expires_at }
+
+function adminAuthMiddleware(req, res, next) {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader 
+    ? authHeader.replace(/^Bearer\s+/i, '').trim() 
+    : (req.headers['x-admin-key'] || req.query.admin_token);
+
+  if (!token) {
+    return res.status(401).json({ error: 'Unauthorized: Admin authentication token or Master Key required.' });
+  }
+
+  // Master key verification
+  if (token === ADMIN_MASTER_KEY) {
+    req.admin = { username: 'admin', role: 'admin', source: 'master_key' };
+    return next();
+  }
+
+  // Session token verification
+  const session = adminSessions.get(token);
+  if (session) {
+    if (Date.now() > session.expires_at) {
+      adminSessions.delete(token);
+      return res.status(401).json({ error: 'Admin session expired. Please log in again.' });
+    }
+    req.admin = session;
+    return next();
+  }
+
+  return res.status(403).json({ error: 'Forbidden: Invalid administrator credentials.' });
+}
+
+/**
+ * 1. Admin Authentication Endpoint
+ */
+app.post('/v1/admin/login', async (req, res) => {
+  let { username, password, adminKey, pin, masterKey } = req.body || {};
+  if (!adminKey && masterKey) adminKey = masterKey;
+  if (!password && pin) password = pin;
+  if (!username && password) username = 'admin';
+
+  // Master Key unlock
+  if (adminKey && adminKey === ADMIN_MASTER_KEY) {
+    const token = `NX-ADM-${crypto.randomBytes(16).toString('hex')}`;
+    adminSessions.set(token, {
+      username: 'admin',
+      role: 'admin',
+      created_at: Date.now(),
+      expires_at: Date.now() + 24 * 60 * 60 * 1000
+    });
+    Database.logActivity({ 
+      type: 'admin', 
+      action: 'admin_login', 
+      target: 'admin', 
+      actor: 'admin', 
+      details: 'Administrator authenticated via Master Key' 
+    });
+    return res.json({ 
+      success: true, 
+      token, 
+      admin: { username: 'admin', handle: '@admin', fullName: 'Administrator', role: 'admin' } 
+    });
+  }
+
+  const clean = sanitizeUsername(username);
+  if (!clean || !password) {
+    return res.status(400).json({ error: 'Username and password or adminKey required.' });
+  }
+
+  const user = await Database.findUser(clean);
+  if (!user || (user.role !== 'admin' && user.username !== 'admin')) {
+    Database.logActivity({ 
+      type: 'security', 
+      action: 'admin_login_denied', 
+      target: clean, 
+      actor: clean, 
+      details: 'Unauthorized admin panel access attempt' 
+    });
+    return res.status(403).json({ error: 'Access denied: User does not have administrative rights.' });
+  }
+
+  const passwordHash = crypto.createHash('sha256').update(password).digest('hex');
+  if (user.password_hash !== passwordHash) {
+    Database.logActivity({ 
+      type: 'security', 
+      action: 'admin_bad_credentials', 
+      target: clean, 
+      actor: clean, 
+      details: 'Invalid admin Master PIN entered' 
+    });
+    return res.status(401).json({ error: 'Incorrect administrator password / Master PIN.' });
+  }
+
+  const token = `NX-ADM-${crypto.randomBytes(16).toString('hex')}`;
+  adminSessions.set(token, {
+    username: user.username,
+    role: 'admin',
+    created_at: Date.now(),
+    expires_at: Date.now() + 24 * 60 * 60 * 1000
+  });
+
+  Database.logActivity({ 
+    type: 'admin', 
+    action: 'admin_login', 
+    target: user.username, 
+    actor: user.username, 
+    details: 'Administrator logged into Admin Control Center' 
+  });
+
+  return res.json({
+    success: true,
+    token,
+    admin: {
+      username: user.username,
+      handle: `@${user.username}`,
+      fullName: user.full_name,
+      role: 'admin'
+    }
+  });
+});
+
+/**
+ * 2. Admin Overview & System Metrics
+ */
+app.get('/v1/admin/overview', adminAuthMiddleware, (req, res) => {
+  const metrics = Database.getSystemMetrics(activeConnections.size);
+  res.json({ success: true, metrics });
+});
+
+/**
+ * 3. Complete User Database Inspection
+ */
+app.get('/v1/admin/users', adminAuthMiddleware, (req, res) => {
+  const users = Database.getUsersDetailed();
+  res.json({ success: true, count: users.length, users });
+});
+
+/**
+ * 4. User Status Modification (Suspend / Activate)
+ */
+app.post('/v1/admin/users/status', adminAuthMiddleware, (req, res) => {
+  const { username, status } = req.body || {};
+  if (!username || !status) {
+    return res.status(400).json({ error: 'Username and status (active/suspended) are required.' });
+  }
+  const updated = Database.updateUserStatus(username, status);
+  if (!updated) {
+    return res.status(404).json({ error: `User '@${username}' not found.` });
+  }
+  res.json({ success: true, message: `User '@${username}' status set to ${status}.`, user: updated });
+});
+
+/**
+ * 5. Override User Master PIN
+ */
+app.post('/v1/admin/users/reset-pin', adminAuthMiddleware, (req, res) => {
+  const { username, newPin } = req.body || {};
+  if (!username || !newPin || newPin.length < 4) {
+    return res.status(400).json({ error: 'Username and new PIN (minimum 4 digits) are required.' });
+  }
+  const success = Database.resetUserPin(username, newPin);
+  if (!success) {
+    return res.status(404).json({ error: `User '@${username}' not found.` });
+  }
+  res.json({ success: true, message: `Master PIN for '@${username}' reset successfully.` });
+});
+
+/**
+ * 6. Delete User Account Permanently
+ */
+app.delete('/v1/admin/users/:username', adminAuthMiddleware, (req, res) => {
+  const { username } = req.params;
+  const deleted = Database.deleteUser(username);
+  if (!deleted) {
+    return res.status(404).json({ error: `User '@${username}' not found.` });
+  }
+  res.json({ success: true, message: `User '@${username}' and all associated keys removed permanently.` });
+});
+
+/**
+ * 7. Security & Activity Audit Log Stream
+ */
+app.get('/v1/admin/activity', adminAuthMiddleware, (req, res) => {
+  const limit = Math.min(Number(req.query.limit) || 100, 500);
+  const filterType = req.query.type || 'all';
+  const logs = Database.getActivityLogs(limit, filterType);
+  res.json({ success: true, count: logs.length, logs });
+});
+
+/**
+ * 8. Emergency Mailbox Queue Purge
+ */
+app.post('/v1/admin/purge-queue', adminAuthMiddleware, (req, res) => {
+  const purged = Database.purgeExpiredEnvelopes();
+  res.json({ success: true, message: `Purged ${purged} pending message envelopes.` });
+});
+
 
 
 // --- 1.1 WebRTC ICE & TURN EPHEMERAL CREDENTIALS ---
