@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../core/session/user_session.dart';
@@ -13,10 +14,13 @@ class UserProfileScreen extends StatefulWidget {
 
 class _UserProfileScreenState extends State<UserProfileScreen> {
   final UserSession _session = UserSession.instance;
+  static const MethodChannel _nativeMediaChannel = MethodChannel('com.nexa.media_picker');
+
   late TextEditingController _nameController;
   late TextEditingController _statusController;
   late TextEditingController _bioController;
   late int _selectedAvatarIndex;
+  String? _customAvatarPath;
 
   @override
   void initState() {
@@ -25,6 +29,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     _statusController = TextEditingController(text: _session.status);
     _bioController = TextEditingController(text: _session.bio);
     _selectedAvatarIndex = _session.avatarIndex;
+    _customAvatarPath = _session.customAvatarPath;
   }
 
   @override
@@ -41,6 +46,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       status: _statusController.text.trim(),
       bio: _bioController.text.trim(),
       avatarIndex: _selectedAvatarIndex,
+      customAvatarPath: _customAvatarPath,
     );
 
     ScaffoldMessenger.of(context).showSnackBar(
@@ -112,7 +118,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                         final isSelected = _selectedAvatarIndex == index;
                         return InkWell(
                           onTap: () {
-                            setState(() => _selectedAvatarIndex = index);
+                            setState(() {
+                              _selectedAvatarIndex = index;
+                              _customAvatarPath = null;
+                            });
                             setModalState(() {});
                             Navigator.pop(ctx);
                           },
@@ -157,11 +166,36 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                       children: [
                         Expanded(
                           child: OutlinedButton.icon(
-                            onPressed: () {
-                              Navigator.pop(ctx);
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Camera photo captured & encrypted locally!')),
-                              );
+                            onPressed: () async {
+                              final messenger = ScaffoldMessenger.of(context);
+                              final navigator = Navigator.of(ctx);
+                              try {
+                                final dynamic permGranted = await _nativeMediaChannel.invokeMethod('requestNativePermission', {'permission': 'camera'});
+                                if (permGranted == false) {
+                                  messenger.showSnackBar(
+                                    const SnackBar(content: Text('Camera permission is required to take a profile photo.')),
+                                  );
+                                  return;
+                                }
+                                final dynamic result = await _nativeMediaChannel.invokeMethod('openInbuiltCamera');
+                                if (!mounted) return;
+                                if (result != null && result is Map && result['path'] != null) {
+                                  setState(() {
+                                    _customAvatarPath = result['path'] as String;
+                                  });
+                                  setModalState(() {});
+                                  navigator.pop();
+                                  messenger.showSnackBar(
+                                    const SnackBar(content: Text('Inbuilt camera photo captured & set as profile picture!')),
+                                  );
+                                }
+                              } catch (e) {
+                                if (!mounted) return;
+                                navigator.pop();
+                                messenger.showSnackBar(
+                                  SnackBar(content: Text('Camera error: $e')),
+                                );
+                              }
                             },
                             icon: const Icon(Icons.camera_alt_outlined, size: 16),
                             label: const Text('Take Photo'),
@@ -170,11 +204,36 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                         const SizedBox(width: 10),
                         Expanded(
                           child: OutlinedButton.icon(
-                            onPressed: () {
-                              Navigator.pop(ctx);
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Photo imported from device vault!')),
-                              );
+                            onPressed: () async {
+                              final messenger = ScaffoldMessenger.of(context);
+                              final navigator = Navigator.of(ctx);
+                              try {
+                                final dynamic permGranted = await _nativeMediaChannel.invokeMethod('requestNativePermission', {'permission': 'storage'});
+                                if (permGranted == false) {
+                                  messenger.showSnackBar(
+                                    const SnackBar(content: Text('Gallery/Photos permission is required to choose a profile photo.')),
+                                  );
+                                  return;
+                                }
+                                final dynamic result = await _nativeMediaChannel.invokeMethod('openInbuiltGallery');
+                                if (!mounted) return;
+                                if (result != null && result is Map && result['path'] != null) {
+                                  setState(() {
+                                    _customAvatarPath = result['path'] as String;
+                                  });
+                                  setModalState(() {});
+                                  navigator.pop();
+                                  messenger.showSnackBar(
+                                    const SnackBar(content: Text('Gallery photo selected & set as profile picture!')),
+                                  );
+                                }
+                              } catch (e) {
+                                if (!mounted) return;
+                                navigator.pop();
+                                messenger.showSnackBar(
+                                  SnackBar(content: Text('Gallery error: $e')),
+                                );
+                              }
                             },
                             icon: const Icon(Icons.photo_outlined, size: 16),
                             label: const Text('From Gallery'),
@@ -308,7 +367,12 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                     child: CircleAvatar(
                       radius: 48,
                       backgroundColor: (currentPreset['color'] as Color),
-                      child: Icon(currentPreset['icon'] as IconData, color: Colors.white, size: 48),
+                      backgroundImage: (_customAvatarPath != null && File(_customAvatarPath!).existsSync())
+                          ? FileImage(File(_customAvatarPath!))
+                          : null,
+                      child: (_customAvatarPath != null && File(_customAvatarPath!).existsSync())
+                          ? null
+                          : Icon(currentPreset['icon'] as IconData, color: Colors.white, size: 48),
                     ),
                   ),
                 ),

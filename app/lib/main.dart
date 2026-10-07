@@ -25,7 +25,7 @@ class NexaApp extends StatelessWidget {
           theme: NexaTheme.lightTheme,
           darkTheme: NexaTheme.darkTheme,
           themeMode: ThemeMode.light,
-          home: showHome ? const FocusOrbitScreen() : const AuthFlowScreen(),
+          home: showHome ? const FocusOrbitScreen() : const AuthFlowScreen(isLoginInitial: true),
         );
       },
     );

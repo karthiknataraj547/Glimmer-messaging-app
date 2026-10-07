@@ -23,49 +23,8 @@ class _PostsFeedScreenState extends State<PostsFeedScreen> {
     '💻 Cryptography',
   ];
 
-  final List<Map<String, dynamic>> _posts = [
-    {
-      'id': 'p1',
-      'authorName': 'Dr. Elena Rostova',
-      'authorHandle': '@elena_vance',
-      'authorAvatarColor': Color(0xFF0284C7),
-      'circle': '🤖 AI Research',
-      'time': '20m ago',
-      'content': 'Benchmarked our local 2B quantized SLM directly on an ARM Cortex NPU. Achieved 48 tokens/sec with full hardware AES isolation. Zero cloud pings during inference!',
-      'upvotes': 42,
-      'isUpvoted': false,
-      'comments': [
-        {'author': 'Karthik', 'text': 'Are you using INT4 or INT8 quantization?', 'time': '10m ago'},
-        {'author': 'Elena', 'text': 'INT4 with AWQ group size 128!', 'time': '5m ago'},
-      ],
-    },
-    {
-      'id': 'p2',
-      'authorName': 'Vikram Malhotra',
-      'authorHandle': '@vikram_m',
-      'authorAvatarColor': Color(0xFFD97706),
-      'circle': '⚡ Hardware',
-      'time': '2h ago',
-      'content': 'Completed the revised 4-layer PCB layout for the zero-knowledge hardware badge. Paired the ESP32-S3 with an ATECC608A cryptographic co-processor.',
-      'upvotes': 28,
-      'isUpvoted': false,
-      'comments': [
-        {'author': 'Alex M.', 'text': 'Can we run Double Ratchet ephemeral key generation directly on the co-processor?', 'time': '1h ago'},
-      ],
-    },
-    {
-      'id': 'p3',
-      'authorName': 'Maya Lin',
-      'authorHandle': '@maya_quantum',
-      'authorAvatarColor': Color(0xFF7C3AED),
-      'circle': '💻 Cryptography',
-      'time': '5h ago',
-      'content': 'New paper published on integrating Post-Quantum ML-KEM lattice key agreement into asynchronous Double Ratchet sessions without increasing envelope sizes significantly.',
-      'upvotes': 53,
-      'isUpvoted': false,
-      'comments': [],
-    },
-  ];
+  // Real Posts Feed (Starts empty with zero mock accounts or fake posts)
+  final List<Map<String, dynamic>> _posts = [];
 
   @override
   void dispose() {
@@ -419,9 +378,40 @@ class _PostsFeedScreenState extends State<PostsFeedScreen> {
             const SizedBox(height: 16),
 
             // Posts Stream
-            ...filteredPosts.map((post) {
-              final isUpvoted = post['isUpvoted'] as bool;
-              final comments = post['comments'] as List<dynamic>;
+            if (filteredPosts.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 40),
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: NexaColors.primary.withValues(alpha: 0.1),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.dynamic_feed_outlined, color: NexaColors.primary, size: 36),
+                      ),
+                      const SizedBox(height: 14),
+                      const Text(
+                        'No Posts in this Circle Yet',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: NexaColors.textPrimary),
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        'Share hardware telemetry, cryptographic benchmarks, or project updates above.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 13, color: NexaColors.textSecondary),
+                      ),
+                    ],
+                  ),
+                ),
+              )
+            else
+              ...filteredPosts.map((post) {
+                final isUpvoted = post['isUpvoted'] as bool;
+                final comments = post['comments'] as List<dynamic>;
 
               return Container(
                 margin: const EdgeInsets.only(bottom: 14),

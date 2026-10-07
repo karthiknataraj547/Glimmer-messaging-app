@@ -22,6 +22,17 @@ app.use(express.json({ limit: '10mb' }));
 const staticWebPath = path.join(__dirname, '../app/build/web');
 app.use(express.static(staticWebPath));
 
+// CORS Middleware for Mobile, Web, and Desktop Clients
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
 // Database Pool Connection (PostgreSQL 16)
 let dbPool = null;
 if (process.env.DATABASE_URL) {
@@ -36,6 +47,20 @@ if (process.env.DATABASE_URL) {
         console.warn('[NEXA] PostgreSQL connection check warning:', err.message);
       } else {
         console.log('[NEXA] PostgreSQL connected successfully at:', res.rows[0].now);
+        // Ensure users table exists in PostgreSQL
+        dbPool.query(`
+          CREATE TABLE IF NOT EXISTS users (
+            username TEXT PRIMARY KEY,
+            password_hash TEXT NOT NULL,
+            full_name TEXT NOT NULL,
+            about TEXT,
+            phone TEXT,
+            nexa_id TEXT NOT NULL,
+            created_at BIGINT NOT NULL
+          );
+        `, (err2) => {
+          if (err2) console.warn('[NEXA] Users table creation notice:', err2.message);
+        });
       }
     });
   } catch (e) {
@@ -45,11 +70,18 @@ if (process.env.DATABASE_URL) {
   console.log('[NEXA] Operating in ephemeral in-memory zero-knowledge mode (DATABASE_URL not set).');
 }
 
-// In-Memory Zero-Knowledge Stores (Backed by PostgreSQL / Redis in production)
+// In-Memory Zero-Knowledge & User Registry Stores
+const registeredUsers = new Map();   // username (lowercase) -> { username, password_hash, full_name, about, phone, nexa_id, created_at }
 const userDevices = new Map();       // user_id -> Map(device_id -> { identity_key, ... })
 const prekeyBundles = new Map();     // `${user_id}:${device_id}` -> { signed_prekey, opks: [] }
 const mailboxQueue = new Map();      // device_id -> Array of encrypted envelopes
 const activeConnections = new Map(); // device_id -> WebSocket
+
+// Helper to clean username
+function sanitizeUsername(input) {
+  if (!input || typeof input !== 'string') return '';
+  return input.trim().replace(/^@+/, '').toLowerCase();
+}
 
 // --- 1. HEALTH & METRICS ---
 app.get('/health', (req, res) => {
@@ -58,10 +90,211 @@ app.get('/health', (req, res) => {
     security_mode: 'zero_knowledge_e2ee',
     crypto_standard: 'X3DH_DoubleRatchet_AES256GCM',
     database_connected: dbPool !== null,
+    registered_users_count: registeredUsers.size,
     active_devices: userDevices.size,
     pending_envelopes: Array.from(mailboxQueue.values()).reduce((acc, q) => acc + q.length, 0),
     timestamp: Date.now()
   });
+});
+
+// --- 1.05 ONLINE DATABASE USER MANAGEMENT & REALTIME UNIQUENESS CHECK ---
+/**
+ * Real-time check to verify if a username is available in the online database.
+ * If user exists: returns available: false, message: 'Username is already taken'
+ * If unique: returns available: true, message: 'Username is available'
+ */
+app.get('/v1/auth/check-username/:username', async (req, res) => {
+  const rawUsername = req.params.username;
+  const username = sanitizeUsername(rawUsername);
+
+  if (!username || username.length < 3) {
+    return res.status(400).json({
+      available: false,
+      error: 'Username must be at least 3 characters long and contain only letters, numbers, or underscores.'
+    });
+  }
+
+  const validRegex = /^[a-zA-Z0-9_]+$/;
+  if (!validRegex.test(username)) {
+    return res.status(400).json({
+      available: false,
+      error: 'Username can only contain alphanumeric characters and underscores.'
+    });
+  }
+
+  // Check PostgreSQL if connected
+  if (dbPool) {
+    try {
+      const dbResult = await dbPool.query('SELECT username FROM users WHERE LOWER(username) = LOWER($1)', [username]);
+      if (dbResult.rows.length > 0) {
+        return res.json({
+          available: false,
+          username,
+          message: `Username '@${username}' is already taken in the online database. Please choose another username.`
+        });
+      }
+    } catch (e) {
+      console.warn('[NEXA DB] PostgreSQL query error, falling back to cache:', e.message);
+    }
+  }
+
+  // Check In-Memory Database
+  if (registeredUsers.has(username)) {
+    return res.json({
+      available: false,
+      username,
+      message: `Username '@${username}' is already taken in the online database. Please choose another username.`
+    });
+  }
+
+  return res.json({
+    available: true,
+    username,
+    message: `Username '@${username}' is unique and available!`
+  });
+});
+
+/**
+ * Register a new user in the online database with unique username validation.
+ */
+app.post('/v1/auth/register-user', async (req, res) => {
+  const { username: rawUsername, password, fullName, about, phone } = req.body;
+  const username = sanitizeUsername(rawUsername);
+
+  if (!username || username.length < 3) {
+    return res.status(400).json({ error: 'Username must be at least 3 characters long.' });
+  }
+
+  if (!password || password.length < 4) {
+    return res.status(400).json({ error: 'Password / Master PIN must be at least 4 characters.' });
+  }
+
+  // Online Database Uniqueness Verification
+  let exists = registeredUsers.has(username);
+  if (dbPool && !exists) {
+    try {
+      const dbResult = await dbPool.query('SELECT username FROM users WHERE LOWER(username) = LOWER($1)', [username]);
+      if (dbResult.rows.length > 0) exists = true;
+    } catch (e) {
+      console.warn('[NEXA DB] Check error:', e.message);
+    }
+  }
+
+  if (exists) {
+    return res.status(409).json({
+      error: `Username '@${username}' already exists in the online database. Please change your username.`
+    });
+  }
+
+  const nexaId = `NX-${crypto.randomBytes(2).toString('hex').toUpperCase()}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
+  const passwordHash = crypto.createHash('sha256').update(password).digest('hex');
+  const now = Date.now();
+  const cleanFullName = (fullName && fullName.trim()) ? fullName.trim() : username;
+  const cleanAbout = (about && about.trim()) ? about.trim() : 'Zero-knowledge encrypted peer.';
+  const cleanPhone = (phone && phone.trim()) ? phone.trim() : '';
+
+  const newUserRecord = {
+    username,
+    password_hash: passwordHash,
+    full_name: cleanFullName,
+    about: cleanAbout,
+    phone: cleanPhone,
+    nexa_id: nexaId,
+    created_at: now
+  };
+
+  // Save to PostgreSQL if active
+  if (dbPool) {
+    try {
+      await dbPool.query(`
+        INSERT INTO users (username, password_hash, full_name, about, phone, nexa_id, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ON CONFLICT (username) DO UPDATE
+        SET full_name = $3, about = $4, phone = $5;
+      `, [username, passwordHash, cleanFullName, cleanAbout, cleanPhone, nexaId, now]);
+    } catch (e) {
+      console.warn('[NEXA DB] Insert error:', e.message);
+    }
+  }
+
+  // Save to in-memory store
+  registeredUsers.set(username, newUserRecord);
+  console.log(`[NEXA] Registered new user '@${username}' (${nexaId}) in online database.`);
+
+  return res.status(201).json({
+    success: true,
+    message: 'User registered successfully in the online database.',
+    user: {
+      username,
+      handle: `@${username}`,
+      fullName: cleanFullName,
+      about: cleanAbout,
+      phone: cleanPhone,
+      nexaId
+    }
+  });
+});
+
+/**
+ * Log in an existing user against the online database.
+ */
+app.post('/v1/auth/login-user', async (req, res) => {
+  const { username: rawUsername, password } = req.body;
+  const username = sanitizeUsername(rawUsername);
+
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Username and password are required.' });
+  }
+
+  const passwordHash = crypto.createHash('sha256').update(password).digest('hex');
+  let user = registeredUsers.get(username);
+
+  if (!user && dbPool) {
+    try {
+      const dbResult = await dbPool.query('SELECT * FROM users WHERE LOWER(username) = LOWER($1)', [username]);
+      if (dbResult.rows.length > 0) {
+        user = dbResult.rows[0];
+      }
+    } catch (e) {
+      console.warn('[NEXA DB] Login query error:', e.message);
+    }
+  }
+
+  if (!user) {
+    return res.status(401).json({ error: `Account with username '@${username}' not found in online database.` });
+  }
+
+  if (user.password_hash !== passwordHash) {
+    return res.status(401).json({ error: 'Incorrect password or Master PIN.' });
+  }
+
+  return res.json({
+    success: true,
+    message: 'Authentication successful.',
+    user: {
+      username: user.username,
+      handle: `@${user.username}`,
+      fullName: user.full_name,
+      about: user.about,
+      phone: user.phone || '',
+      nexaId: user.nexa_id
+    }
+  });
+});
+
+/**
+ * List verified online directory users
+ */
+app.get('/v1/auth/users', (req, res) => {
+  const list = Array.from(registeredUsers.values()).map(u => ({
+    username: u.username,
+    handle: `@${u.username}`,
+    fullName: u.full_name,
+    about: u.about,
+    phone: u.phone,
+    nexaId: u.nexa_id
+  }));
+  res.json({ count: list.length, users: list });
 });
 
 // --- 1.1 WebRTC ICE & TURN EPHEMERAL CREDENTIALS ---

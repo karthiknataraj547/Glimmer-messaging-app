@@ -7,7 +7,7 @@ import 'package:nexa_app/features/profile/presentation/user_profile_screen.dart'
 import 'package:nexa_app/features/posts/presentation/posts_feed_screen.dart';
 
 void main() {
-  testWidgets('AuthFlowScreen renders stepper and toggles between Register and Login', (tester) async {
+  testWidgets('AuthFlowScreen renders simple unified layout and toggles between Register and Log In', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
         theme: NexaTheme.lightTheme,
@@ -17,18 +17,19 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('NEXA'), findsOneWidget);
-    expect(find.text('Create Self-Sovereign Identity'), findsOneWidget);
-    expect(find.text('Choose Your Handle'), findsOneWidget);
+    expect(find.text('Create Account'), findsWidgets);
+    expect(find.text('Handle / Identity'), findsOneWidget);
 
     // Switch to Login Mode
-    await tester.tap(find.text('Login'));
+    await tester.tap(find.text('Log In').first);
     await tester.pumpAndSettle();
 
-    expect(find.text('Unlock Your Cryptographic Vault'), findsOneWidget);
-    expect(find.text('Enter 24 Recovery Words'), findsOneWidget);
+    expect(find.text('Log In to NEXA'), findsOneWidget);
+    expect(find.text('Master PIN (6 Digits)'), findsOneWidget);
   });
 
   testWidgets('UserProfileScreen allows updating name and status', (tester) async {
+    UserSession.instance.login(name: 'Karthik', handle: '@karthik');
     await tester.pumpWidget(
       MaterialApp(
         theme: NexaTheme.lightTheme,
@@ -52,6 +53,7 @@ void main() {
   });
 
   testWidgets('PostsFeedScreen creates and upvotes a post', (tester) async {
+    UserSession.instance.login(name: 'Karthik', handle: '@karthik');
     await tester.pumpWidget(
       MaterialApp(
         theme: NexaTheme.lightTheme,
@@ -61,7 +63,6 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Circle Posts & Feed'), findsOneWidget);
-    expect(find.text('Dr. Elena Rostova'), findsOneWidget);
 
     // Enter a new post
     final postInput = find.byType(TextField);

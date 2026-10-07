@@ -6,15 +6,16 @@ class UserSession extends ChangeNotifier {
 
   UserSession._internal();
 
-  // User Profile Data
-  String _name = 'Karthik';
-  String _handle = '@karthik';
-  final String _nexaId = 'NX-77A1-49PQ';
-  String _status = 'Encrypted & Focused';
-  String _bio = 'Building decentralized AI systems. Hardware & local models.';
+  // User Profile Data (Empty until real online authentication)
+  String _name = '';
+  String _handle = '';
+  String _nexaId = '';
+  String _status = 'Encrypted';
+  String _bio = '';
+  String _phone = '';
   int _avatarIndex = 0; // 0 to 5 preset avatars
   String? _customAvatarPath;
-  bool _isLoggedIn = true;
+  bool _isLoggedIn = false;
 
   // Preset avatar definitions
   static const List<Map<String, dynamic>> avatarPresets = [
@@ -32,6 +33,7 @@ class UserSession extends ChangeNotifier {
   String get nexaId => _nexaId;
   String get status => _status;
   String get bio => _bio;
+  String get phone => _phone;
   int get avatarIndex => _avatarIndex;
   String? get customAvatarPath => _customAvatarPath;
   bool get isLoggedIn => _isLoggedIn;
@@ -44,6 +46,8 @@ class UserSession extends ChangeNotifier {
     String? handle,
     String? status,
     String? bio,
+    String? phone,
+    String? nexaId,
     int? avatarIndex,
     String? customAvatarPath,
   }) {
@@ -51,6 +55,8 @@ class UserSession extends ChangeNotifier {
     if (handle != null) _handle = handle;
     if (status != null) _status = status;
     if (bio != null) _bio = bio;
+    if (phone != null) _phone = phone;
+    if (nexaId != null) _nexaId = nexaId;
     if (avatarIndex != null) {
       _avatarIndex = avatarIndex;
       _customAvatarPath = null;
@@ -60,15 +66,36 @@ class UserSession extends ChangeNotifier {
   }
 
   // Authentication toggles
-  void login({String? name, String? handle, int? avatarIndex}) {
+  void login({
+    String? name,
+    String? handle,
+    String? bio,
+    String? phone,
+    String? nexaId,
+    int? avatarIndex,
+  }) {
     if (name != null) _name = name;
     if (handle != null) _handle = handle;
+    if (bio != null) {
+      _bio = bio;
+      _status = bio;
+    }
+    if (phone != null) _phone = phone;
+    if (nexaId != null) _nexaId = nexaId;
     if (avatarIndex != null) _avatarIndex = avatarIndex;
     _isLoggedIn = true;
     notifyListeners();
   }
 
   void logout() {
+    _name = '';
+    _handle = '';
+    _nexaId = '';
+    _status = 'Encrypted';
+    _bio = '';
+    _phone = '';
+    _customAvatarPath = null;
+    _avatarIndex = 0;
     _isLoggedIn = false;
     notifyListeners();
   }
