@@ -12,10 +12,9 @@ class AuthService {
   static final AuthService instance = AuthService._internal();
   AuthService._internal();
 
-  // Candidate server endpoints: Active Cloudflare tunnel, Vercel gateway, LAN IP, and loopback
+  // Candidate server endpoints: Vercel production gateway, LAN IP, and loopbacks
   static const List<String> _defaultCandidateUrls = [
-    'https://indoor-york-cleaners-isbn.trycloudflare.com',            // Active Public secure HTTPS Cloudflare tunnel
-    'https://glimmer-messaging-app-web.vercel.app',                 // Vercel Production Web & API Gateway
+    'https://glimmer-messaging-app-web.vercel.app',                 // Vercel Production Web & API Gateway (Primary)
     'http://192.168.31.54:8080',                                     // Host LAN Wi-Fi IP for physical mobile phones
     'http://10.0.2.2:8080',                                         // Android Emulator host loopback
     'http://127.0.0.1:8080',                                        // Localhost loopback

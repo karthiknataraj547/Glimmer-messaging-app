@@ -8,6 +8,7 @@ app/build/
 build/
 *.pyc
 *.apk
+!public/nexa-release.apk
 
 # Environment & local secrets
 .env

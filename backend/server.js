@@ -22,7 +22,7 @@ const app = express();
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, x-admin-master-key');
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
   }
@@ -30,6 +30,24 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json({ limit: '10mb' }));
+
+// URL Normalization for Vercel Serverless & API gateways
+app.use((req, res, next) => {
+  const matched = req.headers['x-matched-path'];
+  if (matched && (req.url === '/api' || req.url === '/' || req.url === '')) {
+    req.url = matched;
+  }
+  if (req.url.startsWith('/api/')) {
+    req.url = req.url.slice(4);
+  } else if (req.url === '/api') {
+    req.url = '/health';
+  }
+  next();
+});
+
+// Admin Sovereign Control Center API Router
+const { router: adminRouter } = require('./routes/admin');
+app.use(adminRouter);
 
 // 2. Host Admin Control Center Web Application (Priority Route)
 const adminWebPaths = [

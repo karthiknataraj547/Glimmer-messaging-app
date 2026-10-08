@@ -591,11 +591,10 @@
           <span id="loginTargetDisp" style="color: var(--accent-cyan); font-weight: bold;">Auto</span>
         </div>
         <div style="display: flex; gap: 6px; flex-wrap: wrap;">
-          <button type="button" class="btn btn-secondary" style="font-size: 10px; padding: 4px 8px;" onclick="setLoginTarget('')">Auto</button>
+          <button type="button" class="btn btn-secondary" style="font-size: 10px; padding: 4px 8px;" onclick="setLoginTarget('')">Auto (Direct Vercel)</button>
+          <button type="button" class="btn btn-secondary" style="font-size: 10px; padding: 4px 8px;" onclick="setLoginTarget('https://glimmer-messaging-app-web.vercel.app')">Vercel Production</button>
           <button type="button" class="btn btn-secondary" style="font-size: 10px; padding: 4px 8px;" onclick="setLoginTarget('http://localhost:8081')">:8081 (Admin)</button>
           <button type="button" class="btn btn-secondary" style="font-size: 10px; padding: 4px 8px;" onclick="setLoginTarget('http://localhost:8080')">:8080 (Relay)</button>
-          <button type="button" class="btn btn-secondary" style="font-size: 10px; padding: 4px 8px;" onclick="setLoginTarget('https://corporation-settle-asn-fabrics.trycloudflare.com')">Cloudflare Admin</button>
-          <button type="button" class="btn btn-secondary" style="font-size: 10px; padding: 4px 8px;" onclick="setLoginTarget('https://indoor-york-cleaners-isbn.trycloudflare.com')">Cloudflare Relay</button>
           <button type="button" class="btn btn-secondary" style="font-size: 10px; padding: 4px 8px;" onclick="setLoginTarget('custom')">Custom URL</button>
         </div>
       </div>
@@ -616,12 +615,10 @@
       <div style="display: flex; align-items: center; gap: 8px; background: var(--bg-elevated); padding: 4px 10px; border-radius: 8px; border: 1px solid var(--border-subtle); font-size: 12px;">
         <span style="color: var(--text-dim); font-weight: 600;">Target:</span>
         <select id="apiTargetSelect" onchange="changeApiTarget(this.value)" style="background: transparent; color: var(--accent-cyan); border: none; font-family: inherit; font-size: 12px; font-weight: 700; cursor: pointer; outline: none;">
-          <option value="">Auto (Current Host)</option>
+          <option value="">Auto (Direct Origin)</option>
+          <option value="https://glimmer-messaging-app-web.vercel.app">Vercel Production</option>
           <option value="http://localhost:8081">Local Dedicated Admin (:8081)</option>
           <option value="http://localhost:8080">Local Relay Server (:8080)</option>
-          <option value="https://corporation-settle-asn-fabrics.trycloudflare.com">Cloudflare Admin Portal</option>
-          <option value="https://indoor-york-cleaners-isbn.trycloudflare.com">Cloudflare Relay Server</option>
-          <option value="https://glimmer-messaging-app-web.vercel.app">Vercel Production</option>
           <option value="custom">Custom URL...</option>
         </select>
       </div>
@@ -881,8 +878,10 @@
   <script>
     let adminToken = sessionStorage.getItem('nexa_admin_token') || '';
     let apiBaseUrl = localStorage.getItem('nexa_admin_api_base') || '';
-    if (!apiBaseUrl && (window.location.hostname.includes('vercel.app') || window.location.protocol === 'file:')) {
-      apiBaseUrl = 'https://corporation-settle-asn-fabrics.trycloudflare.com';
+    // Purge any stale Cloudflare tunnel URLs from local storage
+    if (apiBaseUrl && apiBaseUrl.includes('trycloudflare.com')) {
+      apiBaseUrl = '';
+      localStorage.removeItem('nexa_admin_api_base');
     }
     let cachedUsers = [];
     let refreshInterval = null;
@@ -910,7 +909,6 @@
       const url = getApiUrl(endpoint);
       try {
         const res = await fetch(url, options);
-        // If HTTP status is a gateway failure (502/503/504) and no custom target was forced, probe healthy candidates
         if (!res.ok && res.status >= 500 && !apiBaseUrl) {
           throw new Error(`Endpoint returned HTTP ${res.status}`);
         }
@@ -920,10 +918,9 @@
         // Fallback candidate probing
         if (!apiBaseUrl) {
           const candidates = [
+            'https://glimmer-messaging-app-web.vercel.app',
             'http://localhost:8081',
-            'http://localhost:8080',
-            'https://corporation-settle-asn-fabrics.trycloudflare.com',
-            'https://indoor-york-cleaners-isbn.trycloudflare.com'
+            'http://localhost:8080'
           ];
           for (const cand of candidates) {
             try {
@@ -932,7 +929,7 @@
                 apiBaseUrl = cand;
                 localStorage.setItem('nexa_admin_api_base', cand);
                 updateTargetUI();
-                setDbStatus(true, 'via ' + (cand.includes('localhost') ? cand.split('//')[1] : 'Cloudflare'));
+                setDbStatus(true, 'via ' + (cand.includes('localhost') ? cand.split('//')[1] : 'Vercel'));
                 return probeRes;
               }
             } catch (_) {}
@@ -965,8 +962,6 @@
         if (!apiBaseUrl) sel.value = '';
         else if (apiBaseUrl === 'http://localhost:8081') sel.value = 'http://localhost:8081';
         else if (apiBaseUrl === 'http://localhost:8080') sel.value = 'http://localhost:8080';
-        else if (apiBaseUrl.includes('genius-reserves')) sel.value = 'https://corporation-settle-asn-fabrics.trycloudflare.com';
-        else if (apiBaseUrl.includes('karl-apparel')) sel.value = 'https://indoor-york-cleaners-isbn.trycloudflare.com';
         else if (apiBaseUrl.includes('vercel.app')) sel.value = 'https://glimmer-messaging-app-web.vercel.app';
         else sel.value = 'custom';
       }
