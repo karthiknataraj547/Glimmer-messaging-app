@@ -978,7 +978,7 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                 ),
                 icon: const Icon(Icons.refresh, size: 16),
                 label: const Text('Check for Updates Now', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                onPressed: () => UpdateEngine.instance.checkForUpdate(context, userInitiated: true),
+                onPressed: () => UpdateEngine.instance.openUpdateCenter(context),
               ),
             ],
           ),
@@ -1222,7 +1222,7 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
               title: const Text('App Update Engine', style: TextStyle(color: Colors.white, fontSize: 14)),
               onTap: () {
                 Navigator.pop(context);
-                UpdateEngine.instance.checkForUpdate(context, userInitiated: true);
+                UpdateEngine.instance.openUpdateCenter(context);
               },
             ),
             const Spacer(),

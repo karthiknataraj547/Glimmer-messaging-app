@@ -28,16 +28,26 @@ class _AdminPanelScreenState extends State<AdminPanelScreen>
   Map<String, dynamic>? _overviewMetrics;
   List<Map<String, dynamic>> _users = [];
   List<Map<String, dynamic>> _activityLogs = [];
+  Map<String, dynamic>? _appVersion;
 
   // Search & Filter
   final TextEditingController _searchController = TextEditingController();
   String _userFilter = 'ALL'; // ALL, ACTIVE, SUSPENDED
   String _activityFilter = 'ALL'; // ALL, AUTH, ADMIN, REGISTRATION
 
+  // App Update Form Controllers
+  final TextEditingController _updVersionController = TextEditingController(text: '1.2.0');
+  final TextEditingController _updBuildController = TextEditingController(text: '4');
+  final TextEditingController _updNotesController = TextEditingController(text: 'Performance improvements, call updates, and UI enhancements.');
+  final TextEditingController _updDownloadController = TextEditingController(text: 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk');
+  final TextEditingController _updWebController = TextEditingController(text: 'https://glimmer-messaging-app-web.vercel.app/');
+  bool _updMandatory = false;
+  bool _isPushingUpdate = false;
+
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     if (_adminService.isAuthenticated) {
       _loadDashboardData();
     }
@@ -49,6 +59,11 @@ class _AdminPanelScreenState extends State<AdminPanelScreen>
     _pinController.dispose();
     _masterKeyController.dispose();
     _searchController.dispose();
+    _updVersionController.dispose();
+    _updBuildController.dispose();
+    _updNotesController.dispose();
+    _updDownloadController.dispose();
+    _updWebController.dispose();
     super.dispose();
   }
 
@@ -85,6 +100,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen>
     final overviewRes = await _adminService.getOverview();
     final usersRes = await _adminService.getUsers();
     final activityRes = await _adminService.getActivityLogs();
+    final versionRes = await _adminService.getAppVersion();
 
     if (!mounted) return;
     setState(() {
@@ -94,6 +110,17 @@ class _AdminPanelScreenState extends State<AdminPanelScreen>
       }
       _users = usersRes;
       _activityLogs = activityRes;
+      _appVersion = versionRes;
+
+      if (versionRes != null && versionRes['success'] == true) {
+        _updVersionController.text = (versionRes['latest_version'] as String?) ?? '1.2.0';
+        final currBuild = (versionRes['build_number'] as num?)?.toInt() ?? 4;
+        _updBuildController.text = '${currBuild + 1}';
+        _updNotesController.text = (versionRes['release_notes'] as String?) ?? '';
+        _updDownloadController.text = (versionRes['download_url'] as String?) ?? 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk';
+        _updWebController.text = (versionRes['web_url'] as String?) ?? 'https://glimmer-messaging-app-web.vercel.app/';
+        _updMandatory = (versionRes['mandatory'] as bool?) ?? false;
+      }
     });
   }
 
@@ -338,8 +365,9 @@ class _AdminPanelScreenState extends State<AdminPanelScreen>
           indicatorColor: NexaColors.primary,
           tabs: const [
             Tab(icon: Icon(Icons.people_outline), text: 'Users DB'),
-            Tab(icon: Icon(Icons.security), text: 'Security Logs'),
+            Tab(icon: Icon(Icons.security), text: 'Security'),
             Tab(icon: Icon(Icons.dns_outlined), text: 'System'),
+            Tab(icon: Icon(Icons.system_update_alt), text: 'Releases'),
           ],
         ),
       ),
@@ -351,6 +379,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen>
                 _buildUsersTab(),
                 _buildSecurityLogsTab(),
                 _buildSystemTab(),
+                _buildAppReleasesTab(),
               ],
             ),
     );
@@ -1288,5 +1317,212 @@ class _AdminPanelScreenState extends State<AdminPanelScreen>
         ),
       ],
     );
+  }
+
+  // -------------------------------------------------------------
+  // TAB 4: APP RELEASES & UPDATE ENGINE
+  // -------------------------------------------------------------
+  Widget _buildAppReleasesTab() {
+    final v = _appVersion?['latest_version'] ?? '1.2.0';
+    final b = _appVersion?['build_number'] ?? 4;
+    final date = _appVersion?['release_date'] ?? '2026-10-09';
+    final dl = _appVersion?['download_url'] ?? 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk';
+    final notes = _appVersion?['release_notes'] ?? 'Dual camera vision calls, modern minimalist UI, and contacts sync.';
+    final isMandatory = _appVersion?['mandatory'] == true;
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        // Current Live Version Card
+        Card(
+          elevation: 2,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.verified, color: NexaColors.emeraldSecure, size: 20),
+                        SizedBox(width: 8),
+                        Text('Active Server Release', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                      ],
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: NexaColors.emeraldSecure.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text('v$v+$b', style: const TextStyle(color: NexaColors.emeraldSecure, fontWeight: FontWeight.bold, fontSize: 12)),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                _buildDiagnosticRow('Release Date', '$date'),
+                const SizedBox(height: 6),
+                _buildDiagnosticRow('Enforcement', isMandatory ? 'STRICT MANDATORY' : 'OPTIONAL'),
+                const SizedBox(height: 6),
+                _buildDiagnosticRow('APK URL', '$dl'),
+                const Divider(height: 20),
+                const Text('Release Notes:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: NexaColors.textMuted)),
+                const SizedBox(height: 4),
+                Text(notes, style: const TextStyle(fontSize: 13, height: 1.4)),
+              ],
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 20),
+
+        // Publish New Release Form
+        Card(
+          elevation: 2,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Row(
+                  children: [
+                    Icon(Icons.rocket_launch, color: NexaColors.primary, size: 20),
+                    SizedBox(width: 8),
+                    Text('Publish New Release', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Publishing an update will broadcast the new version across all running mobile and web clients in real-time.',
+                  style: TextStyle(fontSize: 12, color: NexaColors.textSecondary),
+                ),
+                const SizedBox(height: 16),
+
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _updVersionController,
+                        decoration: const InputDecoration(
+                          labelText: 'Version (e.g. 1.2.1)',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TextField(
+                        controller: _updBuildController,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'Build (e.g. 5)',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+
+                TextField(
+                  controller: _updDownloadController,
+                  decoration: const InputDecoration(
+                    labelText: 'Download APK URL',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                TextField(
+                  controller: _updWebController,
+                  decoration: const InputDecoration(
+                    labelText: 'Web App URL',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                TextField(
+                  controller: _updNotesController,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    labelText: 'Release Notes',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Mandatory Update', style: TextStyle(fontSize: 14)),
+                  subtitle: const Text('Block app usage until updated', style: TextStyle(fontSize: 12)),
+                  value: _updMandatory,
+                  onChanged: (val) => setState(() => _updMandatory = val),
+                ),
+                const SizedBox(height: 16),
+
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: NexaColors.primary,
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size(double.infinity, 46),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  icon: _isPushingUpdate
+                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                      : const Icon(Icons.cloud_upload),
+                  label: Text(_isPushingUpdate ? 'Publishing...' : 'Broadcast Release to All Clients'),
+                  onPressed: _isPushingUpdate ? null : _pushUpdateFromAdmin,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _pushUpdateFromAdmin() async {
+    final ver = _updVersionController.text.trim();
+    final build = int.tryParse(_updBuildController.text.trim());
+    if (ver.isEmpty || build == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a valid version and integer build number.')),
+      );
+      return;
+    }
+
+    setState(() => _isPushingUpdate = true);
+    final res = await _adminService.pushAppUpdate(
+      latestVersion: ver,
+      buildNumber: build,
+      releaseNotes: _updNotesController.text.trim(),
+      downloadUrl: _updDownloadController.text.trim(),
+      webUrl: _updWebController.text.trim(),
+      mandatory: _updMandatory,
+    );
+    if (!mounted) return;
+    setState(() => _isPushingUpdate = false);
+
+    if (res['success'] == true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Release v$ver+$build broadcasted successfully!'),
+          backgroundColor: NexaColors.emeraldSecure,
+        ),
+      );
+      _loadDashboardData();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to publish release: ${res['error'] ?? 'Server rejected'}'),
+          backgroundColor: NexaColors.error,
+        ),
+      );
+    }
   }
 }

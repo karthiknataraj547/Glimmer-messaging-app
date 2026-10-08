@@ -101,6 +101,40 @@ class MainActivity : FlutterActivity() {
                         result.error("ERROR", e.message, null)
                     }
                 }
+                "getAppCacheDir" -> {
+                    try {
+                        result.success(applicationContext.cacheDir.absolutePath)
+                    } catch (e: Exception) {
+                        result.error("CACHE_ERROR", e.message, null)
+                    }
+                }
+                "installApk" -> {
+                    try {
+                        val filePath = call.argument<String>("filePath")
+                        if (filePath.isNullOrEmpty()) {
+                            result.error("INVALID_PATH", "APK file path cannot be null or empty", null)
+                            return@setMethodCallHandler
+                        }
+                        val apkFile = File(filePath)
+                        if (!apkFile.exists()) {
+                            result.error("FILE_NOT_FOUND", "APK file does not exist at $filePath", null)
+                            return@setMethodCallHandler
+                        }
+                        val apkUri = androidx.core.content.FileProvider.getUriForFile(
+                            applicationContext,
+                            "${applicationContext.packageName}.fileprovider",
+                            apkFile
+                        )
+                        val installIntent = Intent(Intent.ACTION_VIEW).apply {
+                            setDataAndType(apkUri, "application/vnd.android.package-archive")
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
+                        }
+                        startActivity(installIntent)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("INSTALL_ERROR", e.message, null)
+                    }
+                }
                 "getNativeContacts" -> {
                     try {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {

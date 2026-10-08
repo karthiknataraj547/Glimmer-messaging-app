@@ -222,4 +222,55 @@ class AdminService {
       return 0;
     }
   }
+
+  /// Fetches current app version manifest.
+  Future<Map<String, dynamic>?> getAppVersion() async {
+    final baseUrl = await AuthService.instance.getBaseUrl();
+    try {
+      final uri = Uri.parse('$baseUrl/v1/app/check-update');
+      final response = await http
+          .get(uri, headers: _buildHeaders())
+          .timeout(const Duration(seconds: 6));
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body) as Map<String, dynamic>;
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Publishes and broadcasts an application update to all clients.
+  Future<Map<String, dynamic>> pushAppUpdate({
+    required String latestVersion,
+    required int buildNumber,
+    required String releaseNotes,
+    required String downloadUrl,
+    required String webUrl,
+    required bool mandatory,
+  }) async {
+    final baseUrl = await AuthService.instance.getBaseUrl();
+    try {
+      final uri = Uri.parse('$baseUrl/v1/admin/app/push-update');
+      final body = jsonEncode({
+        'latest_version': latestVersion,
+        'build_number': buildNumber,
+        'release_notes': releaseNotes,
+        'download_url': downloadUrl,
+        'web_url': webUrl,
+        'mandatory': mandatory,
+        'release_date': DateTime.now().toIso8601String().split('T')[0],
+      });
+
+      final response = await http
+          .post(uri, headers: _buildHeaders(), body: body)
+          .timeout(const Duration(seconds: 6));
+
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      return {'success': response.statusCode == 200 && data['success'] == true, ...data};
+    } catch (e) {
+      return {'success': false, 'error': e.toString()};
+    }
+  }
 }
