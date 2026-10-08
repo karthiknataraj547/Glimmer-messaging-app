@@ -647,6 +647,7 @@
       <button class="tab-btn active" onclick="switchTab('usersTab', this)">👥 User Database Explorer</button>
       <button class="tab-btn" onclick="switchTab('activityTab', this)">⚡ Security & Activity Timeline</button>
       <button class="tab-btn" onclick="switchTab('systemTab', this)">🛠️ System Diagnostics</button>
+      <button class="tab-btn" onclick="switchTab('updateTab', this)">🚀 App Releases & Update Engine</button>
     </div>
 
     <!-- TAB 1: USER DATABASE EXPLORER -->
@@ -747,6 +748,105 @@
         </div>
       </div>
     </div>
+
+    <!-- TAB 4: APP RELEASES & UPDATE ENGINE -->
+    <div id="updateTab" class="tab-pane">
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 24px;">
+        <!-- Card 1: Currently Published Release -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">
+              <span>Current Server Release</span>
+              <span id="currentVerBadge" class="badge badge-active">v1.0.0+1</span>
+            </div>
+            <button class="btn btn-secondary" onclick="fetchAppVersionInfo()">↻ Check Status</button>
+          </div>
+
+          <div style="background: var(--bg-elevated); padding: 20px; border-radius: 14px; margin-bottom: 20px; border: 1px solid var(--border-subtle);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+              <span style="font-size: 13px; color: var(--text-muted);">Published Version:</span>
+              <strong id="dispVersion" style="font-size: 16px; color: var(--accent-cyan); font-family: 'JetBrains Mono';">1.0.0</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+              <span style="font-size: 13px; color: var(--text-muted);">Build Number:</span>
+              <strong id="dispBuild" style="font-size: 14px; color: var(--text-main); font-family: 'JetBrains Mono';">1</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+              <span style="font-size: 13px; color: var(--text-muted);">Release Date:</span>
+              <span id="dispDate" style="font-size: 13px; color: var(--text-main);">2026-10-08</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+              <span style="font-size: 13px; color: var(--text-muted);">Enforcement:</span>
+              <span id="dispMandatory" class="badge badge-active">Optional Update</span>
+            </div>
+            <div style="margin-top: 14px; border-top: 1px solid var(--border-subtle); padding-top: 12px;">
+              <div style="font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px;">Download APK URL:</div>
+              <div id="dispDownload" style="font-family: 'JetBrains Mono'; font-size: 11px; color: var(--accent-emerald); word-break: break-all;">
+                https://glimmer-messaging-app-web.vercel.app/nexa-release.apk
+              </div>
+            </div>
+            <div style="margin-top: 14px; border-top: 1px solid var(--border-subtle); padding-top: 12px;">
+              <div style="font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px;">Release Notes:</div>
+              <div id="dispNotes" style="font-size: 13px; color: var(--text-main); line-height: 1.4; background: rgba(0,0,0,0.2); padding: 10px; border-radius: 8px;">
+                Native contacts sync & real-time messaging support.
+              </div>
+            </div>
+          </div>
+          <div style="font-size: 12px; color: var(--text-dim); line-height: 1.4;">
+            ℹ️ When an update is published here, all running instances of the mobile application and web app will automatically display the in-app update prompt with your release notes.
+          </div>
+        </div>
+
+        <!-- Card 2: Publish New Update Form -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">
+              <span>Publish New Release</span>
+              <span class="badge" style="background: rgba(139, 92, 246, 0.2); color: var(--accent-violet);">OTA Engine</span>
+            </div>
+          </div>
+
+          <form id="pushUpdateForm" onsubmit="handlePushUpdate(event)">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+              <div class="form-group">
+                <label>Version String (SemVer)</label>
+                <input type="text" id="updVersion" class="form-control" placeholder="e.g. 1.0.1" value="1.0.1" required>
+              </div>
+              <div class="form-group">
+                <label>Build Number</label>
+                <input type="number" id="updBuild" class="form-control" placeholder="e.g. 2" value="2" required>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>Download APK URL</label>
+              <input type="url" id="updDownload" class="form-control" value="https://glimmer-messaging-app-web.vercel.app/nexa-release.apk" required>
+            </div>
+
+            <div class="form-group">
+              <label>Web App URL</label>
+              <input type="url" id="updWeb" class="form-control" value="https://glimmer-messaging-app-web.vercel.app/" required>
+            </div>
+
+            <div class="form-group">
+              <label>Release Notes</label>
+              <textarea id="updNotes" class="form-control" rows="4" style="resize: vertical; font-family: inherit;" required placeholder="What's new in this build? e.g. Native contacts integration, realtime P2P messaging, bug fixes.">Native device contacts synchronization, peer ID servicing option, real-time message delivery enhancements, and security upgrades.</textarea>
+            </div>
+
+            <div class="form-group" style="display: flex; align-items: center; gap: 10px; margin-top: 4px;">
+              <input type="checkbox" id="updMandatory" style="width: 18px; height: 18px; accent-color: var(--accent-cyan); cursor: pointer;">
+              <label for="updMandatory" style="margin-bottom: 0; cursor: pointer; color: var(--text-main);">
+                Mandatory Update (Strict enforcement)
+              </label>
+            </div>
+
+            <button type="submit" id="btnPushUpdate" class="btn btn-primary" style="width: 100%; justify-content: center; padding: 14px; margin-top: 10px; font-size: 14px;">
+              🚀 Push Update to Server & Broadcast to Clients
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
   </main>
 
   <div id="toast" class="toast">Action completed successfully</div>
@@ -804,6 +904,7 @@
 
     function startDashboard() {
       fetchFullDashboard(true);
+      fetchAppVersionInfo();
       if (refreshInterval) clearInterval(refreshInterval);
       refreshInterval = setInterval(() => {
         fetchFullDashboard(false);
@@ -1021,6 +1122,93 @@
         }
       } catch (err) {
         alert('Purge failed: ' + err.message);
+      }
+    }
+
+    async function fetchAppVersionInfo() {
+      try {
+        const res = await fetch('/v1/app/check-update');
+        const data = await res.json();
+        if (data.success) {
+          const badge = document.getElementById('currentVerBadge');
+          if (badge) badge.textContent = `v${data.latest_version}+${data.build_number}`;
+          const dVer = document.getElementById('dispVersion');
+          if (dVer) dVer.textContent = data.latest_version;
+          const dBld = document.getElementById('dispBuild');
+          if (dBld) dBld.textContent = data.build_number;
+          const dDate = document.getElementById('dispDate');
+          if (dDate) dDate.textContent = data.release_date || 'N/A';
+          const dMand = document.getElementById('dispMandatory');
+          if (dMand) {
+            dMand.textContent = data.mandatory ? 'Strict Mandatory' : 'Optional Update';
+            dMand.className = data.mandatory ? 'badge badge-suspended' : 'badge badge-active';
+          }
+          const dDown = document.getElementById('dispDownload');
+          if (dDown) dDown.textContent = data.download_url || 'N/A';
+          const dNotes = document.getElementById('dispNotes');
+          if (dNotes) dNotes.textContent = data.release_notes || 'No release notes provided.';
+
+          // Pre-populate form next build
+          const nextBuild = (Number(data.build_number) || 1) + 1;
+          const updBuildInput = document.getElementById('updBuild');
+          if (updBuildInput && (!updBuildInput.value || Number(updBuildInput.value) <= Number(data.build_number))) {
+            updBuildInput.value = nextBuild;
+          }
+        }
+      } catch (e) {
+        console.error('Failed to fetch app version info:', e);
+      }
+    }
+
+    async function handlePushUpdate(event) {
+      event.preventDefault();
+      const version = document.getElementById('updVersion').value.trim();
+      const build = parseInt(document.getElementById('updBuild').value.trim(), 10);
+      const download = document.getElementById('updDownload').value.trim();
+      const web = document.getElementById('updWeb').value.trim();
+      const notes = document.getElementById('updNotes').value.trim();
+      const mandatory = document.getElementById('updMandatory').checked;
+
+      if (!version || isNaN(build)) {
+        alert('Please specify a valid version string and integer build number.');
+        return;
+      }
+
+      const btn = document.getElementById('btnPushUpdate');
+      btn.disabled = true;
+      btn.textContent = 'Publishing release...';
+
+      try {
+        const res = await fetch('/v1/admin/app/push-update', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + adminToken
+          },
+          body: JSON.stringify({
+            latest_version: version,
+            build_number: build,
+            release_notes: notes,
+            download_url: download,
+            web_url: web,
+            mandatory: mandatory,
+            release_date: new Date().toISOString().split('T')[0]
+          })
+        });
+
+        const data = await res.json();
+        if (data.success) {
+          showToast(`Application update v${version}+${build} published successfully!`);
+          fetchAppVersionInfo();
+          fetchFullDashboard(false);
+        } else {
+          alert('Failed to publish update: ' + (data.error || 'Server rejected release'));
+        }
+      } catch (err) {
+        alert('Update push failed: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '🚀 Push Update to Server & Broadcast to Clients';
       }
     }
 

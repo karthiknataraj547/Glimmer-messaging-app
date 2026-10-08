@@ -474,6 +474,131 @@ app.post('/v1/admin/purge-queue', adminAuthMiddleware, (req, res) => {
   res.json({ success: true, message: `Purged ${purged} pending message envelopes.` });
 });
 
+// --- 1.08 USER SEARCH & PEER LOOKUP ---
+/**
+ * Search registered users by NEXA ID, @username, full name, or phone number.
+ */
+app.get('/v1/users/lookup', (req, res) => {
+  const query = req.query.q || req.query.query || '';
+  const results = Database.searchUsers(query);
+  res.json({
+    success: true,
+    count: results.length,
+    users: results
+  });
+});
+
+app.get('/v1/users/lookup/:query', (req, res) => {
+  const results = Database.searchUsers(req.params.query);
+  res.json({
+    success: true,
+    count: results.length,
+    users: results
+  });
+});
+
+// --- 1.09 REAL-TIME BIDIRECTIONAL MESSAGING API ---
+/**
+ * Dispatch message between two users
+ */
+app.post('/v1/messages/send', (req, res) => {
+  const { sender_handle, sender_nexa_id, recipient_handle, recipient_nexa_id, text, type, audio_path, audio_duration, timestamp } = req.body;
+  if (!sender_handle || !recipient_handle || (!text && !audio_path)) {
+    return res.status(400).json({ error: 'Missing sender_handle, recipient_handle, or message content.' });
+  }
+
+  const record = Database.saveMessage({
+    sender_handle,
+    sender_nexa_id,
+    recipient_handle,
+    recipient_nexa_id,
+    text,
+    type,
+    audio_path,
+    audio_duration,
+    timestamp
+  });
+
+  // Notify recipient via active WebSocket connection if connected
+  for (const [deviceId, conn] of activeConnections.entries()) {
+    if (conn.readyState === 1) {
+      conn.send(JSON.stringify({
+        event: 'NEW_CHAT_MESSAGE',
+        message: record
+      }));
+    }
+  }
+
+  res.status(201).json({
+    success: true,
+    message: record
+  });
+});
+
+/**
+ * Get conversation history thread between two users
+ */
+app.get('/v1/messages/thread/:user1/:user2', (req, res) => {
+  const { user1, user2 } = req.params;
+  const messages = Database.getThread(user1, user2);
+  res.json({
+    success: true,
+    count: messages.length,
+    messages
+  });
+});
+
+/**
+ * Get incoming inbox messages for user
+ */
+app.get('/v1/messages/inbox/:user', (req, res) => {
+  const { user } = req.params;
+  const messages = Database.getInbox(user);
+  res.json({
+    success: true,
+    count: messages.length,
+    messages
+  });
+});
+
+// --- 1.10 APPLICATION UPDATE ENGINE ---
+/**
+ * Check for application updates (Version telemetry, release notes, and download URL)
+ */
+app.get(['/v1/app/version', '/v1/app/check-update'], (req, res) => {
+  const versionInfo = Database.getAppVersion();
+  res.json({
+    success: true,
+    ...versionInfo
+  });
+});
+
+/**
+ * Admin: Push application update
+ */
+app.post('/v1/admin/app/push-update', adminAuthMiddleware, (req, res) => {
+  const { latest_version, build_number, release_date, release_notes, download_url, web_url, mandatory } = req.body;
+  if (!latest_version || !build_number) {
+    return res.status(400).json({ error: 'latest_version and build_number are required.' });
+  }
+
+  const updated = Database.setAppVersion({
+    latest_version,
+    build_number,
+    release_date,
+    release_notes,
+    download_url,
+    web_url,
+    mandatory
+  });
+
+  res.json({
+    success: true,
+    message: `Application update v${updated.latest_version}+${updated.build_number} published successfully.`,
+    app_version: updated
+  });
+});
+
 
 
 // --- 1.1 WebRTC ICE & TURN EPHEMERAL CREDENTIALS ---

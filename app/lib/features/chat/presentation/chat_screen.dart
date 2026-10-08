@@ -3,6 +3,8 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../../../core/services/chat_service.dart';
+import '../../../core/session/user_session.dart';
 import '../../../core/theme/nexa_theme.dart';
 import '../../calls/presentation/active_call_screen.dart';
 
@@ -52,6 +54,7 @@ class _ChatScreenState extends State<ChatScreen> {
   int _playbackElapsedSeconds = 0;
   Timer? _playbackTimer;
   double _playbackSpeed = 1.0;
+  Timer? _pollingTimer;
 
   // Message list (Starts empty with zero mock accounts or fake messages)
   final List<Map<String, dynamic>> _messages = [];
@@ -65,16 +68,102 @@ class _ChatScreenState extends State<ChatScreen> {
         setState(() => _isComposing = composing);
       }
     });
+
+    // 1. Initial thread load from server
+    _loadThread();
+
+    // 2. Periodic sync to catch live incoming messages from peer
+    _pollingTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (mounted) _syncIncomingMessages();
+    });
   }
 
   @override
   void dispose() {
+    _pollingTimer?.cancel();
     _messageController.dispose();
     _scrollController.dispose();
     _recordingTimer?.cancel();
     _amplitudeTimer?.cancel();
     _playbackTimer?.cancel();
     super.dispose();
+  }
+
+  Future<void> _loadThread() async {
+    final history = await ChatService.instance.fetchThread(widget.contactName);
+    if (!mounted || history.isEmpty) return;
+
+    final myHandle = UserSession.instance.handle.replaceAll('@', '').toLowerCase();
+
+    setState(() {
+      _messages.clear();
+      for (final m in history) {
+        final senderHandle = (m['sender_handle'] ?? '').toString().toLowerCase();
+        final isMe = senderHandle == myHandle;
+        final ts = (m['timestamp'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch;
+        final dt = DateTime.fromMillisecondsSinceEpoch(ts);
+        final timeStr = '${dt.hour > 12 ? dt.hour - 12 : (dt.hour == 0 ? 12 : dt.hour)}:${dt.minute.toString().padLeft(2, '0')} ${dt.hour >= 12 ? 'PM' : 'AM'}';
+
+        _messages.add({
+          'id': m['id'] ?? 'm_${ts}_${_messages.length}',
+          'isMe': isMe,
+          'text': (m['text'] ?? '').toString(),
+          'time': timeStr,
+          'isAudio': m['type'] == 'voice',
+          'attachmentType': m['type'] == 'voice' ? 'voice' : null,
+          'audioDuration': m['audio_duration'] != null && (m['audio_duration'] as num) > 0
+              ? _formatDuration((m['audio_duration'] as num).toInt())
+              : null,
+          'hasAction': false,
+          'actionAdded': false,
+          'actionDismissed': false,
+          'reactions': <String>[],
+        });
+      }
+    });
+    _scrollToBottom();
+  }
+
+  Future<void> _syncIncomingMessages() async {
+    final history = await ChatService.instance.fetchThread(widget.contactName);
+    if (!mounted || history.isEmpty) return;
+
+    final myHandle = UserSession.instance.handle.replaceAll('@', '').toLowerCase();
+    final existingIds = _messages.map((m) => m['id']).toSet();
+    bool addedAny = false;
+
+    for (final m in history) {
+      final msgId = m['id'] ?? '';
+      if (msgId.isNotEmpty && !existingIds.contains(msgId)) {
+        final senderHandle = (m['sender_handle'] ?? '').toString().toLowerCase();
+        final isMe = senderHandle == myHandle;
+        final ts = (m['timestamp'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch;
+        final dt = DateTime.fromMillisecondsSinceEpoch(ts);
+        final timeStr = '${dt.hour > 12 ? dt.hour - 12 : (dt.hour == 0 ? 12 : dt.hour)}:${dt.minute.toString().padLeft(2, '0')} ${dt.hour >= 12 ? 'PM' : 'AM'}';
+
+        _messages.add({
+          'id': msgId,
+          'isMe': isMe,
+          'text': (m['text'] ?? '').toString(),
+          'time': timeStr,
+          'isAudio': m['type'] == 'voice',
+          'attachmentType': m['type'] == 'voice' ? 'voice' : null,
+          'audioDuration': m['audio_duration'] != null && (m['audio_duration'] as num) > 0
+              ? _formatDuration((m['audio_duration'] as num).toInt())
+              : null,
+          'hasAction': false,
+          'actionAdded': false,
+          'actionDismissed': false,
+          'reactions': <String>[],
+        });
+        addedAny = true;
+      }
+    }
+
+    if (addedAny && mounted) {
+      setState(() {});
+      _scrollToBottom();
+    }
   }
 
   void _scrollToBottom() {
@@ -112,6 +201,13 @@ class _ChatScreenState extends State<ChatScreen> {
     });
 
     _scrollToBottom();
+
+    // Transmit to server relay so recipient receives the message in real time
+    ChatService.instance.sendMessage(
+      recipientHandle: widget.contactName,
+      recipientNexaId: widget.nexaId,
+      text: text,
+    );
   }
 
   String _formatDuration(int seconds) {
@@ -383,6 +479,16 @@ class _ChatScreenState extends State<ChatScreen> {
         content: Text('Voice note ($durationStr) encrypted with AES-256-GCM and sent.'),
         duration: const Duration(seconds: 2),
       ),
+    );
+
+    // Transmit voice memo to server relay
+    ChatService.instance.sendMessage(
+      recipientHandle: widget.contactName,
+      recipientNexaId: widget.nexaId,
+      text: 'Voice memo ($durationStr)',
+      type: 'voice',
+      audioPath: nativeAudioInfo?['path']?.toString(),
+      audioDuration: durationSeconds,
     );
 
     _scrollToBottom();

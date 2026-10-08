@@ -91,6 +91,53 @@ class MainActivity : FlutterActivity() {
                         result.error("ERROR", e.message, null)
                     }
                 }
+                "openUrlInBrowser" -> {
+                    try {
+                        val url = call.argument<String>("url") ?: "https://glimmer-messaging-app-web.vercel.app/"
+                        val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                        startActivity(browserIntent)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("ERROR", e.message, null)
+                    }
+                }
+                "getNativeContacts" -> {
+                    try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            if (checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
+                                result.error("PERMISSION_DENIED", "READ_CONTACTS permission not granted", null)
+                                return@setMethodCallHandler
+                            }
+                        }
+                        val contactsList = mutableListOf<Map<String, String>>()
+                        val uri = android.provider.ContactsContract.CommonDataKinds.Phone.CONTENT_URI
+                        val projection = arrayOf(
+                            android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                            android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER
+                        )
+                        val cursor = contentResolver.query(uri, projection, null, null, "${android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} ASC")
+                        cursor?.use {
+                            val nameIdx = it.getColumnIndex(android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+                            val numIdx = it.getColumnIndex(android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER)
+                            val seenNumbers = mutableSetOf<String>()
+                            while (it.moveToNext()) {
+                                val name = if (nameIdx != -1) it.getString(nameIdx) ?: "Unknown" else "Unknown"
+                                val rawNumber = if (numIdx != -1) it.getString(numIdx) ?: "" else ""
+                                val cleanNumber = rawNumber.replace("\\s+".toRegex(), "").replace("-", "").trim()
+                                if (cleanNumber.isNotEmpty() && !seenNumbers.contains(cleanNumber)) {
+                                    seenNumbers.add(cleanNumber)
+                                    contactsList.add(mapOf(
+                                        "name" to name,
+                                        "phone" to cleanNumber
+                                    ))
+                                }
+                            }
+                        }
+                        result.success(contactsList)
+                    } catch (e: Exception) {
+                        result.error("CONTACTS_ERROR", e.message, null)
+                    }
+                }
                 "openInbuiltCamera" -> {
                     pendingResult = result
                     try {

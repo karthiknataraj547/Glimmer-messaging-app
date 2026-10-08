@@ -61,6 +61,8 @@ function loadFromDisk() {
         dbState.prekey_bundles = parsed.prekey_bundles || {};
         dbState.mailbox_queue = parsed.mailbox_queue || {};
         dbState.activity_logs = parsed.activity_logs || [];
+        dbState.messages = parsed.messages || [];
+        dbState.app_version = parsed.app_version || dbState.app_version;
         dbState.meta = parsed.meta || dbState.meta;
         console.log(`[NEXA DB] Loaded persistent database (${Object.keys(dbState.users).length} registered users).`);
       }
@@ -453,6 +455,141 @@ const Database = {
       security_mode: 'zero_knowledge_e2ee',
       crypto_protocol: 'X3DH_DoubleRatchet_AES256GCM'
     };
+  },
+
+  /**
+   * Search users by NEXA ID, @username, full name, or phone number
+   */
+  searchUsers(rawQuery) {
+    if (!rawQuery || typeof rawQuery !== 'string') return [];
+    loadFromDisk();
+    const q = rawQuery.trim().replace(/^@+/, '').toLowerCase();
+    if (!q) return [];
+
+    const results = [];
+    for (const u of Object.values(dbState.users || {})) {
+      if (u.status === 'suspended') continue;
+      const un = (u.username || '').toLowerCase();
+      const fn = (u.full_name || '').toLowerCase();
+      const nid = (u.nexa_id || '').toLowerCase();
+      const ph = (u.phone || '').replace(/\s+/g, '').replace(/-/g, '').toLowerCase();
+
+      if (un.includes(q) || fn.includes(q) || nid.includes(q) || (ph.length >= 3 && ph.includes(q))) {
+        results.push({
+          username: u.username,
+          handle: `@${u.username}`,
+          fullName: u.full_name || u.username,
+          nexaId: u.nexa_id,
+          phone: u.phone || '',
+          about: u.about || 'Zero-Knowledge Peer'
+        });
+      }
+    }
+    return results;
+  },
+
+  /**
+   * Store a message in persistent database
+   */
+  saveMessage(msg) {
+    loadFromDisk();
+    if (!dbState.messages) dbState.messages = [];
+
+    const record = {
+      id: msg.id || `msg_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+      sender_handle: (msg.sender_handle || '').trim().replace(/^@+/, '').toLowerCase(),
+      sender_nexa_id: msg.sender_nexa_id || '',
+      recipient_handle: (msg.recipient_handle || '').trim().replace(/^@+/, '').toLowerCase(),
+      recipient_nexa_id: msg.recipient_nexa_id || '',
+      text: msg.text || '',
+      type: msg.type || 'text',
+      audio_path: msg.audio_path || null,
+      audio_duration: msg.audio_duration || 0,
+      timestamp: Number(msg.timestamp) || Date.now(),
+      created_at: Date.now()
+    };
+
+    dbState.messages.push(record);
+
+    // Keep latest 5000 messages
+    if (dbState.messages.length > 5000) {
+      dbState.messages = dbState.messages.slice(-5000);
+    }
+
+    saveToDiskSync();
+    return record;
+  },
+
+  /**
+   * Retrieve message thread between two peers
+   */
+  getThread(peerA, peerB) {
+    loadFromDisk();
+    if (!dbState.messages) return [];
+
+    const cleanA = (peerA || '').trim().replace(/^@+/, '').toLowerCase();
+    const cleanB = (peerB || '').trim().replace(/^@+/, '').toLowerCase();
+
+    return dbState.messages.filter(m => {
+      const isFromAToB = (m.sender_handle === cleanA || m.sender_nexa_id.toLowerCase() === cleanA) &&
+                         (m.recipient_handle === cleanB || m.recipient_nexa_id.toLowerCase() === cleanB);
+      const isFromBToA = (m.sender_handle === cleanB || m.sender_nexa_id.toLowerCase() === cleanB) &&
+                         (m.recipient_handle === cleanA || m.recipient_nexa_id.toLowerCase() === cleanA);
+      return isFromAToB || isFromBToA;
+    }).sort((a, b) => a.timestamp - b.timestamp);
+  },
+
+  /**
+   * Retrieve incoming messages inbox for a user
+   */
+  getInbox(recipient) {
+    loadFromDisk();
+    if (!dbState.messages) return [];
+    const clean = (recipient || '').trim().replace(/^@+/, '').toLowerCase();
+
+    return dbState.messages.filter(m => {
+      return m.recipient_handle === clean || m.recipient_nexa_id.toLowerCase() === clean;
+    }).sort((a, b) => a.timestamp - b.timestamp);
+  },
+
+  /**
+   * Application Update Engine
+   */
+  getAppVersion() {
+    loadFromDisk();
+    return dbState.app_version || {
+      latest_version: '1.0.1',
+      build_number: 2,
+      release_date: '2026-10-08',
+      release_notes: 'Added real mobile contacts sync, NEXA ID peer lookup, bidirectional chat delivery, and in-app update engine.',
+      download_url: 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk',
+      web_url: 'https://glimmer-messaging-app-web.vercel.app/',
+      mandatory: false,
+      published_at: Date.now()
+    };
+  },
+
+  setAppVersion(info) {
+    loadFromDisk();
+    dbState.app_version = {
+      latest_version: info.latest_version || '1.0.1',
+      build_number: Number(info.build_number) || 2,
+      release_date: info.release_date || new Date().toISOString().split('T')[0],
+      release_notes: info.release_notes || 'Performance and security updates.',
+      download_url: info.download_url || 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk',
+      web_url: info.web_url || 'https://glimmer-messaging-app-web.vercel.app/',
+      mandatory: Boolean(info.mandatory),
+      published_at: Date.now()
+    };
+    saveToDiskSync();
+    this.logActivity({
+      type: 'admin',
+      action: 'push_app_update',
+      target: `v${dbState.app_version.latest_version}+${dbState.app_version.build_number}`,
+      actor: 'admin',
+      details: `App update released: ${dbState.app_version.release_notes}`
+    });
+    return dbState.app_version;
   }
 };
 

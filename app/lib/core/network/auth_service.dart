@@ -366,4 +366,49 @@ class AuthService {
     }
     return [];
   }
+
+  /// Generic resilient GET JSON request with multi-candidate failover
+  Future<Map<String, dynamic>?> getJson(Uri uri) async {
+    final path = uri.path + (uri.hasQuery ? '?${uri.query}' : '');
+    final candidates = getAllCandidateUrls();
+    for (final base in candidates) {
+      try {
+        final target = Uri.parse('$base$path');
+        final response = await http.get(target).timeout(const Duration(seconds: 6));
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          _resolvedBaseUrl = base;
+          isConnectedNotifier.value = true;
+          return jsonDecode(response.body) as Map<String, dynamic>;
+        }
+      } catch (_) {
+        continue;
+      }
+    }
+    return null;
+  }
+
+  /// Generic resilient POST JSON request with multi-candidate failover
+  Future<Map<String, dynamic>?> postJson(String path, Map<String, dynamic> body) async {
+    final payload = jsonEncode(body);
+    final candidates = getAllCandidateUrls();
+    for (final base in candidates) {
+      try {
+        final target = Uri.parse('$base$path');
+        final response = await http.post(
+          target,
+          headers: {'Content-Type': 'application/json'},
+          body: payload,
+        ).timeout(const Duration(seconds: 8));
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          _resolvedBaseUrl = base;
+          isConnectedNotifier.value = true;
+          return jsonDecode(response.body) as Map<String, dynamic>;
+        }
+      } catch (_) {
+        continue;
+      }
+    }
+    return null;
+  }
 }
+
