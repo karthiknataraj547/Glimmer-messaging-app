@@ -16,10 +16,13 @@ void main() {
   testWidgets('NexaApp loads FocusOrbitScreen when user is authenticated', (WidgetTester tester) async {
     UserSession.instance.login(name: 'Karthik', handle: '@karthik');
     await tester.pumpWidget(const NexaApp());
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
 
-    // Verify calm quiet intelligence header is present
-    expect(find.text('Good evening, Karthik'), findsOneWidget);
-    expect(find.text('PRIORITY CHATS'), findsOneWidget);
+    // Verify modern minimalist UI header and navigation are present
+    expect(find.text('NEXA'), findsOneWidget);
+    expect(find.text('@karthik'), findsOneWidget);
+    expect(find.text('Chats'), findsOneWidget);
+    expect(find.text('Contacts'), findsOneWidget);
   });
 }

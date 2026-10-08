@@ -67,6 +67,7 @@ function loadFromDisk() {
         dbState.mailbox_queue = parsed.mailbox_queue || {};
         dbState.activity_logs = parsed.activity_logs || [];
         dbState.messages = parsed.messages || [];
+        dbState.calls = parsed.calls || {};
         dbState.app_version = parsed.app_version || dbState.app_version;
         dbState.meta = parsed.meta || dbState.meta;
         console.log(`[NEXA DB] Loaded persistent database (${Object.keys(dbState.users).length} registered users).`);
@@ -558,15 +559,108 @@ const Database = {
   },
 
   /**
+   * Match phone numbers against registered users
+   */
+  matchContactsByPhones(phones) {
+    loadFromDisk();
+    if (!Array.isArray(phones) || phones.length === 0) return [];
+    const phoneSet = new Set(phones.map(p => String(p).replace(/[^0-9]/g, '')));
+    const matched = [];
+    for (const u of Object.values(dbState.users || {})) {
+      if (u.phone) {
+        const cleanPhone = String(u.phone).replace(/[^0-9]/g, '');
+        if (phoneSet.has(cleanPhone)) {
+          matched.push({
+            username: u.username,
+            handle: u.handle || `@${u.username}`,
+            nexaId: u.nexa_id,
+            fullName: u.full_name || u.username,
+            phone: u.phone,
+            about: u.about || 'Zero-Knowledge Peer'
+          });
+        }
+      }
+    }
+    return matched;
+  },
+
+  /**
+   * Call Session Engine (Voice & Video Call Signaling)
+   */
+  createCallSession(data) {
+    loadFromDisk();
+    if (!dbState.calls) dbState.calls = {};
+    const callId = data.call_id || data.offer_id || `call_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+    const session = {
+      call_id: callId,
+      caller_handle: (data.caller_handle || '').trim().replace(/^@+/, '').toLowerCase(),
+      caller_nexa_id: data.caller_nexa_id || '',
+      caller_name: data.caller_name || data.caller_handle || 'Peer',
+      recipient_handle: (data.recipient_handle || '').trim().replace(/^@+/, '').toLowerCase(),
+      recipient_nexa_id: data.recipient_nexa_id || '',
+      call_type: data.call_type || 'voice', // 'video' | 'voice'
+      status: 'ringing', // 'ringing', 'connected', 'declined', 'ended'
+      created_at: Date.now(),
+      updated_at: Date.now()
+    };
+    dbState.calls[callId] = session;
+    saveToDiskSync();
+    return session;
+  },
+
+  getIncomingCall(user) {
+    loadFromDisk();
+    if (!dbState.calls) return null;
+    const clean = (user || '').trim().replace(/^@+/, '').toLowerCase();
+    const now = Date.now();
+    for (const call of Object.values(dbState.calls)) {
+      if (
+        (call.recipient_handle === clean || (call.recipient_nexa_id && call.recipient_nexa_id.toLowerCase() === clean)) &&
+        call.status === 'ringing' &&
+        now - call.created_at < 45000
+      ) {
+        return call;
+      }
+    }
+    return null;
+  },
+
+  answerCallSession(callId, accepted) {
+    loadFromDisk();
+    if (!dbState.calls || !dbState.calls[callId]) return null;
+    const session = dbState.calls[callId];
+    session.status = accepted ? 'connected' : 'declined';
+    session.updated_at = Date.now();
+    saveToDiskSync();
+    return session;
+  },
+
+  endCallSession(callId) {
+    loadFromDisk();
+    if (!dbState.calls || !dbState.calls[callId]) return null;
+    const session = dbState.calls[callId];
+    session.status = 'ended';
+    session.updated_at = Date.now();
+    saveToDiskSync();
+    return session;
+  },
+
+  getCallSession(callId) {
+    loadFromDisk();
+    if (!dbState.calls) return null;
+    return dbState.calls[callId] || null;
+  },
+
+  /**
    * Application Update Engine
    */
   getAppVersion() {
     loadFromDisk();
     return dbState.app_version || {
-      latest_version: '1.0.1',
-      build_number: 2,
-      release_date: '2026-10-08',
-      release_notes: 'Added real mobile contacts sync, NEXA ID peer lookup, bidirectional chat delivery, and in-app update engine.',
+      latest_version: '1.2.0',
+      build_number: 4,
+      release_date: '2026-10-09',
+      release_notes: 'Redesigned Modern Minimalist UI, Dual Camera Vision Video Calls & Voice Calling, and Native Device Contacts Sync.',
       download_url: 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk',
       web_url: 'https://glimmer-messaging-app-web.vercel.app/',
       mandatory: false,
@@ -577,10 +671,10 @@ const Database = {
   setAppVersion(info) {
     loadFromDisk();
     dbState.app_version = {
-      latest_version: info.latest_version || '1.0.1',
-      build_number: Number(info.build_number) || 2,
+      latest_version: info.latest_version || '1.2.0',
+      build_number: Number(info.build_number) || 4,
       release_date: info.release_date || new Date().toISOString().split('T')[0],
-      release_notes: info.release_notes || 'Performance and security updates.',
+      release_notes: info.release_notes || 'Performance, UI redesign, and video calling updates.',
       download_url: info.download_url || 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk',
       web_url: info.web_url || 'https://glimmer-messaging-app-web.vercel.app/',
       mandatory: Boolean(info.mandatory),

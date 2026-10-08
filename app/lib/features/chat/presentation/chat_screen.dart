@@ -4,9 +4,9 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../core/services/chat_service.dart';
+import '../../../core/services/call_service.dart';
 import '../../../core/session/user_session.dart';
 import '../../../core/theme/nexa_theme.dart';
-import '../../calls/presentation/active_call_screen.dart';
 
 class ChatScreen extends StatefulWidget {
   final String contactName;
@@ -2350,29 +2350,23 @@ class _ChatScreenState extends State<ChatScreen> {
           IconButton(
             icon: const Icon(Icons.phone_outlined, color: NexaColors.textSecondary),
             tooltip: 'Encrypted Voice Call',
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => ActiveCallScreen(
-                  peerName: widget.contactName,
-                  peerNexaId: widget.nexaId,
-                  isVideo: false,
-                ),
-              ),
+            onPressed: () => CallService.instance.initiateCall(
+              context: context,
+              recipientHandle: widget.contactName,
+              recipientNexaId: widget.nexaId,
+              peerName: widget.contactName,
+              isVideo: false,
             ),
           ),
           IconButton(
             icon: const Icon(Icons.videocam_outlined, color: NexaColors.textSecondary),
             tooltip: 'Encrypted Video Call',
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => ActiveCallScreen(
-                  peerName: widget.contactName,
-                  peerNexaId: widget.nexaId,
-                  isVideo: true,
-                ),
-              ),
+            onPressed: () => CallService.instance.initiateCall(
+              context: context,
+              recipientHandle: widget.contactName,
+              recipientNexaId: widget.nexaId,
+              peerName: widget.contactName,
+              isVideo: true,
             ),
           ),
           IconButton(
@@ -3371,11 +3365,12 @@ class _ChatScreenState extends State<ChatScreen> {
                           label: 'Audio',
                           onTap: () {
                             Navigator.pop(ctx);
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => ActiveCallScreen(peerName: widget.contactName, peerNexaId: widget.nexaId, isVideo: false),
-                              ),
+                            CallService.instance.initiateCall(
+                              context: context,
+                              recipientHandle: widget.contactName,
+                              recipientNexaId: widget.nexaId,
+                              peerName: widget.contactName,
+                              isVideo: false,
                             );
                           },
                         ),
@@ -3384,11 +3379,12 @@ class _ChatScreenState extends State<ChatScreen> {
                           label: 'Video',
                           onTap: () {
                             Navigator.pop(ctx);
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => ActiveCallScreen(peerName: widget.contactName, peerNexaId: widget.nexaId, isVideo: true),
-                              ),
+                            CallService.instance.initiateCall(
+                              context: context,
+                              recipientHandle: widget.contactName,
+                              recipientNexaId: widget.nexaId,
+                              peerName: widget.contactName,
+                              isVideo: true,
                             );
                           },
                         ),

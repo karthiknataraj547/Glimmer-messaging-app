@@ -12,8 +12,8 @@ class UpdateEngine {
   static final UpdateEngine instance = UpdateEngine._internal();
   UpdateEngine._internal();
 
-  static const String currentVersion = '1.0.0';
-  static const int currentBuildNumber = 1;
+  static const String currentVersion = '1.2.0';
+  static const int currentBuildNumber = 4;
 
   bool _isChecking = false;
   bool _hasPromptedThisSession = false;
@@ -31,11 +31,11 @@ class UpdateEngine {
       final data = await AuthService.instance.getJson(uri);
 
       if (data != null && data['success'] == true) {
-        final serverVersion = (data['latest_version'] as String?) ?? '1.0.0';
-        final serverBuild = (data['build_number'] as num?)?.toInt() ?? 1;
+        final serverVersion = (data['latest_version'] as String?) ?? '1.2.0';
+        final serverBuild = (data['build_number'] as num?)?.toInt() ?? 4;
         final releaseNotes = (data['release_notes'] as String?) ?? 'Bug fixes and performance improvements.';
         final releaseDate = (data['release_date'] as String?) ?? '';
-        final downloadUrl = (data['download_url'] as String?) ?? 'https://glimmer-messaging-app-web.vercel.app/';
+        final downloadUrl = (data['download_url'] as String?) ?? 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk';
 
         final isNewer = _isVersionNewer(serverVersion, serverBuild);
 
@@ -52,7 +52,7 @@ class UpdateEngine {
         } else if (userInitiated && context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('You are using the latest version of NEXA (v1.0.0+1).'),
+              content: Text('You are using the latest version of NEXA (v1.2.0+4).'),
               backgroundColor: NexaColors.emeraldSecure,
               duration: Duration(seconds: 3),
             ),
@@ -93,11 +93,11 @@ class UpdateEngine {
       builder: (ctx) {
         return Container(
           decoration: const BoxDecoration(
-            color: NexaColors.surfaceLight,
+            color: Color(0xFF0F172A),
             borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
             boxShadow: [
               BoxShadow(
-                color: Colors.black26,
+                color: Colors.black54,
                 blurRadius: 30,
                 offset: Offset(0, -5),
               ),

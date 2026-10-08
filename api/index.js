@@ -295,6 +295,136 @@ app.post('/v1/auth/contacts/sync', async (req, res) => {
   });
 });
 
+app.get('/v1/users/lookup', (req, res) => {
+  const query = req.query.q || req.query.query || '';
+  const results = Database.searchUsers(query);
+  return res.json({
+    success: true,
+    count: results.length,
+    users: results
+  });
+});
+
+app.get('/v1/users/lookup/:query', (req, res) => {
+  const results = Database.searchUsers(req.params.query);
+  return res.json({
+    success: true,
+    count: results.length,
+    users: results
+  });
+});
+
+// --------------------------------------------------------------------------
+// 5.5 CALL SIGNALING & VIDEO/VOICE CALL INVITATION ENGINE
+// --------------------------------------------------------------------------
+app.post('/v1/calls/offer', (req, res) => {
+  const { caller_handle, caller_nexa_id, caller_name, recipient_handle, recipient_nexa_id, call_type, offer_id } = req.body || {};
+  if (!caller_handle || (!recipient_handle && !recipient_nexa_id)) {
+    return res.status(400).json({ error: 'caller_handle and recipient identifier are required.' });
+  }
+
+  const session = Database.createCallSession({
+    call_id: offer_id,
+    caller_handle,
+    caller_nexa_id,
+    caller_name,
+    recipient_handle,
+    recipient_nexa_id,
+    call_type: call_type || 'video'
+  });
+
+  return res.status(201).json({
+    success: true,
+    call_id: session.call_id,
+    session
+  });
+});
+
+app.get('/v1/calls/incoming/:user', (req, res) => {
+  const user = req.params.user;
+  const call = Database.getIncomingCall(user);
+  return res.json({
+    success: true,
+    has_incoming: Boolean(call),
+    call: call || null
+  });
+});
+
+app.post('/v1/calls/answer', (req, res) => {
+  const { call_id, accepted } = req.body || {};
+  if (!call_id) {
+    return res.status(400).json({ error: 'call_id is required.' });
+  }
+
+  const session = Database.answerCallSession(call_id, Boolean(accepted));
+  if (!session) {
+    return res.status(404).json({ error: 'Call session not found or already expired.' });
+  }
+
+  return res.json({
+    success: true,
+    session
+  });
+});
+
+app.post('/v1/calls/end', (req, res) => {
+  const { call_id } = req.body || {};
+  if (!call_id) {
+    return res.status(400).json({ error: 'call_id is required.' });
+  }
+
+  const session = Database.endCallSession(call_id);
+  return res.json({
+    success: true,
+    session: session || { status: 'ended' }
+  });
+});
+
+app.get('/v1/calls/session/:callId', (req, res) => {
+  const session = Database.getCallSession(req.params.callId);
+  if (!session) {
+    return res.status(404).json({ error: 'Call session not found or expired.' });
+  }
+  return res.json({
+    success: true,
+    session
+  });
+});
+
+// --------------------------------------------------------------------------
+// 5.6 APPLICATION UPDATE ENGINE
+// --------------------------------------------------------------------------
+app.get(['/v1/app/version', '/v1/app/check-update'], (req, res) => {
+  const versionInfo = Database.getAppVersion();
+  return res.json({
+    success: true,
+    ...versionInfo
+  });
+});
+
+app.post('/v1/admin/app/push-update', adminAuthMiddleware, (req, res) => {
+  const { latest_version, build_number, release_date, release_notes, download_url, web_url, mandatory } = req.body || {};
+  if (!latest_version || !build_number) {
+    return res.status(400).json({ error: 'latest_version and build_number are required.' });
+  }
+
+  const updated = Database.setAppVersion({
+    latest_version,
+    build_number,
+    release_date,
+    release_notes,
+    download_url,
+    web_url,
+    mandatory
+  });
+
+  return res.json({
+    success: true,
+    message: `Application update v${updated.latest_version}+${updated.build_number} published successfully.`,
+    app_version: updated
+  });
+});
+
 // --------------------------------------------------------------------------
 // 6. ADMIN CONTROL CENTER API
 // --------------------------------------------------------------------------

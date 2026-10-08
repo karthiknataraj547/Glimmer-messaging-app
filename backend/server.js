@@ -623,6 +623,154 @@ app.post('/v1/admin/app/push-update', adminAuthMiddleware, (req, res) => {
   });
 });
 
+// --- 1.11 CALL SIGNALING & VIDEO/VOICE CALL INVITATION ENGINE ---
+/**
+ * User 1 initiates call to User 2 (Voice or Video)
+ */
+app.post('/v1/calls/offer', (req, res) => {
+  const { caller_handle, caller_nexa_id, caller_name, recipient_handle, recipient_nexa_id, call_type, offer_id } = req.body || {};
+  if (!caller_handle || (!recipient_handle && !recipient_nexa_id)) {
+    return res.status(400).json({ error: 'caller_handle and recipient identifier are required.' });
+  }
+
+  const session = Database.createCallSession({
+    call_id: offer_id,
+    caller_handle,
+    caller_nexa_id,
+    caller_name,
+    recipient_handle,
+    recipient_nexa_id,
+    call_type: call_type || 'video'
+  });
+
+  // Notify any active WebSockets of the incoming call
+  for (const [, conn] of activeConnections.entries()) {
+    if (conn.readyState === 1) {
+      conn.send(JSON.stringify({
+        event: 'INCOMING_CALL',
+        call: session
+      }));
+    }
+  }
+
+  return res.status(201).json({
+    success: true,
+    call_id: session.call_id,
+    session
+  });
+});
+
+/**
+ * Callee checks or polls for incoming calls
+ */
+app.get('/v1/calls/incoming/:user', (req, res) => {
+  const user = req.params.user;
+  const call = Database.getIncomingCall(user);
+  return res.json({
+    success: true,
+    has_incoming: Boolean(call),
+    call: call || null
+  });
+});
+
+/**
+ * Callee answers (accepts or declines) incoming call
+ */
+app.post('/v1/calls/answer', (req, res) => {
+  const { call_id, accepted } = req.body || {};
+  if (!call_id) {
+    return res.status(400).json({ error: 'call_id is required.' });
+  }
+
+  const session = Database.answerCallSession(call_id, Boolean(accepted));
+  if (!session) {
+    return res.status(404).json({ error: 'Call session not found or already expired.' });
+  }
+
+  return res.json({
+    success: true,
+    session
+  });
+});
+
+/**
+ * End or hang up an active call
+ */
+app.post('/v1/calls/end', (req, res) => {
+  const { call_id } = req.body || {};
+  if (!call_id) {
+    return res.status(400).json({ error: 'call_id is required.' });
+  }
+
+  const session = Database.endCallSession(call_id);
+  return res.json({
+    success: true,
+    session: session || { status: 'ended' }
+  });
+});
+
+/**
+ * Inspect active call session status
+ */
+app.get('/v1/calls/session/:callId', (req, res) => {
+  const session = Database.getCallSession(req.params.callId);
+  if (!session) {
+    return res.status(404).json({ error: 'Call session not found or expired.' });
+  }
+  return res.json({
+    success: true,
+    session
+  });
+});
+
+// --- 1.12 CONTACTS SYNC & DIRECTORY RESOLUTION ---
+app.post('/v1/auth/contacts/sync', async (req, res) => {
+  const { phones = [] } = req.body || {};
+  const matched = Database.matchContactsByPhones(phones);
+  return res.json({
+    success: true,
+    matched_count: matched.length,
+    contacts: matched
+  });
+});
+
+app.get('/v1/directory/users', async (req, res) => {
+  const list = await Database.listUsers();
+  return res.json({
+    count: list.length,
+    users: list.map(u => ({
+      username: u.username,
+      handle: `@${u.username}`,
+      nexa_id: u.nexa_id,
+      full_name: u.full_name,
+      phone: u.phone,
+      about: u.about
+    }))
+  });
+});
+
+app.get('/v1/directory/resolve/:identifier', async (req, res) => {
+  const raw = (req.params.identifier || '').trim();
+  const clean = sanitizeUsername(raw);
+
+  let user = await Database.findUser(clean);
+  if (!user && raw.toUpperCase().startsWith('NX-')) {
+    user = await Database.findUserByNexaId(raw.toUpperCase());
+  }
+
+  if (!user) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+
+  return res.json({
+    user_id: user.nexa_id,
+    handle: `@${user.username}`,
+    username: user.username,
+    full_name: user.full_name,
+    phone: user.phone || ''
+  });
+});
+
 
 
 // --- 1.1 WebRTC ICE & TURN EPHEMERAL CREDENTIALS ---

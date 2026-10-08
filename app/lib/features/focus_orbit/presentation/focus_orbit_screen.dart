@@ -1,24 +1,18 @@
 import 'dart:async';
-import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../core/network/auth_service.dart';
 import '../../../core/session/user_session.dart';
-import '../../../core/theme/nexa_theme.dart';
 import '../../../core/services/contacts_service.dart';
 import '../../../core/services/chat_service.dart';
+import '../../../core/services/call_service.dart';
 import '../../../core/services/update_engine.dart';
-import '../../auth/presentation/auth_flow_screen.dart';
 import '../../auth/presentation/device_link_qr_screen.dart';
 import '../../auth/presentation/recovery_key_vault_screen.dart';
-import '../../calls/presentation/active_call_screen.dart';
 import '../../chat/presentation/chat_screen.dart';
-import '../../communities/presentation/explore_communities_screen.dart';
-import '../../posts/presentation/posts_feed_screen.dart';
 import '../../privacy_center/presentation/privacy_center_screen.dart';
-import '../../profile/presentation/user_profile_screen.dart';
-import '../../stories/presentation/story_viewer_screen.dart';
+import '../../auth/presentation/auth_flow_screen.dart';
 
 class FocusOrbitScreen extends StatefulWidget {
   const FocusOrbitScreen({super.key});
@@ -31,28 +25,39 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final UserSession _session = UserSession.instance;
 
-  int _activeNav = 0; // 0 = Chats, 1 = Posts, 2 = Communities, 3 = Calls
-  final TextEditingController _searchController = TextEditingController();
-  String _searchQuery = '';
-  String _activeFilter = 'All'; // All, Direct, Groups, Unread
-  bool _quietModeActive = false;
-  String? _myStoryStatus;
+  int _activeNav = 0; // 0 = Chats, 1 = Contacts, 2 = Calls, 3 = Settings
 
-  // Real Data Stores (Zero mock data or fake seeded accounts)
-  final List<Map<String, dynamic>> _stories = [];
+  // Chats
   final List<Map<String, dynamic>> _chats = [];
-  final List<Map<String, dynamic>> _callLogs = [];
-
   Timer? _inboxSyncTimer;
+  final TextEditingController _chatSearchController = TextEditingController();
+  String _chatSearchQuery = '';
+
+  // Contacts
+  List<Map<String, dynamic>> _deviceContacts = [];
+  List<Map<String, dynamic>> _directoryUsers = [];
+  bool _isLoadingContacts = false;
+  int _activeContactsTab = 0; // 0 = On NEXA, 1 = All Contacts, 2 = ID Search
+  final TextEditingController _contactsSearchController = TextEditingController();
+  String _contactsSearchQuery = '';
+
+  // Calls
+  final List<Map<String, dynamic>> _callLogs = [];
 
   @override
   void initState() {
     super.initState();
     _session.addListener(_onSessionChanged);
+
+    // 1. Initial message sync & periodic background polling
     _syncInbox();
-    _inboxSyncTimer = Timer.periodic(const Duration(seconds: 4), (_) => _syncInbox());
+    _inboxSyncTimer = Timer.periodic(const Duration(seconds: 3), (_) => _syncInbox());
+
+    // 2. Start global real-time call invitation listener
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      CallService.instance.startListening(context);
       UpdateEngine.instance.checkForUpdate(context);
+      _loadContacts();
     });
   }
 
@@ -60,7 +65,9 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
   void dispose() {
     _session.removeListener(_onSessionChanged);
     _inboxSyncTimer?.cancel();
-    _searchController.dispose();
+    CallService.instance.stopListening();
+    _chatSearchController.dispose();
+    _contactsSearchController.dispose();
     super.dispose();
   }
 
@@ -68,7 +75,7 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
     if (mounted) setState(() {});
   }
 
-  /// Bidirectional message sync: Polls server inbox for incoming messages
+  /// Synchronize incoming chat messages from server relay
   Future<void> _syncInbox() async {
     if (!mounted || !_session.isLoggedIn) return;
     try {
@@ -79,7 +86,7 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
       for (final msg in messages) {
         final senderHandle = (msg['sender_handle'] as String?) ?? 'Peer';
         final senderNexaId = (msg['sender_nexa_id'] as String?) ?? 'NX-${senderHandle.toUpperCase()}';
-        final text = (msg['text'] as String?) ?? 'Sent an encrypted memo';
+        final text = (msg['text'] as String?) ?? 'Encrypted Memo';
         final ts = (msg['timestamp'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch;
         final timeStr = _formatTimestamp(ts);
 
@@ -107,7 +114,6 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
             'message': text,
             'time': timeStr,
             'unread': 1,
-            'isGroup': false,
           });
           changed = true;
         }
@@ -117,6 +123,26 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
         setState(() {});
       }
     } catch (_) {}
+  }
+
+  /// Load device contacts and online user directory
+  Future<void> _loadContacts() async {
+    if (!mounted) return;
+    setState(() => _isLoadingContacts = true);
+
+    try {
+      // Fetch online directory
+      final onlineUsers = await AuthService.instance.getRegisteredUsersOnline();
+      _directoryUsers = onlineUsers;
+
+      // Fetch device contacts
+      final rawDevice = await ContactsService.instance.fetchDeviceContacts();
+      _deviceContacts = ContactsService.instance.correlateContactsWithRegistered(rawDevice, onlineUsers);
+    } catch (e) {
+      debugPrint('[FocusOrbit] Contacts loading error: $e');
+    } finally {
+      if (mounted) setState(() => _isLoadingContacts = false);
+    }
   }
 
   String _formatTimestamp(int ts) {
@@ -129,924 +155,36 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
     return '${dt.month}/${dt.day}';
   }
 
-  // ==========================================
-  // MOBILE CONTACTS & NEXA ID SERVING / LOOKUP
-  // ==========================================
-  void _showStartNewChatModal() async {
-    final searchCtrl = TextEditingController();
-    int activeModalTab = 0; // 0 = Mobile Contacts, 1 = NEXA ID Search
-    bool loadingContacts = true;
-    bool loadingDirectory = false;
-    List<Map<String, dynamic>> deviceContacts = [];
-    List<Map<String, dynamic>> directoryResults = [];
-    List<Map<String, dynamic>> registeredUsers = [];
-
-    // Pre-fetch registered online users and native device contacts
-    try {
-      registeredUsers = await AuthService.instance.getRegisteredUsersOnline();
-    } catch (_) {}
-
-    try {
-      final rawContacts = await ContactsService.instance.fetchDeviceContacts();
-      deviceContacts = ContactsService.instance.correlateContactsWithRegistered(
-        rawContacts,
-        registeredUsers,
-      );
-      loadingContacts = false;
-    } catch (_) {
-      loadingContacts = false;
-    }
-
-    if (!mounted) return;
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: NexaColors.surfaceLight,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            final query = searchCtrl.text.trim();
-
-            // Contacts filtered by search
-            final filteredContacts = deviceContacts.where((c) {
-              if (query.isEmpty) return true;
-              final q = query.toLowerCase();
-              final name = (c['name'] as String? ?? '').toLowerCase();
-              final phone = (c['phone'] as String? ?? '').toLowerCase();
-              return name.contains(q) || phone.contains(q);
-            }).toList();
-
-            // Directory / ID search results
-            final filteredDirectory = directoryResults.isNotEmpty
-                ? directoryResults
-                : registeredUsers.where((u) {
-                    if (query.isEmpty) return true;
-                    final q = query.toLowerCase();
-                    final un = (u['username'] ?? '').toString().toLowerCase();
-                    final fn = (u['fullName'] ?? '').toString().toLowerCase();
-                    final nid = (u['nexaId'] ?? '').toString().toLowerCase();
-                    return un.contains(q) || fn.contains(q) || nid.contains(q);
-                  }).toList();
-
-            return SafeArea(
-              child: Padding(
-                padding: EdgeInsets.only(
-                  left: 20,
-                  right: 20,
-                  top: 18,
-                  bottom: MediaQuery.of(ctx).viewInsets.bottom + 18,
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Header Bar
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(8),
-                              decoration: BoxDecoration(
-                                color: NexaColors.primary.withValues(alpha: 0.12),
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: const Icon(Icons.shield_outlined, color: NexaColors.primary, size: 20),
-                            ),
-                            const SizedBox(width: 10),
-                            const Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Start Encrypted Chat',
-                                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: NexaColors.textPrimary),
-                                ),
-                                Text(
-                                  'End-to-End Encrypted via Double Ratchet',
-                                  style: TextStyle(fontSize: 11, color: NexaColors.textMuted),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.close, size: 20),
-                          onPressed: () => Navigator.pop(ctx),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-
-                    // Tab Selector: [Device Contacts] vs [NEXA ID & Directory]
-                    Container(
-                      padding: const EdgeInsets.all(4),
-                      decoration: BoxDecoration(
-                        color: NexaColors.elevatedLight,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: GestureDetector(
-                              onTap: () => setModalState(() => activeModalTab = 0),
-                              child: AnimatedContainer(
-                                duration: const Duration(milliseconds: 180),
-                                padding: const EdgeInsets.symmetric(vertical: 8),
-                                decoration: BoxDecoration(
-                                  color: activeModalTab == 0 ? NexaColors.surfaceLight : Colors.transparent,
-                                  borderRadius: BorderRadius.circular(9),
-                                  boxShadow: activeModalTab == 0
-                                      ? [const BoxShadow(color: Colors.black12, blurRadius: 4, offset: Offset(0, 1))]
-                                      : null,
-                                ),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(
-                                      Icons.contacts_outlined,
-                                      size: 16,
-                                      color: activeModalTab == 0 ? NexaColors.primary : NexaColors.textMuted,
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      'Device Contacts',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.bold,
-                                        color: activeModalTab == 0 ? NexaColors.textPrimary : NexaColors.textMuted,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                          Expanded(
-                            child: GestureDetector(
-                              onTap: () => setModalState(() => activeModalTab = 1),
-                              child: AnimatedContainer(
-                                duration: const Duration(milliseconds: 180),
-                                padding: const EdgeInsets.symmetric(vertical: 8),
-                                decoration: BoxDecoration(
-                                  color: activeModalTab == 1 ? NexaColors.surfaceLight : Colors.transparent,
-                                  borderRadius: BorderRadius.circular(9),
-                                  boxShadow: activeModalTab == 1
-                                      ? [const BoxShadow(color: Colors.black12, blurRadius: 4, offset: Offset(0, 1))]
-                                      : null,
-                                ),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(
-                                      Icons.fingerprint,
-                                      size: 16,
-                                      color: activeModalTab == 1 ? NexaColors.primary : NexaColors.textMuted,
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      'NEXA ID & Lookup',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.bold,
-                                        color: activeModalTab == 1 ? NexaColors.textPrimary : NexaColors.textMuted,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-
-                    // Search input
-                    TextField(
-                      controller: searchCtrl,
-                      onChanged: (text) async {
-                        setModalState(() {});
-                        if (activeModalTab == 1 && text.trim().length >= 2) {
-                          setModalState(() => loadingDirectory = true);
-                          final res = await ContactsService.instance.searchNexaDirectory(text.trim());
-                          if (mounted) {
-                            setModalState(() {
-                              directoryResults = res;
-                              loadingDirectory = false;
-                            });
-                          }
-                        }
-                      },
-                      decoration: InputDecoration(
-                        hintText: activeModalTab == 0
-                            ? 'Filter contacts by name or phone...'
-                            : 'Enter NEXA ID (e.g. NX-...) or @username...',
-                        prefixIcon: const Icon(Icons.search, size: 20),
-                        suffixIcon: query.isNotEmpty
-                            ? IconButton(
-                                icon: const Icon(Icons.clear, size: 18),
-                                onPressed: () {
-                                  searchCtrl.clear();
-                                  setModalState(() {
-                                    directoryResults.clear();
-                                  });
-                                },
-                              )
-                            : null,
-                        filled: true,
-                        fillColor: NexaColors.elevatedLight,
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-
-                    // TAB CONTENT
-                    if (activeModalTab == 0) ...[
-                      // TAB 0: DEVICE CONTACTS
-                      if (loadingContacts)
-                        const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 30),
-                          child: Center(
-                            child: Column(
-                              children: [
-                                CircularProgressIndicator(strokeWidth: 2),
-                                SizedBox(height: 10),
-                                Text('Fetching device contacts...', style: TextStyle(fontSize: 12, color: NexaColors.textMuted)),
-                              ],
-                            ),
-                          ),
-                        )
-                      else if (filteredContacts.isEmpty) ...[
-                        Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: NexaColors.elevatedLight,
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: NexaColors.borderLight),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  const Icon(Icons.perm_contact_calendar_outlined, color: NexaColors.primary, size: 22),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: Text(
-                                      kIsWeb ? 'Device Address Book on Mobile' : 'No Contacts Found',
-                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: NexaColors.textPrimary),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                kIsWeb
-                                    ? 'Native contact fetching is active on Android/iOS mobile devices. On the web app, you can search any peer directly by their NEXA ID or @username.'
-                                    : 'No contacts matched or address book permission was not granted. You can search directly by NEXA ID.',
-                                style: const TextStyle(fontSize: 12, color: NexaColors.textSecondary, height: 1.4),
-                              ),
-                              const SizedBox(height: 12),
-                              ElevatedButton.icon(
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: NexaColors.primary,
-                                  foregroundColor: Colors.white,
-                                  minimumSize: const Size(double.infinity, 38),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                ),
-                                icon: const Icon(Icons.fingerprint, size: 16),
-                                label: const Text('Switch to NEXA ID & Handle Search', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                                onPressed: () => setModalState(() => activeModalTab = 1),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ] else ...[
-                        ConstrainedBox(
-                          constraints: const BoxConstraints(maxHeight: 280),
-                          child: ListView.separated(
-                            shrinkWrap: true,
-                            itemCount: filteredContacts.length,
-                            separatorBuilder: (_, _) => const Divider(height: 8, color: NexaColors.borderLight),
-                            itemBuilder: (context, i) {
-                              final contact = filteredContacts[i];
-                              final cName = (contact['name'] as String?) ?? 'Contact';
-                              final cPhone = (contact['phone'] as String?) ?? '';
-                              final isOnNexa = contact['isOnNexa'] == true;
-                              final nexaUser = contact['nexaUser'] as Map<String, dynamic>?;
-
-                              return ListTile(
-                                contentPadding: EdgeInsets.zero,
-                                leading: CircleAvatar(
-                                  backgroundColor: isOnNexa ? NexaColors.emeraldSecure.withValues(alpha: 0.15) : NexaColors.elevatedLight,
-                                  child: Text(
-                                    cName.isNotEmpty ? cName.substring(0, 1).toUpperCase() : '?',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: isOnNexa ? NexaColors.emeraldSecure : NexaColors.textPrimary,
-                                    ),
-                                  ),
-                                ),
-                                title: Row(
-                                  children: [
-                                    Flexible(
-                                      child: Text(cName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13), overflow: TextOverflow.ellipsis),
-                                    ),
-                                    if (isOnNexa) ...[
-                                      const SizedBox(width: 6),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                        decoration: BoxDecoration(
-                                          color: NexaColors.emeraldSecure.withValues(alpha: 0.15),
-                                          borderRadius: BorderRadius.circular(6),
-                                        ),
-                                        child: const Text('On NEXA', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: NexaColors.emeraldSecure)),
-                                      ),
-                                    ],
-                                  ],
-                                ),
-                                subtitle: Text(
-                                  isOnNexa && nexaUser != null
-                                      ? '@${nexaUser['username']} • ${nexaUser['nexaId']}'
-                                      : cPhone,
-                                  style: const TextStyle(fontSize: 11, color: NexaColors.textMuted),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                trailing: isOnNexa && nexaUser != null
-                                    ? ElevatedButton(
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: NexaColors.primary,
-                                          foregroundColor: Colors.white,
-                                          minimumSize: const Size(60, 32),
-                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                        ),
-                                        onPressed: () {
-                                          final handle = (nexaUser['username'] ?? cName) as String;
-                                          final nId = (nexaUser['nexaId'] ?? 'NX-PEER') as String;
-                                          Navigator.pop(ctx);
-                                          _openOrCreateChat('@$handle', nId);
-                                        },
-                                        child: const Text('Chat', style: TextStyle(fontSize: 12)),
-                                      )
-                                    : OutlinedButton(
-                                        style: OutlinedButton.styleFrom(
-                                          foregroundColor: NexaColors.primary,
-                                          side: BorderSide(color: NexaColors.primary.withValues(alpha: 0.5)),
-                                          minimumSize: const Size(60, 32),
-                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                        ),
-                                        onPressed: () {
-                                          Clipboard.setData(const ClipboardData(
-                                            text: 'Join me on NEXA for secure end-to-end encrypted messaging: https://glimmer-messaging-app-web.vercel.app/',
-                                          ));
-                                          ScaffoldMessenger.of(context).showSnackBar(
-                                            SnackBar(
-                                              content: Text('Invitation link for $cName copied to clipboard!'),
-                                              backgroundColor: NexaColors.emeraldSecure,
-                                            ),
-                                          );
-                                        },
-                                        child: const Text('Invite', style: TextStyle(fontSize: 11)),
-                                      ),
-                              );
-                            },
-                          ),
-                        ),
-                      ],
-                    ] else ...[
-                      // TAB 1: NEXA ID & DIRECTORY SEARCH (ID SERVICING OPTION)
-                      if (loadingDirectory)
-                        const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 20),
-                          child: Center(
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
-                                SizedBox(width: 10),
-                                Text('Querying NEXA directory...', style: TextStyle(fontSize: 12, color: NexaColors.textMuted)),
-                              ],
-                            ),
-                          ),
-                        ),
-
-                      if (query.isNotEmpty && filteredDirectory.isEmpty && !loadingDirectory) ...[
-                        // Direct Custom ID or Handle Session Creator
-                        Container(
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: NexaColors.primary.withValues(alpha: 0.08),
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: NexaColors.primary.withValues(alpha: 0.25)),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  const CircleAvatar(
-                                    backgroundColor: NexaColors.primary,
-                                    radius: 18,
-                                    child: Icon(Icons.fingerprint, color: Colors.white, size: 20),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          query,
-                                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: NexaColors.textPrimary),
-                                        ),
-                                        const Text('Direct Peer-to-Peer Identifier', style: TextStyle(fontSize: 11, color: NexaColors.textMuted)),
-                                      ],
-                                    ),
-                                  ),
-                                  ElevatedButton(
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: NexaColors.primary,
-                                      foregroundColor: Colors.white,
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                    ),
-                                    onPressed: () {
-                                      final targetId = query.startsWith('NX-')
-                                          ? query
-                                          : 'NX-${query.replaceAll('@', '').hashCode.abs().toRadixString(16).toUpperCase()}';
-                                      final targetName = query.startsWith('@') ? query : '@$query';
-                                      Navigator.pop(ctx);
-                                      _openOrCreateChat(targetName, targetId);
-                                    },
-                                    child: const Text('Start Chat'),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              const Text(
-                                'You can chat directly with any peer by entering their unique NEXA ID or handle. Messages will be delivered in real-time or queued when offline.',
-                                style: TextStyle(fontSize: 11, color: NexaColors.textSecondary),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ] else if (filteredDirectory.isNotEmpty) ...[
-                        ConstrainedBox(
-                          constraints: const BoxConstraints(maxHeight: 280),
-                          child: ListView.separated(
-                            shrinkWrap: true,
-                            itemCount: filteredDirectory.length,
-                            separatorBuilder: (_, _) => const Divider(height: 8, color: NexaColors.borderLight),
-                            itemBuilder: (context, i) {
-                              final u = filteredDirectory[i];
-                              final uName = (u['fullName'] ?? u['username'] ?? 'User') as String;
-                              final uHandle = (u['handle'] ?? '@${u['username']}') as String;
-                              final uNexaId = (u['nexaId'] ?? 'NX-PEER') as String;
-
-                              return ListTile(
-                                contentPadding: EdgeInsets.zero,
-                                leading: CircleAvatar(
-                                  backgroundColor: NexaColors.primary.withValues(alpha: 0.15),
-                                  child: Text(
-                                    uName.isNotEmpty ? uName.substring(0, 1).toUpperCase() : 'U',
-                                    style: const TextStyle(fontWeight: FontWeight.bold, color: NexaColors.primary),
-                                  ),
-                                ),
-                                title: Text(uName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                                subtitle: Text('$uHandle • $uNexaId', style: const TextStyle(fontSize: 11, color: NexaColors.textSecondary)),
-                                trailing: ElevatedButton(
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: NexaColors.primary,
-                                    foregroundColor: Colors.white,
-                                    minimumSize: const Size(60, 32),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                  ),
-                                  onPressed: () {
-                                    Navigator.pop(ctx);
-                                    _openOrCreateChat(uHandle, uNexaId);
-                                  },
-                                  child: const Text('Chat', style: TextStyle(fontSize: 12)),
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                      ] else ...[
-                        const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 24),
-                          child: Center(
-                            child: Column(
-                              children: [
-                                Icon(Icons.fingerprint, size: 38, color: NexaColors.textMuted),
-                                SizedBox(height: 8),
-                                Text('ID Serving & Lookup Option', style: TextStyle(color: NexaColors.textPrimary, fontSize: 13, fontWeight: FontWeight.bold)),
-                                SizedBox(height: 4),
-                                Text('Type any NEXA ID (e.g. NX-...) or @username to start a peer chat session.', textAlign: TextAlign.center, style: TextStyle(color: NexaColors.textMuted, fontSize: 11)),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  void _openOrCreateChat(String name, String nexaId) {
-    final existingIdx = _chats.indexWhere((c) => c['name'] == name || c['nexaId'] == nexaId);
-    if (existingIdx == -1) {
-      setState(() {
-        _chats.insert(0, {
-          'name': name,
-          'nexaId': nexaId,
-          'message': 'Encrypted Double Ratchet session initiated.',
-          'time': 'Just now',
-          'unread': 0,
-          'isGroup': false,
-        });
-      });
-    }
-
+  void _openChat(String contactName, String nexaId) {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => ChatScreen(contactName: name, nexaId: nexaId),
-      ),
-    );
-  }
-
-  // ==========================================
-  // REAL ENCRYPTED CALL LAUNCHER MODAL
-  // ==========================================
-  void _showStartNewCallModal({required bool isVideo}) async {
-    final searchCtrl = TextEditingController();
-    List<Map<String, dynamic>> registeredUsers = [];
-    try {
-      registeredUsers = await AuthService.instance.getRegisteredUsersOnline();
-    } catch (_) {}
-
-    if (!mounted) return;
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: NexaColors.surfaceLight,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            return SafeArea(
-              child: Padding(
-                padding: EdgeInsets.only(
-                  left: 20,
-                  right: 20,
-                  top: 20,
-                  bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Row(
-                          children: [
-                            Icon(isVideo ? Icons.videocam : Icons.call, color: NexaColors.primary, size: 22),
-                            const SizedBox(width: 8),
-                            Text(
-                              isVideo ? 'Start Encrypted Video Call' : 'Start Encrypted Voice Call',
-                              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: NexaColors.textPrimary),
-                            ),
-                          ],
-                        ),
-                        IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(ctx)),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      isVideo
-                          ? 'Real device camera hardware streaming with DTLS-SRTP encryption.'
-                          : 'Encrypted P2P crystal-clear audio tunnel.',
-                      style: const TextStyle(fontSize: 12, color: NexaColors.textSecondary),
-                    ),
-                    const SizedBox(height: 14),
-                    TextField(
-                      controller: searchCtrl,
-                      onChanged: (_) => setModalState(() {}),
-                      decoration: InputDecoration(
-                        hintText: 'Enter peer name, @handle or NEXA ID...',
-                        prefixIcon: const Icon(Icons.search, size: 20),
-                        filled: true,
-                        fillColor: NexaColors.elevatedLight,
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    if (searchCtrl.text.trim().isNotEmpty) ...[
-                      ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: NexaColors.primary,
-                          foregroundColor: Colors.white,
-                          minimumSize: const Size(double.infinity, 44),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        ),
-                        icon: Icon(isVideo ? Icons.videocam : Icons.call, size: 18),
-                        label: Text('Call ${searchCtrl.text.trim()}'),
-                        onPressed: () {
-                          final name = searchCtrl.text.trim();
-                          Navigator.pop(ctx);
-                          _launchCall(name, 'NX-${name.hashCode.abs().toRadixString(16).toUpperCase()}', isVideo);
-                        },
-                      ),
-                    ] else if (registeredUsers.isNotEmpty) ...[
-                      const Text('ONLINE REGISTERED PEERS', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: NexaColors.textMuted)),
-                      const SizedBox(height: 8),
-                      ...registeredUsers.map((u) {
-                        final name = (u['fullName'] ?? u['username'] ?? 'User') as String;
-                        final nexaId = (u['nexaId'] ?? 'NX-PEER') as String;
-                        return ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          leading: CircleAvatar(
-                            backgroundColor: NexaColors.primary.withValues(alpha: 0.15),
-                            child: Text(name.substring(0, 1).toUpperCase(), style: const TextStyle(color: NexaColors.primary, fontWeight: FontWeight.bold)),
-                          ),
-                          title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                          subtitle: Text(nexaId, style: const TextStyle(fontSize: 11, color: NexaColors.textSecondary)),
-                          trailing: IconButton(
-                            icon: Icon(isVideo ? Icons.videocam : Icons.call, color: NexaColors.primary),
-                            onPressed: () {
-                              Navigator.pop(ctx);
-                              _launchCall(name, nexaId, isVideo);
-                            },
-                          ),
-                        );
-                      }),
-                    ] else ...[
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 20),
-                        child: Center(
-                          child: Text(
-                            'Type any peer handle above to begin encrypted ${isVideo ? "video" : "voice"} call.',
-                            style: const TextStyle(color: NexaColors.textSecondary, fontSize: 13),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  void _launchCall(String peerName, String peerNexaId, bool isVideo) {
-    setState(() {
-      _callLogs.insert(0, {
-        'name': peerName,
-        'nexaId': peerNexaId,
-        'type': isVideo ? 'Outgoing Video' : 'Outgoing Audio',
-        'duration': 'Connected',
-        'time': 'Just now',
-        'isVideo': isVideo,
-        'isMissed': false,
-      });
-    });
-
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => ActiveCallScreen(
-          peerName: peerName,
-          peerNexaId: peerNexaId,
-          isVideo: isVideo,
+        builder: (_) => ChatScreen(
+          contactName: contactName,
+          nexaId: nexaId,
         ),
       ),
     );
   }
 
-  void _showAddStoryModal() {
-    final TextEditingController storyTextController = TextEditingController();
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: NexaColors.surfaceLight,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (ctx) {
-        return Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(ctx).viewInsets.bottom,
-            left: 20,
-            right: 20,
-            top: 20,
-          ),
-          child: SafeArea(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Post an Encrypted Moment',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: NexaColors.textPrimary),
-                ),
-                const SizedBox(height: 6),
-                const Text(
-                  'Disappears in 24 hours. Shared strictly with your pairwise contacts.',
-                  style: TextStyle(fontSize: 13, color: NexaColors.textSecondary),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: storyTextController,
-                  maxLines: 3,
-                  style: const TextStyle(fontSize: 14),
-                  decoration: InputDecoration(
-                    hintText: 'What are you working on or building today?',
-                    filled: true,
-                    fillColor: NexaColors.elevatedLight,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    OutlinedButton.icon(
-                      onPressed: () async {
-                        Navigator.pop(ctx);
-                        try {
-                          const channel = MethodChannel('com.nexa.media_picker');
-                          final dynamic perm = await channel.invokeMethod('requestNativePermission', {'permission': 'camera'});
-                          if (perm == false) {
-                            if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Camera permission denied.')),
-                              );
-                            }
-                            return;
-                          }
-                          final dynamic result = await channel.invokeMethod('openInbuiltCamera');
-                          if (result != null && result is Map) {
-                            setState(() => _myStoryStatus = '📸 ${result['name'] ?? 'Camera Moment'}');
-                            if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Camera photo added to your moment!')),
-                              );
-                            }
-                          }
-                        } catch (_) {
-                          setState(() => _myStoryStatus = '📷 Attached local laboratory photo');
-                        }
-                      },
-                      icon: const Icon(Icons.photo_camera_outlined, size: 16),
-                      label: const Text('Camera'),
-                    ),
-                    const SizedBox(width: 8),
-                    OutlinedButton.icon(
-                      onPressed: () async {
-                        Navigator.pop(ctx);
-                        try {
-                          const channel = MethodChannel('com.nexa.media_picker');
-                          final dynamic perm = await channel.invokeMethod('requestNativePermission', {'permission': 'storage'});
-                          if (perm == false) {
-                            if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Gallery permission denied.')),
-                              );
-                            }
-                            return;
-                          }
-                          final dynamic result = await channel.invokeMethod('openInbuiltGallery');
-                          if (result != null && result is Map) {
-                            setState(() => _myStoryStatus = '🖼️ ${result['name'] ?? 'Gallery Moment'}');
-                            if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Gallery photo added to your moment!')),
-                              );
-                            }
-                          }
-                        } catch (_) {
-                          setState(() => _myStoryStatus = '🖼️ Attached gallery photo');
-                        }
-                      },
-                      icon: const Icon(Icons.photo_outlined, size: 16),
-                      label: const Text('Gallery'),
-                    ),
-                    const Spacer(),
-                    ElevatedButton(
-                      onPressed: () {
-                        final text = storyTextController.text.trim();
-                        if (text.isEmpty) return;
-                        setState(() => _myStoryStatus = text);
-                        Navigator.pop(ctx);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Your moment is live and end-to-end encrypted!')),
-                        );
-                      },
-                      child: const Text('Share Moment'),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
+  void _startCall({required String contactName, required String nexaId, required bool isVideo}) {
+    // Record to local call logs
+    setState(() {
+      _callLogs.insert(0, {
+        'name': contactName,
+        'nexaId': nexaId,
+        'isVideo': isVideo,
+        'isOutgoing': true,
+        'time': 'Just now',
+      });
+    });
 
-  void _showOrbitQuickFilters() {
-    showModalBottomSheet(
+    CallService.instance.initiateCall(
       context: context,
-      backgroundColor: NexaColors.surfaceLight,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            return SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Row(
-                          children: [
-                            Icon(Icons.tune, color: NexaColors.primary, size: 20),
-                            SizedBox(width: 8),
-                            Text('Focus Orbit Controls', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                          ],
-                        ),
-                        IconButton(icon: const Icon(Icons.close, size: 20), onPressed: () => Navigator.pop(ctx)),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      secondary: const Icon(Icons.nightlight_round, color: NexaColors.primary),
-                      title: const Text('Quiet Mode', style: TextStyle(fontWeight: FontWeight.w600)),
-                      subtitle: const Text('Silences all non-priority background pings'),
-                      value: _quietModeActive,
-                      onChanged: (val) {
-                        setState(() => _quietModeActive = val);
-                        setModalState(() {});
-                      },
-                    ),
-                    const Divider(height: 16, color: NexaColors.borderLight),
-                    const Text('FILTER BY STREAM', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: NexaColors.textMuted)),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      children: ['All', 'Direct', 'Groups', 'Unread'].map((filter) {
-                        final isSel = _activeFilter == filter;
-                        return ChoiceChip(
-                          label: Text(filter),
-                          selected: isSel,
-                          selectedColor: NexaColors.primary,
-                          backgroundColor: NexaColors.elevatedLight,
-                          labelStyle: TextStyle(
-                            color: isSel ? Colors.white : NexaColors.textPrimary,
-                            fontWeight: FontWeight.w600,
-                            fontSize: 12,
-                          ),
-                          onSelected: (_) {
-                            setState(() => _activeFilter = filter);
-                            setModalState(() {});
-                            Navigator.pop(ctx);
-                          },
-                        );
-                      }).toList(),
-                    ),
-                    const SizedBox(height: 16),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
+      recipientHandle: contactName,
+      recipientNexaId: nexaId,
+      peerName: contactName,
+      isVideo: isVideo,
     );
   }
 
@@ -1054,1231 +192,976 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       key: _scaffoldKey,
-      backgroundColor: NexaColors.canvasLight,
-      drawer: _buildAppDrawer(context),
-      endDrawer: _buildAppDrawer(context),
-      body: Stack(
+      backgroundColor: const Color(0xFF090D16),
+      drawer: _buildModernDrawer(),
+      body: SafeArea(
+        child: Column(
+          children: [
+            // Minimalist Top App Bar
+            _buildMinimalistTopBar(),
+
+            // Screen Content
+            Expanded(
+              child: IndexedStack(
+                index: _activeNav,
+                children: [
+                  _buildChatsView(),
+                  _buildContactsView(),
+                  _buildCallsView(),
+                  _buildSettingsView(),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+      bottomNavigationBar: _buildModernBottomBar(),
+      floatingActionButton: _activeNav == 0
+          ? FloatingActionButton(
+              backgroundColor: const Color(0xFF0284C7),
+              foregroundColor: Colors.white,
+              elevation: 4,
+              onPressed: _showNewChatDialog,
+              child: const Icon(Icons.add_comment_rounded, size: 24),
+            )
+          : null,
+    );
+  }
+
+  // =====================================================================
+  // 1. MINIMALIST TOP APP BAR
+  // =====================================================================
+  Widget _buildMinimalistTopBar() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+      decoration: const BoxDecoration(
+        color: Color(0xFF090D16),
+        border: Border(bottom: BorderSide(color: Color(0x1AFFFFFF))),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          SafeArea(
-            bottom: false,
-            child: IndexedStack(
-              index: _activeNav,
+          Row(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.menu_rounded, color: Colors.white, size: 24),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+                onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+              ),
+              const SizedBox(width: 14),
+              Row(
+                children: [
+                  Container(
+                    width: 10,
+                    height: 10,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF00E5FF),
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(color: Color(0xFF00E5FF), blurRadius: 8, spreadRadius: 1),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'NEXA',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 19,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1.5,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+
+          // User handle chip with green online dot
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: const Color(0xFF111827),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: const Color(0x26FFFFFF)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                _buildChatsTab(),
-                const PostsFeedScreen(isEmbedded: true),
-                const ExploreCommunitiesScreen(isEmbedded: true),
-                _buildCallsTab(),
+                Container(
+                  width: 7,
+                  height: 7,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF10B981),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  _session.handle.isNotEmpty ? _session.handle : '@user',
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
               ],
             ),
           ),
-
-          // Floating "=" Focus Orbit Widget (Shifted to right, placed directly above Calls tab with slight gap, only visible in Chats tab)
-          if (_activeNav == 0)
-            Positioned(
-              right: 22,
-              bottom: 12,
-              child: Tooltip(
-                message: 'Focus Controls',
-                child: GestureDetector(
-                  onTap: _showOrbitQuickFilters,
-                  child: Container(
-                    width: 54,
-                    height: 54,
-                    decoration: BoxDecoration(
-                      color: _quietModeActive || _activeFilter != 'All' ? NexaColors.primary : NexaColors.surfaceLight,
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: _quietModeActive || _activeFilter != 'All' ? NexaColors.primary : NexaColors.borderLight,
-                        width: 1.5,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: (_quietModeActive || _activeFilter != 'All' ? NexaColors.primary : Colors.black).withValues(alpha: 0.16),
-                          blurRadius: 12,
-                          offset: const Offset(0, 3),
-                        ),
-                      ],
-                    ),
-                    child: Center(
-                      child: Icon(
-                        Icons.drag_handle,
-                        size: 28,
-                        color: _quietModeActive || _activeFilter != 'All' ? Colors.white : NexaColors.textPrimary,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
         ],
       ),
-      bottomNavigationBar: SafeArea(
-        top: false,
-        child: _buildOrbitDock(context),
-      ),
     );
   }
 
-  // ==========================================
-  // SIDE DRAWER (TOP MENU DROPDOWN)
-  // ==========================================
-  Widget _buildAppDrawer(BuildContext context) {
-    final avatarColor = _session.currentAvatarPreset['color'] as Color;
-    final avatarIcon = _session.currentAvatarPreset['icon'] as IconData;
-
-    return Drawer(
-      backgroundColor: NexaColors.surfaceLight,
-      child: SafeArea(
-        child: Column(
-          children: [
-            // User Profile Header in Drawer
-            InkWell(
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(context, MaterialPageRoute(builder: (_) => const UserProfileScreen()));
-              },
-              child: Container(
-                padding: const EdgeInsets.all(20),
-                decoration: const BoxDecoration(
-                  border: Border(bottom: BorderSide(color: NexaColors.borderLight)),
-                ),
-                child: Row(
-                  children: [
-                    CircleAvatar(
-                      radius: 26,
-                      backgroundColor: avatarColor,
-                      backgroundImage: (_session.customAvatarPath != null && File(_session.customAvatarPath!).existsSync())
-                          ? FileImage(File(_session.customAvatarPath!))
-                          : null,
-                      child: (_session.customAvatarPath != null && File(_session.customAvatarPath!).existsSync())
-                          ? null
-                          : Icon(avatarIcon, color: Colors.white, size: 24),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Text(
-                                _session.name,
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: NexaColors.textPrimary),
-                              ),
-                              const SizedBox(width: 4),
-                              const Icon(Icons.edit, size: 14, color: NexaColors.textMuted),
-                            ],
-                          ),
-                          Text(
-                            _session.handle,
-                            style: const TextStyle(fontSize: 12, color: NexaColors.textSecondary),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            _session.nexaId,
-                            style: const TextStyle(fontFamily: 'Courier', fontSize: 11, color: NexaColors.primary, fontWeight: FontWeight.bold),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-            // Navigation Items
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                children: [
-                  // Security & Privacy Center (Shifted here from bottom nav!)
-                  ListTile(
-                    leading: const Icon(Icons.shield_outlined, color: NexaColors.emeraldSecure),
-                    title: const Text('Security & Privacy Center', style: TextStyle(fontWeight: FontWeight.w600)),
-                    subtitle: const Text('Zero-knowledge & hardware isolation', style: TextStyle(fontSize: 12)),
-                    trailing: const Icon(Icons.chevron_right, size: 18),
-                    onTap: () {
-                      Navigator.pop(context);
-                      Navigator.push(context, MaterialPageRoute(builder: (_) => const PrivacyCenterScreen()));
-                    },
-                  ),
-
-                  // Linked Devices
-                  ListTile(
-                    leading: const Icon(Icons.devices, color: NexaColors.primary),
-                    title: const Text('Linked Devices', style: TextStyle(fontWeight: FontWeight.w600)),
-                    subtitle: const Text('Authorize desktop & secondary phones', style: TextStyle(fontSize: 12)),
-                    trailing: const Icon(Icons.chevron_right, size: 18),
-                    onTap: () {
-                      Navigator.pop(context);
-                      Navigator.push(context, MaterialPageRoute(builder: (_) => const DeviceLinkQrScreen()));
-                    },
-                  ),
-
-                  // Recovery Key Vault
-                  ListTile(
-                    leading: const Icon(Icons.vpn_key_outlined, color: NexaColors.amberAttention),
-                    title: const Text('Recovery Key Vault', style: TextStyle(fontWeight: FontWeight.w600)),
-                    subtitle: const Text('24-word self-sovereign seed', style: TextStyle(fontSize: 12)),
-                    trailing: const Icon(Icons.chevron_right, size: 18),
-                    onTap: () {
-                      Navigator.pop(context);
-                      Navigator.push(context, MaterialPageRoute(builder: (_) => const RecoveryKeyVaultScreen()));
-                    },
-                  ),
-
-                  // Profile Settings
-                  ListTile(
-                    leading: const Icon(Icons.person_outline, color: NexaColors.textSecondary),
-                    title: const Text('Profile & Avatar', style: TextStyle(fontWeight: FontWeight.w600)),
-                    subtitle: const Text('Edit name, photo, and bio', style: TextStyle(fontSize: 12)),
-                    trailing: const Icon(Icons.chevron_right, size: 18),
-                    onTap: () {
-                      Navigator.pop(context);
-                      Navigator.push(context, MaterialPageRoute(builder: (_) => const UserProfileScreen()));
-                    },
-                  ),
-
-                  // Check for App Updates
-                  ListTile(
-                    leading: const Icon(Icons.system_update_alt, color: NexaColors.emeraldSecure),
-                    title: const Text('Check for Updates', style: TextStyle(fontWeight: FontWeight.w600)),
-                    subtitle: const Text('Application update engine (v1.0.0+1)', style: TextStyle(fontSize: 12)),
-                    trailing: const Icon(Icons.chevron_right, size: 18),
-                    onTap: () {
-                      Navigator.pop(context);
-                      UpdateEngine.instance.checkForUpdate(context, userInitiated: true);
-                    },
-                  ),
-
-                  const Divider(color: NexaColors.borderLight),
-
-                  // Settings / Preferences
-                  ListTile(
-                    leading: const Icon(Icons.settings_outlined, color: NexaColors.textSecondary),
-                    title: const Text('Settings', style: TextStyle(fontWeight: FontWeight.w600)),
-                    subtitle: const Text('Notifications, chats & telemetry', style: TextStyle(fontSize: 12)),
-                    trailing: const Icon(Icons.chevron_right, size: 18),
-                    onTap: () {
-                      Navigator.pop(context);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Settings: All telemetry hardware isolated.')),
-                      );
-                    },
-                  ),
-                ],
-              ),
-            ),
-
-            // Bottom Logout / Lock Vault Option
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: const BoxDecoration(
-                border: Border(top: BorderSide(color: NexaColors.borderLight)),
-              ),
-              child: ListTile(
-                leading: const Icon(Icons.lock_outline, color: NexaColors.rubyDestructive),
-                title: const Text('Lock Vault / Switch Account', style: TextStyle(fontWeight: FontWeight.bold, color: NexaColors.rubyDestructive)),
-                onTap: () {
-                  Navigator.pop(context);
-                  _session.logout();
-                  Navigator.pushAndRemoveUntil(
-                    context,
-                    MaterialPageRoute(builder: (_) => const AuthFlowScreen(isLoginInitial: true)),
-                    (route) => false,
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ==========================================
-  // TAB 0: CHATS (WITH STORIES & SEARCH)
-  // ==========================================
-  Widget _buildChatsTab() {
+  // =====================================================================
+  // 2. TAB 0: CHATS VIEW
+  // =====================================================================
+  Widget _buildChatsView() {
     final filtered = _chats.where((c) {
-      final name = (c['name'] as String).toLowerCase();
-      final msg = (c['message'] as String).toLowerCase();
-      final matchesQuery = _searchQuery.isEmpty || name.contains(_searchQuery.toLowerCase()) || msg.contains(_searchQuery.toLowerCase());
-      if (!matchesQuery) return false;
-      if (_activeFilter == 'Direct' && (c['isGroup'] as bool)) return false;
-      if (_activeFilter == 'Groups' && !(c['isGroup'] as bool)) return false;
-      if (_activeFilter == 'Unread' && (c['unread'] as int) == 0) return false;
-      return true;
+      if (_chatSearchQuery.isEmpty) return true;
+      final q = _chatSearchQuery.toLowerCase();
+      final n = (c['name'] as String).toLowerCase();
+      final m = (c['message'] as String).toLowerCase();
+      return n.contains(q) || m.contains(q);
     }).toList();
 
-    return ListView(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      children: [
-        const SizedBox(height: 4),
-        _buildQuietIntelligenceHeader(),
-        const SizedBox(height: 10),
-
-        // Compact Search Bar
-        _buildSearchBar(),
-        const SizedBox(height: 14),
-
-        // Horizontally Scrollable Stories Bar
-        _buildStoriesRow(),
-        const SizedBox(height: 18),
-
-        // Priority Chats Header with Active Filter Indicator
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Row(
-              children: [
-                const Text(
-                  'PRIORITY CHATS',
-                  style: TextStyle(
-                    color: NexaColors.textMuted,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 1.2,
-                  ),
-                ),
-                if (_activeFilter != 'All') ...[
-                  const SizedBox(width: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: NexaColors.primary.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(_activeFilter, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: NexaColors.primary)),
-                  ),
-                ],
-              ],
-            ),
-            Text(
-              '${filtered.length} active',
-              style: const TextStyle(color: NexaColors.textMuted, fontSize: 12),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-
-        if (filtered.isEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 32),
-            child: Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: NexaColors.primary.withValues(alpha: 0.08),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(Icons.shield_outlined, color: NexaColors.primary, size: 36),
-                  ),
-                  const SizedBox(height: 14),
-                  const Text(
-                    'No Encrypted Conversations Yet',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: NexaColors.textPrimary),
-                  ),
-                  const SizedBox(height: 6),
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 24),
-                    child: Text(
-                      'Connect with verified users in the online database or start an encrypted chat using their @handle.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 13, color: NexaColors.textSecondary),
-                    ),
-                  ),
-                  const SizedBox(height: 18),
-                  ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: NexaColors.primary,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                    ),
-                    icon: const Icon(Icons.edit_note, size: 20),
-                    label: const Text('Start Encrypted Chat', style: TextStyle(fontWeight: FontWeight.bold)),
-                    onPressed: _showStartNewChatModal,
-                  ),
-                ],
-              ),
-            ),
-          )
-        else
-          ...filtered.map((chat) {
-            return _buildChatTile(
-              name: chat['name'] as String,
-              nexaId: chat['nexaId'] as String,
-              message: chat['message'] as String,
-              time: chat['time'] as String,
-              unread: chat['unread'] as int,
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => ChatScreen(contactName: chat['name'] as String, nexaId: chat['nexaId'] as String),
-                ),
-              ),
-            );
-          }),
-        const SizedBox(height: 20),
-      ],
-    );
-  }
-
-  // ==========================================
-  // STORIES HORIZONTAL ROW
-  // ==========================================
-  Widget _buildStoriesRow() {
-    final avatarColor = _session.currentAvatarPreset['color'] as Color;
-    final avatarIcon = _session.currentAvatarPreset['icon'] as IconData;
-
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        SizedBox(
-          height: 94,
-          child: ListView.builder(
-            scrollDirection: Axis.horizontal,
-            itemCount: _stories.length + 1,
-            itemBuilder: (context, idx) {
-              if (idx == 0) {
-                // "Your Story" item
-                final hasMyStory = _myStoryStatus != null;
-                return Padding(
-                  padding: const EdgeInsets.only(right: 14),
-                  child: GestureDetector(
-                    onTap: hasMyStory
-                        ? () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => StoryViewerScreen(
-                                  authorName: 'Your Moment',
-                                  authorNexaId: _session.nexaId,
-                                  themeColor: avatarColor,
-                                  slides: [
-                                    {
-                                      'content': _myStoryStatus!,
-                                      'tag': '#my-moment',
-                                      'time': 'Just now',
-                                      'icon': Icons.person,
-                                    },
-                                  ],
-                                ),
-                              ),
-                            );
-                          }
-                        : _showAddStoryModal,
-                    child: Column(
-                      children: [
-                        Stack(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(2.5),
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: hasMyStory ? NexaColors.primary : NexaColors.borderLight,
-                                  width: hasMyStory ? 2.5 : 1,
-                                ),
-                              ),
-                              child: CircleAvatar(
-                                radius: 24,
-                                backgroundColor: avatarColor,
-                                backgroundImage: (_session.customAvatarPath != null && File(_session.customAvatarPath!).existsSync())
-                                    ? FileImage(File(_session.customAvatarPath!))
-                                    : null,
-                                child: (_session.customAvatarPath != null && File(_session.customAvatarPath!).existsSync())
-                                    ? null
-                                    : Icon(avatarIcon, color: Colors.white, size: 20),
-                              ),
-                            ),
-                            Positioned(
-                              bottom: 0,
-                              right: 0,
-                              child: Container(
-                                padding: const EdgeInsets.all(3),
-                                decoration: const BoxDecoration(
-                                  color: NexaColors.primary,
-                                  shape: BoxShape.circle,
-                                ),
-                                child: Icon(hasMyStory ? Icons.check : Icons.add, color: Colors.white, size: 12),
-                              ),
-                            ),
-                          ],
+        // Search Bar
+        Padding(
+          padding: const EdgeInsets.fromLTRB(18, 12, 18, 8),
+          child: TextField(
+            controller: _chatSearchController,
+            onChanged: (val) => setState(() => _chatSearchQuery = val),
+            style: const TextStyle(color: Colors.white, fontSize: 14),
+            decoration: InputDecoration(
+              hintText: 'Search encrypted conversations...',
+              hintStyle: const TextStyle(color: Color(0xFF64748B), fontSize: 13),
+              prefixIcon: const Icon(Icons.search, color: Color(0xFF64748B), size: 18),
+              filled: true,
+              fillColor: const Color(0xFF111827),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: const BorderSide(color: Color(0x1AFFFFFF)),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: const BorderSide(color: Color(0x1AFFFFFF)),
+              ),
+            ),
+          ),
+        ),
+
+        // Chat List
+        Expanded(
+          child: filtered.isEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF111827),
+                          shape: BoxShape.circle,
+                          border: Border.all(color: const Color(0x1AFFFFFF)),
                         ),
-                        const SizedBox(height: 6),
-                        const Text(
-                          'Your Story',
-                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: NexaColors.textPrimary),
+                        child: const Icon(Icons.chat_bubble_outline, color: Color(0xFF00E5FF), size: 36),
+                      ),
+                      const SizedBox(height: 16),
+                      const Text(
+                        'No Encrypted Conversations Yet',
+                        style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        'Start a chat from Contacts or search any peer by NEXA ID.',
+                        style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                      ),
+                      const SizedBox(height: 18),
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF0284C7),
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         ),
-                      ],
-                    ),
+                        icon: const Icon(Icons.person_search, size: 16),
+                        label: const Text('Find Peer by NEXA ID'),
+                        onPressed: _showNewChatDialog,
+                      ),
+                    ],
                   ),
-                );
-              }
+                )
+              : ListView.separated(
+                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+                  itemCount: filtered.length,
+                  separatorBuilder: (_, _) => const Divider(height: 1, color: Color(0x0FFFFFFF)),
+                  itemBuilder: (context, i) {
+                    final item = filtered[i];
+                    final name = (item['name'] as String?) ?? 'Peer';
+                    final msg = (item['message'] as String?) ?? '';
+                    final time = (item['time'] as String?) ?? '';
+                    final unread = (item['unread'] as int?) ?? 0;
+                    final nexaId = (item['nexaId'] as String?) ?? 'NX-PEER';
 
-              // Contact Story Item
-              final story = _stories[idx - 1];
-              final authorName = story['authorName'] as String;
-              final color = story['avatarColor'] as Color;
-
-              return Padding(
-                padding: const EdgeInsets.only(right: 14),
-                child: GestureDetector(
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => StoryViewerScreen(
-                          authorName: authorName,
-                          authorNexaId: story['authorNexaId'] as String,
-                          themeColor: color,
-                          slides: (story['slides'] as List<dynamic>).cast<Map<String, dynamic>>(),
+                    return ListTile(
+                      contentPadding: const EdgeInsets.symmetric(vertical: 4),
+                      onTap: () => _openChat(name, nexaId),
+                      leading: CircleAvatar(
+                        radius: 22,
+                        backgroundColor: const Color(0xFF1E293B),
+                        child: Text(
+                          name.isNotEmpty ? name.replaceAll('@', '').substring(0, 1).toUpperCase() : '?',
+                          style: const TextStyle(color: Color(0xFF00E5FF), fontWeight: FontWeight.bold, fontSize: 16),
                         ),
+                      ),
+                      title: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Flexible(
+                            child: Text(
+                              name,
+                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          Text(time, style: const TextStyle(color: Color(0xFF64748B), fontSize: 11)),
+                        ],
+                      ),
+                      subtitle: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Flexible(
+                            child: Text(
+                              msg,
+                              style: TextStyle(
+                                color: unread > 0 ? Colors.white : const Color(0xFF94A3B8),
+                                fontSize: 12,
+                                fontWeight: unread > 0 ? FontWeight.w600 : FontWeight.normal,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (unread > 0)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: const BoxDecoration(
+                                color: Color(0xFF00E5FF),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Text(
+                                '$unread',
+                                style: const TextStyle(color: Colors.black, fontSize: 10, fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                        ],
                       ),
                     );
                   },
-                  child: Column(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(2.5),
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          border: Border.all(color: color, width: 2.2),
-                        ),
-                        child: CircleAvatar(
-                          radius: 24,
-                          backgroundColor: color.withValues(alpha: 0.15),
-                          child: Text(
-                            authorName.substring(0, 1),
-                            style: TextStyle(fontWeight: FontWeight.bold, color: color, fontSize: 16),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        authorName.split(' ')[0],
-                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: NexaColors.textPrimary),
-                      ),
-                    ],
-                  ),
                 ),
-              );
-            },
-          ),
         ),
       ],
     );
   }
 
-  // ==========================================
-  // COMPACT TOP NAVIGATION BAR & 3-DOT MENU
-  // ==========================================
-  Widget _buildQuietIntelligenceHeader() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      crossAxisAlignment: CrossAxisAlignment.center,
+  // =====================================================================
+  // 3. TAB 1: CONTACTS VIEW (DEVICE CONTACTS & ONLINE DIRECTORY)
+  // =====================================================================
+  Widget _buildContactsView() {
+    return Column(
       children: [
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'Good evening, ${_session.name}',
-              style: const TextStyle(
-                color: NexaColors.textPrimary,
-                fontSize: 17,
-                fontWeight: FontWeight.w700,
-                letterSpacing: -0.2,
-              ),
-            ),
-            const SizedBox(height: 2),
-            const Row(
-              children: [
-                Icon(Icons.shield_outlined, color: NexaColors.emeraldSecure, size: 11),
-                SizedBox(width: 4),
-                Text(
-                  'Quiet Intelligence • Nothing urgent',
-                  style: TextStyle(color: NexaColors.textSecondary, fontSize: 11, fontWeight: FontWeight.w500),
-                ),
-              ],
-            ),
-          ],
-        ),
-
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              icon: const Icon(Icons.edit_note, color: NexaColors.primary, size: 24),
-              tooltip: 'New Encrypted Chat',
-              onPressed: _showStartNewChatModal,
-            ),
-            const SizedBox(width: 4),
-            // Three-dot button on the right (replacing previous globe icon)
-            PopupMenuButton<String>(
-          icon: Container(
-            width: 36,
-            height: 36,
+        // Top Segmented Bar: [On NEXA] | [Device Contacts] | [Find by ID]
+        Padding(
+          padding: const EdgeInsets.fromLTRB(18, 12, 18, 8),
+          child: Container(
+            padding: const EdgeInsets.all(4),
             decoration: BoxDecoration(
-              color: NexaColors.elevatedLight,
-              shape: BoxShape.circle,
-              border: Border.all(color: NexaColors.borderLight),
+              color: const Color(0xFF111827),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0x1AFFFFFF)),
             ),
-            child: const Icon(Icons.more_vert, color: NexaColors.textPrimary, size: 20),
+            child: Row(
+              children: [
+                _buildSegmentButton('On NEXA', 0),
+                _buildSegmentButton('Device Contacts', 1),
+                _buildSegmentButton('Directory', 2),
+              ],
+            ),
           ),
-          tooltip: 'Options & Settings',
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          color: NexaColors.surfaceLight,
-          elevation: 6,
-          offset: const Offset(0, 42),
-          onSelected: (value) {
-            switch (value) {
-              case 'linked_devices':
-                Navigator.push(context, MaterialPageRoute(builder: (_) => const DeviceLinkQrScreen()));
-                break;
-              case 'settings':
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Settings: All local telemetry and hardware isolated.')),
-                );
-                break;
-              case 'profile':
-                Navigator.push(context, MaterialPageRoute(builder: (_) => const UserProfileScreen()));
-                break;
-              case 'security':
-                Navigator.push(context, MaterialPageRoute(builder: (_) => const PrivacyCenterScreen()));
-                break;
-              case 'vault':
-                Navigator.push(context, MaterialPageRoute(builder: (_) => const RecoveryKeyVaultScreen()));
-                break;
-              case 'lock':
-                _session.logout();
-                Navigator.pushAndRemoveUntil(
-                  context,
-                  MaterialPageRoute(builder: (_) => const AuthFlowScreen(isLoginInitial: true)),
-                  (route) => false,
-                );
-                break;
-            }
-          },
-          itemBuilder: (ctx) => [
-            const PopupMenuItem<String>(
-              value: 'linked_devices',
-              child: Row(
-                children: [
-                  Icon(Icons.devices, color: NexaColors.primary, size: 18),
-                  SizedBox(width: 12),
-                  Text('Linked Devices', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                ],
+        ),
+
+        // Search + Sync Controls
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 4),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _contactsSearchController,
+                  onChanged: (val) => setState(() => _contactsSearchQuery = val),
+                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                  decoration: InputDecoration(
+                    hintText: _activeContactsTab == 2 ? 'Search by NEXA ID or @handle...' : 'Filter contacts...',
+                    hintStyle: const TextStyle(color: Color(0xFF64748B), fontSize: 12),
+                    prefixIcon: const Icon(Icons.search, color: Color(0xFF64748B), size: 16),
+                    filled: true,
+                    fillColor: const Color(0xFF111827),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                  ),
+                ),
               ),
-            ),
-            const PopupMenuItem<String>(
-              value: 'settings',
-              child: Row(
-                children: [
-                  Icon(Icons.settings_outlined, color: NexaColors.textSecondary, size: 18),
-                  SizedBox(width: 12),
-                  Text('Settings', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                ],
+              const SizedBox(width: 8),
+              IconButton(
+                icon: _isLoadingContacts
+                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF00E5FF)))
+                    : const Icon(Icons.sync, color: Color(0xFF00E5FF), size: 22),
+                tooltip: 'Sync Device Contacts',
+                onPressed: _isLoadingContacts ? null : _loadContacts,
               ),
-            ),
-            const PopupMenuItem<String>(
-              value: 'profile',
-              child: Row(
-                children: [
-                  Icon(Icons.person_outline, color: NexaColors.textSecondary, size: 18),
-                  SizedBox(width: 12),
-                  Text('Profile & Avatar', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                ],
-              ),
-            ),
-            const PopupMenuItem<String>(
-              value: 'security',
-              child: Row(
-                children: [
-                  Icon(Icons.shield_outlined, color: NexaColors.emeraldSecure, size: 18),
-                  SizedBox(width: 12),
-                  Text('Security & Privacy', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                ],
-              ),
-            ),
-            const PopupMenuItem<String>(
-              value: 'vault',
-              child: Row(
-                children: [
-                  Icon(Icons.vpn_key_outlined, color: NexaColors.amberAttention, size: 18),
-                  SizedBox(width: 12),
-                  Text('Recovery Key Vault', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                ],
-              ),
-            ),
-            const PopupMenuDivider(),
-            const PopupMenuItem<String>(
-              value: 'lock',
-              child: Row(
-                children: [
-                  Icon(Icons.lock_outline, color: NexaColors.rubyDestructive, size: 18),
-                  SizedBox(width: 12),
-                  Text('Lock Vault', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: NexaColors.rubyDestructive)),
-                ],
-              ),
-            ),
-          ],
+            ],
+          ),
+        ),
+
+        // Contacts List
+        Expanded(
+          child: _isLoadingContacts
+              ? const Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF00E5FF)),
+                      SizedBox(height: 12),
+                      Text('Accessing device contacts...', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12)),
+                    ],
+                  ),
+                )
+              : _buildContactsListContent(),
         ),
       ],
-    ),
-  ],
-);
-}
+    );
+  }
 
-  Widget _buildSearchBar() {
-    return Container(
-      height: 40,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: BoxDecoration(
-        color: NexaColors.surfaceLight,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: NexaColors.borderLight),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.02),
-            blurRadius: 4,
-            offset: const Offset(0, 1),
+  Widget _buildSegmentButton(String label, int index) {
+    final isSelected = _activeContactsTab == index;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => setState(() => _activeContactsTab = index),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          alignment: Alignment.center,
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          decoration: BoxDecoration(
+            color: isSelected ? const Color(0xFF1E293B) : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+            border: isSelected ? Border.all(color: const Color(0xFF00E5FF).withValues(alpha: 0.4)) : null,
           ),
-        ],
-      ),
-      child: TextField(
-        controller: _searchController,
-        onChanged: (val) => setState(() => _searchQuery = val),
-        style: const TextStyle(fontSize: 13),
-        decoration: InputDecoration(
-          isDense: true,
-          contentPadding: const EdgeInsets.symmetric(vertical: 10),
-          icon: const Icon(Icons.search, color: NexaColors.textMuted, size: 18),
-          hintText: 'Search chats, contacts, or messages...',
-          hintStyle: const TextStyle(color: NexaColors.textMuted, fontSize: 13),
-          border: InputBorder.none,
-          suffixIcon: _searchQuery.isNotEmpty
-              ? GestureDetector(
-                  onTap: () {
-                    _searchController.clear();
-                    setState(() => _searchQuery = '');
-                  },
-                  child: const Icon(Icons.close, size: 16, color: NexaColors.textMuted),
-                )
-              : null,
-          suffixIconConstraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: isSelected ? Colors.white : const Color(0xFF94A3B8),
+              fontSize: 11,
+              fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+            ),
+          ),
         ),
       ),
     );
   }
 
+  Widget _buildContactsListContent() {
+    final query = _contactsSearchQuery.toLowerCase();
 
+    if (_activeContactsTab == 0) {
+      // TAB 0: On NEXA (Matched device contacts + Directory registered peers)
+      final onNexa = [
+        ..._deviceContacts.where((c) => c['isOnNexa'] == true),
+        ..._directoryUsers.where((u) => (u['username'] ?? '') != _session.username).map((u) => {
+          'name': u['full_name'] ?? u['fullName'] ?? u['username'],
+          'handle': u['handle'] ?? '@${u['username']}',
+          'phone': u['phone'] ?? '',
+          'nexaId': u['nexa_id'] ?? u['nexaId'] ?? 'NX-USER',
+          'isOnNexa': true,
+        }),
+      ].where((c) {
+        if (query.isEmpty) return true;
+        final name = (c['name'] ?? '').toString().toLowerCase();
+        final handle = (c['handle'] ?? '').toString().toLowerCase();
+        final nid = (c['nexaId'] ?? '').toString().toLowerCase();
+        return name.contains(query) || handle.contains(query) || nid.contains(query);
+      }).toList();
 
+      if (onNexa.isEmpty) {
+        return Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.group_outlined, color: Color(0xFF64748B), size: 36),
+              const SizedBox(height: 12),
+              const Text('No NEXA peers found in address book', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 6),
+              const Text('Switch to "Device Contacts" or "Directory" to find users.', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12)),
+              const SizedBox(height: 14),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF111827)),
+                onPressed: () => setState(() => _activeContactsTab = 2),
+                child: const Text('Browse Directory'),
+              ),
+            ],
+          ),
+        );
+      }
 
+      return ListView.separated(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+        itemCount: onNexa.length,
+        separatorBuilder: (_, _) => const Divider(height: 1, color: Color(0x0FFFFFFF)),
+        itemBuilder: (context, i) {
+          final item = onNexa[i];
+          final name = (item['name'] ?? 'Peer').toString();
+          final handle = (item['handle'] ?? '@${item['username'] ?? name}').toString();
+          final nexaId = (item['nexaId'] ?? 'NX-PEER').toString();
 
-  Widget _buildChatTile({
-    required String name,
-    required String nexaId,
-    required String message,
-    required String time,
-    required int unread,
-    required VoidCallback onTap,
-  }) {
-    final avatarColor = name.contains('Elena')
-        ? const Color(0xFF6366F1)
-        : (name.contains('Rahul')
-            ? const Color(0xFF0284C7)
-            : (name.contains('Vikram') ? const Color(0xFF10B981) : const Color(0xFF8B5CF6)));
-
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
-        child: Row(
-          children: [
-            // Avatar with Online Badge
-            Stack(
-              clipBehavior: Clip.none,
+          return ListTile(
+            contentPadding: const EdgeInsets.symmetric(vertical: 4),
+            leading: CircleAvatar(
+              radius: 20,
+              backgroundColor: const Color(0xFF10B981).withValues(alpha: 0.15),
+              child: Text(
+                name.isNotEmpty ? name.substring(0, 1).toUpperCase() : '?',
+                style: const TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold),
+              ),
+            ),
+            title: Text(name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+            subtitle: Text('$handle • $nexaId', style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                CircleAvatar(
-                  radius: 24,
-                  backgroundColor: avatarColor.withValues(alpha: 0.14),
-                  child: Text(
-                    name.substring(0, 1),
-                    style: TextStyle(
-                      color: avatarColor,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 17,
-                    ),
-                  ),
+                IconButton(
+                  icon: const Icon(Icons.chat_bubble_outline, color: Color(0xFF00E5FF), size: 20),
+                  tooltip: 'Chat',
+                  onPressed: () => _openChat(handle, nexaId),
                 ),
-                Positioned(
-                  right: 0,
-                  bottom: 0,
-                  child: Container(
-                    width: 12,
-                    height: 12,
-                    decoration: BoxDecoration(
-                      color: NexaColors.emeraldSecure,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: NexaColors.canvasLight, width: 2),
-                    ),
-                  ),
+                IconButton(
+                  icon: const Icon(Icons.phone_outlined, color: Color(0xFF10B981), size: 20),
+                  tooltip: 'Voice Call',
+                  onPressed: () => _startCall(contactName: name, nexaId: nexaId, isVideo: false),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.videocam_outlined, color: Color(0xFF00E5FF), size: 20),
+                  tooltip: 'Video Call',
+                  onPressed: () => _startCall(contactName: name, nexaId: nexaId, isVideo: true),
                 ),
               ],
-            ),
-            const SizedBox(width: 14),
-
-            // Name and Message Preview
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(
-                        child: Row(
-                          children: [
-                            Flexible(
-                              child: Text(
-                                name,
-                                style: TextStyle(
-                                  color: NexaColors.textPrimary,
-                                  fontWeight: unread > 0 ? FontWeight.w800 : FontWeight.w700,
-                                  fontSize: 15,
-                                  letterSpacing: -0.2,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            const SizedBox(width: 4),
-                            const Icon(Icons.shield, color: NexaColors.emeraldSecure, size: 12),
-                          ],
-                        ),
-                      ),
-                      Text(
-                        time,
-                        style: TextStyle(
-                          color: unread > 0 ? NexaColors.primary : NexaColors.textMuted,
-                          fontSize: 11,
-                          fontWeight: unread > 0 ? FontWeight.w700 : FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.done_all,
-                        size: 14,
-                        color: unread > 0 ? NexaColors.textMuted : NexaColors.primary,
-                      ),
-                      const SizedBox(width: 4),
-                      Expanded(
-                        child: Text(
-                          message,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: unread > 0 ? NexaColors.textPrimary : NexaColors.textSecondary,
-                            fontWeight: unread > 0 ? FontWeight.w600 : FontWeight.normal,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ),
-                      if (unread > 0) ...[
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: NexaColors.primary,
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Text(
-                            unread.toString(),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 11,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ==========================================
-  // TAB 3: DEDICATED CALLS TAB
-  // ==========================================
-  Widget _buildCallsTab() {
-    return ListView(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Encrypted Calls',
-                  style: TextStyle(
-                    color: NexaColors.textPrimary,
-                    fontSize: 22,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.4,
-                  ),
-                ),
-                SizedBox(height: 2),
-                Text(
-                  'Direct P2P • DTLS-SRTP Audio & Video',
-                  style: TextStyle(color: NexaColors.textSecondary, fontSize: 13),
-                ),
-              ],
-            ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF0FDF4),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFFBBF7D0)),
-              ),
-              child: const Row(
-                children: [
-                  Icon(Icons.lock, color: NexaColors.emeraldSecure, size: 12),
-                  SizedBox(width: 4),
-                  Text('DTLS-SRTP', style: TextStyle(color: NexaColors.emeraldSecure, fontSize: 12, fontWeight: FontWeight.bold)),
-                ],
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 18),
-
-        Row(
-          children: [
-            Expanded(
-              child: ElevatedButton.icon(
-                onPressed: () => _showStartNewCallModal(isVideo: false),
-                icon: const Icon(Icons.call, size: 16),
-                label: const Text('Start Voice Call'),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: () => _showStartNewCallModal(isVideo: true),
-                icon: const Icon(Icons.videocam_outlined, size: 16),
-                label: const Text('Start Video Call'),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 24),
-        const Text('RECENT CALLS', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: NexaColors.textMuted)),
-        const SizedBox(height: 10),
-
-        if (_callLogs.isEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 40),
-            child: Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: NexaColors.primary.withValues(alpha: 0.08),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(Icons.phone_in_talk_outlined, color: NexaColors.primary, size: 36),
-                  ),
-                  const SizedBox(height: 14),
-                  const Text(
-                    'No Recent Calls',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: NexaColors.textPrimary),
-                  ),
-                  const SizedBox(height: 6),
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 20),
-                    child: Text(
-                      'Start an end-to-end encrypted voice or video call with real hardware camera feed.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 13, color: NexaColors.textSecondary),
-                    ),
-                  ),
-                  const SizedBox(height: 18),
-                  ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: NexaColors.primary,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                    ),
-                    icon: const Icon(Icons.add_call, size: 18),
-                    label: const Text('Make Encrypted Call', style: TextStyle(fontWeight: FontWeight.bold)),
-                    onPressed: () => _showStartNewCallModal(isVideo: false),
-                  ),
-                ],
-              ),
-            ),
-          )
-        else
-          ..._callLogs.map((log) {
-          final isMissed = log['isMissed'] as bool;
-          final isVideo = log['isVideo'] as bool;
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Material(
-              color: NexaColors.surfaceLight,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-                side: const BorderSide(color: NexaColors.borderLight),
-              ),
-              child: ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: NexaColors.elevatedLight,
-                  child: Icon(
-                    isVideo ? Icons.videocam : Icons.phone,
-                    color: isMissed ? NexaColors.rubyDestructive : NexaColors.primary,
-                    size: 20,
-                  ),
-                ),
-                title: Text(
-                  log['name'] as String,
-                  style: TextStyle(
-                    color: isMissed ? NexaColors.rubyDestructive : NexaColors.textPrimary,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 15,
-                  ),
-                ),
-                subtitle: Text(
-                  '${log['type']} • ${log['time']}',
-                  style: const TextStyle(color: NexaColors.textSecondary, fontSize: 12),
-                ),
-                trailing: IconButton(
-                  icon: Icon(isVideo ? Icons.videocam_outlined : Icons.phone_outlined, color: NexaColors.primary),
-                  onPressed: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => ActiveCallScreen(
-                        peerName: log['name'] as String,
-                        peerNexaId: log['nexaId'] as String,
-                        isVideo: isVideo,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
             ),
           );
-        }),
+        },
+      );
+    } else if (_activeContactsTab == 1) {
+      // TAB 1: ALL DEVICE CONTACTS
+      final list = _deviceContacts.where((c) {
+        if (query.isEmpty) return true;
+        final name = (c['name'] ?? '').toString().toLowerCase();
+        final phone = (c['phone'] ?? '').toString().toLowerCase();
+        return name.contains(query) || phone.contains(query);
+      }).toList();
+
+      if (list.isEmpty) {
+        return Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.contact_phone_outlined, color: Color(0xFF64748B), size: 36),
+              const SizedBox(height: 12),
+              Text(
+                kIsWeb ? 'Device Address Book on Mobile Devices' : 'No Contacts Detected',
+                style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 6),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Text(
+                  kIsWeb
+                      ? 'Native contacts are fetched on mobile devices. Use Directory search to find peers.'
+                      : 'Ensure address book permission is granted in Android system settings.',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                ),
+              ),
+              const SizedBox(height: 14),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.sync, size: 16),
+                label: const Text('Request Permission & Refresh'),
+                onPressed: _loadContacts,
+              ),
+            ],
+          ),
+        );
+      }
+
+      return ListView.separated(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+        itemCount: list.length,
+        separatorBuilder: (_, _) => const Divider(height: 1, color: Color(0x0FFFFFFF)),
+        itemBuilder: (context, i) {
+          final item = list[i];
+          final name = (item['name'] ?? 'Contact').toString();
+          final phone = (item['phone'] ?? '').toString();
+          final isOnNexa = item['isOnNexa'] == true;
+
+          return ListTile(
+            contentPadding: const EdgeInsets.symmetric(vertical: 4),
+            leading: CircleAvatar(
+              radius: 18,
+              backgroundColor: isOnNexa ? const Color(0xFF10B981).withValues(alpha: 0.2) : const Color(0xFF1E293B),
+              child: Text(
+                name.isNotEmpty ? name.substring(0, 1).toUpperCase() : '?',
+                style: TextStyle(color: isOnNexa ? const Color(0xFF10B981) : Colors.white60, fontWeight: FontWeight.bold),
+              ),
+            ),
+            title: Text(name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13)),
+            subtitle: Text(phone, style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
+            trailing: isOnNexa
+                ? Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Text('ON NEXA', style: TextStyle(color: Color(0xFF10B981), fontSize: 10, fontWeight: FontWeight.bold)),
+                  )
+                : OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      minimumSize: Size.zero,
+                    ),
+                    onPressed: () {
+                      Clipboard.setData(const ClipboardData(
+                        text: 'Connect with me on NEXA: https://glimmer-messaging-app-web.vercel.app/',
+                      ));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('NEXA invite link copied to clipboard!')),
+                      );
+                    },
+                    child: const Text('Invite', style: TextStyle(fontSize: 11)),
+                  ),
+          );
+        },
+      );
+    } else {
+      // TAB 2: DIRECTORY / NEXA ID SEARCH
+      final list = _directoryUsers.where((u) {
+        if (query.isEmpty) return true;
+        final un = (u['username'] ?? '').toString().toLowerCase();
+        final fn = (u['full_name'] ?? u['fullName'] ?? '').toString().toLowerCase();
+        final nid = (u['nexa_id'] ?? u['nexaId'] ?? '').toString().toLowerCase();
+        return un.contains(query) || fn.contains(query) || nid.contains(query);
+      }).toList();
+
+      return ListView.separated(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+        itemCount: list.length,
+        separatorBuilder: (_, _) => const Divider(height: 1, color: Color(0x0FFFFFFF)),
+        itemBuilder: (context, i) {
+          final u = list[i];
+          final un = (u['username'] ?? '').toString();
+          final fn = (u['full_name'] ?? u['fullName'] ?? un).toString();
+          final nid = (u['nexa_id'] ?? u['nexaId'] ?? 'NX-USER').toString();
+
+          return ListTile(
+            contentPadding: const EdgeInsets.symmetric(vertical: 4),
+            leading: CircleAvatar(
+              radius: 18,
+              backgroundColor: const Color(0xFF00E5FF).withValues(alpha: 0.15),
+              child: Text(
+                fn.isNotEmpty ? fn.substring(0, 1).toUpperCase() : '?',
+                style: const TextStyle(color: Color(0xFF00E5FF), fontWeight: FontWeight.bold),
+              ),
+            ),
+            title: Text(fn, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+            subtitle: Text('@$un • $nid', style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.chat_bubble_outline, color: Color(0xFF00E5FF), size: 18),
+                  onPressed: () => _openChat('@$un', nid),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.phone_outlined, color: Color(0xFF10B981), size: 18),
+                  onPressed: () => _startCall(contactName: fn, nexaId: nid, isVideo: false),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.videocam_outlined, color: Color(0xFF00E5FF), size: 18),
+                  onPressed: () => _startCall(contactName: fn, nexaId: nid, isVideo: true),
+                ),
+              ],
+            ),
+          );
+        },
+      );
+    }
+  }
+
+  // =====================================================================
+  // 4. TAB 2: CALLS LOG VIEW
+  // =====================================================================
+  Widget _buildCallsView() {
+    if (_callLogs.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: const Color(0xFF111827),
+                shape: BoxShape.circle,
+                border: Border.all(color: const Color(0x1AFFFFFF)),
+              ),
+              child: const Icon(Icons.phone_in_talk_rounded, color: Color(0xFF10B981), size: 36),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'No Call History',
+              style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Start end-to-end encrypted voice and video calls with any peer.',
+              style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return ListView.separated(
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+      itemCount: _callLogs.length,
+      separatorBuilder: (_, _) => const Divider(height: 1, color: Color(0x0FFFFFFF)),
+      itemBuilder: (context, i) {
+        final log = _callLogs[i];
+        final name = (log['name'] ?? 'Peer').toString();
+        final nexaId = (log['nexaId'] ?? 'NX-PEER').toString();
+        final isVideo = log['isVideo'] == true;
+        final time = (log['time'] ?? 'Recent').toString();
+
+        return ListTile(
+          contentPadding: const EdgeInsets.symmetric(vertical: 4),
+          leading: CircleAvatar(
+            radius: 20,
+            backgroundColor: const Color(0xFF1E293B),
+            child: Icon(
+              isVideo ? Icons.videocam : Icons.call,
+              color: isVideo ? const Color(0xFF00E5FF) : const Color(0xFF10B981),
+              size: 20,
+            ),
+          ),
+          title: Text(name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+          subtitle: Row(
+            children: [
+              const Icon(Icons.call_made, color: Color(0xFF10B981), size: 12),
+              const SizedBox(width: 4),
+              Text(
+                '${isVideo ? 'Video' : 'Voice'} Call • $time',
+                style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+              ),
+            ],
+          ),
+          trailing: IconButton(
+            icon: Icon(
+              isVideo ? Icons.videocam : Icons.call,
+              color: isVideo ? const Color(0xFF00E5FF) : const Color(0xFF10B981),
+            ),
+            tooltip: 'Call back',
+            onPressed: () => _startCall(contactName: name, nexaId: nexaId, isVideo: isVideo),
+          ),
+        );
+      },
+    );
+  }
+
+  // =====================================================================
+  // 5. TAB 3: SETTINGS & UPDATE ENGINE VIEW
+  // =====================================================================
+  Widget _buildSettingsView() {
+    return ListView(
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+      children: [
+        // User Profile Card
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: const Color(0xFF111827),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: const Color(0x1AFFFFFF)),
+          ),
+          child: Row(
+            children: [
+              CircleAvatar(
+                radius: 30,
+                backgroundColor: const Color(0xFF00E5FF).withValues(alpha: 0.15),
+                child: Text(
+                  _session.username.isNotEmpty ? _session.username.substring(0, 1).toUpperCase() : '?',
+                  style: const TextStyle(color: Color(0xFF00E5FF), fontSize: 24, fontWeight: FontWeight.bold),
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _session.fullName.isNotEmpty ? _session.fullName : _session.username,
+                      style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      _session.handle,
+                      style: const TextStyle(color: Color(0xFF00E5FF), fontSize: 12, fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _session.nexaId,
+                      style: const TextStyle(color: Color(0xFF64748B), fontSize: 11, fontFamily: 'Courier'),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+
+        // In-App Update Engine Tile
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: const Color(0xFF111827),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: const Color(0xFF00E5FF).withValues(alpha: 0.3)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.system_update_alt, color: Color(0xFF00E5FF), size: 20),
+                      SizedBox(width: 10),
+                      Text(
+                        'Application Update Engine',
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                      ),
+                    ],
+                  ),
+                  Text('v1.2.0 (Build 4)', style: TextStyle(color: Color(0xFF00E5FF), fontSize: 11, fontWeight: FontWeight.bold)),
+                ],
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'NEXA autonomously checks for server releases, security patches, and calling engine updates.',
+                style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+              ),
+              const SizedBox(height: 12),
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF0284C7),
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size(double.infinity, 38),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                icon: const Icon(Icons.refresh, size: 16),
+                label: const Text('Check for Updates Now', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                onPressed: () => UpdateEngine.instance.checkForUpdate(context, userInitiated: true),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+
+        // Security & Vault Settings
+        Material(
+          color: const Color(0xFF111827),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: const BorderSide(color: Color(0x1AFFFFFF)),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            children: [
+              ListTile(
+                leading: const Icon(Icons.security, color: Color(0xFF10B981)),
+                title: const Text('Zero-Knowledge Security', style: TextStyle(color: Colors.white, fontSize: 14)),
+                subtitle: const Text('Double Ratchet • X3DH • AES-256-GCM', style: TextStyle(color: Color(0xFF64748B), fontSize: 11)),
+                trailing: const Icon(Icons.chevron_right, color: Color(0xFF64748B), size: 18),
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PrivacyCenterScreen())),
+              ),
+              const Divider(height: 1, color: Color(0x0FFFFFFF)),
+              ListTile(
+                leading: const Icon(Icons.vpn_key_outlined, color: Color(0xFFF59E0B)),
+                title: const Text('Recovery Key Vault', style: TextStyle(color: Colors.white, fontSize: 14)),
+                subtitle: const Text('24-word self-sovereign seed', style: TextStyle(color: Color(0xFF64748B), fontSize: 11)),
+                trailing: const Icon(Icons.chevron_right, color: Color(0xFF64748B), size: 18),
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RecoveryKeyVaultScreen())),
+              ),
+              const Divider(height: 1, color: Color(0x0FFFFFFF)),
+              ListTile(
+                leading: const Icon(Icons.devices, color: Color(0xFF00E5FF)),
+                title: const Text('Linked Devices', style: TextStyle(color: Colors.white, fontSize: 14)),
+                subtitle: const Text('Authorize secondary devices', style: TextStyle(color: Color(0xFF64748B), fontSize: 11)),
+                trailing: const Icon(Icons.chevron_right, color: Color(0xFF64748B), size: 18),
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DeviceLinkQrScreen())),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+
+        // Logout Button
+        ElevatedButton.icon(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF1E293B),
+            foregroundColor: const Color(0xFFEF4444),
+            minimumSize: const Size(double.infinity, 44),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+          icon: const Icon(Icons.logout, size: 18),
+          label: const Text('Lock Vault & Sign Out', style: TextStyle(fontWeight: FontWeight.bold)),
+          onPressed: () {
+            _session.logout();
+            Navigator.pushAndRemoveUntil(
+              context,
+              MaterialPageRoute(builder: (_) => const AuthFlowScreen(isLoginInitial: true)),
+              (route) => false,
+            );
+          },
+        ),
       ],
     );
   }
 
-  // ==========================================
-  // UPDATED BOTTOM DOCK (POSTS INCLUDED, SECURITY IN TOP BAR)
-  // ==========================================
-  Widget _buildOrbitDock(BuildContext context) {
+  // =====================================================================
+  // 6. MODERN BOTTOM NAVIGATION BAR
+  // =====================================================================
+  Widget _buildModernBottomBar() {
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-      height: 64,
-      decoration: BoxDecoration(
-        color: NexaColors.surfaceLight,
-        borderRadius: BorderRadius.circular(32),
-        border: Border.all(color: NexaColors.borderLight),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.07),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
+      decoration: const BoxDecoration(
+        color: Color(0xFF090D16),
+        border: Border(top: BorderSide(color: Color(0x1AFFFFFF))),
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Expanded(
-            child: _buildDockButton(
-              icon: Icons.chat_bubble_outline,
-              activeIcon: Icons.chat_bubble,
-              label: 'Chats',
-              index: 0,
-            ),
+      child: BottomNavigationBar(
+        currentIndex: _activeNav,
+        onTap: (index) => setState(() => _activeNav = index),
+        backgroundColor: const Color(0xFF090D16),
+        selectedItemColor: const Color(0xFF00E5FF),
+        unselectedItemColor: const Color(0xFF64748B),
+        type: BottomNavigationBarType.fixed,
+        elevation: 0,
+        selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
+        unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.normal, fontSize: 11),
+        items: const [
+          BottomNavigationBarItem(
+            icon: Icon(Icons.chat_bubble_outline),
+            activeIcon: Icon(Icons.chat_bubble),
+            label: 'Chats',
           ),
-          Expanded(
-            child: _buildDockButton(
-              icon: Icons.article_outlined,
-              activeIcon: Icons.article,
-              label: 'Posts',
-              index: 1,
-            ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.people_outline),
+            activeIcon: Icon(Icons.people),
+            label: 'Contacts',
           ),
-
-          // Central Quiet Intelligence Assistant Orb
-          GestureDetector(
-            onTap: () => _openAssistantModal(context),
-            child: Container(
-              width: 44,
-              height: 44,
-              margin: const EdgeInsets.symmetric(horizontal: 4),
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: const RadialGradient(
-                  colors: [
-                    Color(0xFF38BDF8),
-                    Color(0xFF0284C7),
-                  ],
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: NexaColors.primary.withValues(alpha: 0.35),
-                    blurRadius: 10,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: const Icon(Icons.auto_awesome, color: Colors.white, size: 20),
-            ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.phone_outlined),
+            activeIcon: Icon(Icons.phone),
+            label: 'Calls',
           ),
-
-          Expanded(
-            child: _buildDockButton(
-              icon: Icons.groups_outlined,
-              activeIcon: Icons.groups,
-              label: 'Community',
-              index: 2,
-            ),
-          ),
-          Expanded(
-            child: _buildDockButton(
-              icon: Icons.call_outlined,
-              activeIcon: Icons.call,
-              label: 'Calls',
-              index: 3,
-            ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.tune_outlined),
+            activeIcon: Icon(Icons.tune),
+            label: 'Vault',
           ),
         ],
       ),
     );
   }
 
-  Widget _buildDockButton({
-    required IconData icon,
-    required IconData activeIcon,
-    required String label,
-    required int index,
-  }) {
-    final isActive = _activeNav == index;
-    return InkWell(
-      onTap: () => setState(() => _activeNav = index),
-      borderRadius: BorderRadius.circular(20),
-      child: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              isActive ? activeIcon : icon,
-              color: isActive ? NexaColors.primary : NexaColors.textMuted,
-              size: 22,
-            ),
-            const SizedBox(height: 3),
-            FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Text(
-                label,
-                maxLines: 1,
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
-                  color: isActive ? NexaColors.primary : NexaColors.textMuted,
-                  letterSpacing: -0.1,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _openAssistantModal(BuildContext context) {
+  // =====================================================================
+  // 7. NEW CHAT & NEXA ID SERVICING MODAL
+  // =====================================================================
+  void _showNewChatDialog() {
+    final textCtrl = TextEditingController();
     showModalBottomSheet(
       context: context,
-      backgroundColor: NexaColors.surfaceLight,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (_) {
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF0F172A),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) {
         return Padding(
-          padding: const EdgeInsets.all(24),
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 20,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: NexaColors.primary.withValues(alpha: 0.12),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(Icons.auto_awesome, color: NexaColors.primary, size: 22),
+                  const Text(
+                    'Start Encrypted Conversation',
+                    style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
                   ),
-                  const SizedBox(width: 14),
-                  const Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('NEXA Assistant', style: TextStyle(color: NexaColors.textPrimary, fontSize: 18, fontWeight: FontWeight.bold)),
-                      Text('Local on-device intelligence • Zero cloud exposure', style: TextStyle(color: NexaColors.textSecondary, fontSize: 12)),
-                    ],
+                  IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white54, size: 20),
+                    onPressed: () => Navigator.pop(ctx),
                   ),
                 ],
               ),
-              const SizedBox(height: 20),
-              const Text('Suggested Tasks', style: TextStyle(color: NexaColors.textMuted, fontSize: 12, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 10),
-              _buildAssistantOption(
-                icon: Icons.summarize_outlined,
-                title: 'Summarize unread messages',
-                onTap: () {
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Processing locally: 2 work groups, no urgent promises.')),
-                  );
-                },
-              ),
-              _buildAssistantOption(
-                icon: Icons.alarm_add_outlined,
-                title: 'Remind me: Call Dad tomorrow at 7 PM',
-                onTap: () {
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Reminder scheduled for tomorrow 7:00 PM.')),
-                  );
-                },
+              const SizedBox(height: 8),
+              const Text(
+                'Enter the peer\'s unique NEXA ID (e.g. NX-C53E-AEE9) or @username to begin end-to-end encrypted messaging.',
+                style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
               ),
               const SizedBox(height: 16),
+              TextField(
+                controller: textCtrl,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  hintText: 'e.g. @alice or NX-C53E-AEE9',
+                  hintStyle: const TextStyle(color: Color(0xFF64748B)),
+                  filled: true,
+                  fillColor: const Color(0xFF1E293B),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                ),
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF0284C7),
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size(double.infinity, 44),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                onPressed: () {
+                  final input = textCtrl.text.trim();
+                  if (input.isEmpty) return;
+                  Navigator.pop(ctx);
+                  final name = input.startsWith('@') ? input : '@$input';
+                  final nexaId = input.startsWith('NX-') ? input : 'NX-${input.replaceAll('@', '').toUpperCase()}';
+                  _openChat(name, nexaId);
+                },
+                child: const Text('Open Chat Channel', style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
             ],
           ),
         );
@@ -2286,21 +1169,78 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
     );
   }
 
-  Widget _buildAssistantOption({required IconData icon, required String title, required VoidCallback onTap}) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Material(
-        color: NexaColors.elevatedLight,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
-          side: const BorderSide(color: NexaColors.borderLight),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: ListTile(
-          leading: Icon(icon, color: NexaColors.primary, size: 20),
-          title: Text(title, style: const TextStyle(color: NexaColors.textPrimary, fontSize: 14)),
-          trailing: const Icon(Icons.chevron_right, color: NexaColors.textMuted, size: 18),
-          onTap: onTap,
+  Widget _buildModernDrawer() {
+    return Drawer(
+      backgroundColor: const Color(0xFF090D16),
+      child: SafeArea(
+        child: Column(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(20),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 24,
+                    backgroundColor: const Color(0xFF00E5FF).withValues(alpha: 0.15),
+                    child: Text(
+                      _session.username.isNotEmpty ? _session.username.substring(0, 1).toUpperCase() : '?',
+                      style: const TextStyle(color: Color(0xFF00E5FF), fontWeight: FontWeight.bold, fontSize: 18),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(_session.fullName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+                        Text(_session.handle, style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(color: Color(0x1AFFFFFF)),
+            ListTile(
+              leading: const Icon(Icons.verified_user_outlined, color: Color(0xFF10B981)),
+              title: const Text('Privacy Center', style: TextStyle(color: Colors.white, fontSize: 14)),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const PrivacyCenterScreen()));
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.devices, color: Color(0xFF00E5FF)),
+              title: const Text('Linked Devices', style: TextStyle(color: Colors.white, fontSize: 14)),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const DeviceLinkQrScreen()));
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.system_update_alt, color: Color(0xFFF59E0B)),
+              title: const Text('App Update Engine', style: TextStyle(color: Colors.white, fontSize: 14)),
+              onTap: () {
+                Navigator.pop(context);
+                UpdateEngine.instance.checkForUpdate(context, userInitiated: true);
+              },
+            ),
+            const Spacer(),
+            ListTile(
+              leading: const Icon(Icons.logout, color: Color(0xFFEF4444)),
+              title: const Text('Lock Vault', style: TextStyle(color: Color(0xFFEF4444), fontWeight: FontWeight.bold, fontSize: 14)),
+              onTap: () {
+                Navigator.pop(context);
+                _session.logout();
+                Navigator.pushAndRemoveUntil(
+                  context,
+                  MaterialPageRoute(builder: (_) => const AuthFlowScreen(isLoginInitial: true)),
+                  (route) => false,
+                );
+              },
+            ),
+            const SizedBox(height: 12),
+          ],
         ),
       ),
     );

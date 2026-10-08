@@ -3,20 +3,24 @@ import 'dart:math' as math;
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../../../core/theme/nexa_theme.dart';
+import '../../../core/network/auth_service.dart';
 
-enum CallStatus { connecting, ringing, connected, ended }
+enum CallStatus { connecting, ringing, connected, declined, ended }
 
 class ActiveCallScreen extends StatefulWidget {
   final String peerName;
   final String peerNexaId;
   final bool isVideo;
+  final String? callId;
+  final bool isIncoming;
 
   const ActiveCallScreen({
     super.key,
     required this.peerName,
     required this.peerNexaId,
     this.isVideo = false,
+    this.callId,
+    this.isIncoming = false,
   });
 
   @override
@@ -24,111 +28,150 @@ class ActiveCallScreen extends StatefulWidget {
 }
 
 class _ActiveCallScreenState extends State<ActiveCallScreen> with SingleTickerProviderStateMixin {
-  CallStatus _status = CallStatus.connecting;
+  late CallStatus _status;
   bool _isMuted = false;
   bool _isSpeaker = false;
   late bool _isVideoEnabled;
   bool _isFrontCamera = true;
+  bool _isLocalPip = true; // true = local in PIP, false = swapped
 
-  // Real Hardware Camera Controllers
+  // Hardware Camera
   List<CameraDescription> _availableCameras = [];
   CameraController? _cameraController;
   bool _isCameraInitializing = false;
-  String? _cameraErrorMessage;
 
   int _callDurationSeconds = 0;
   Timer? _callTimer;
-  Timer? _simulatedVoiceTimer;
+  Timer? _signalingTimer;
+  Timer? _waveformTimer;
   List<double> _voiceWaveAmplitudes = [0.2, 0.5, 0.8, 0.4, 0.7, 0.9, 0.3, 0.6];
 
   late AnimationController _pulseController;
-
   static const MethodChannel _nativeMediaChannel = MethodChannel('com.nexa.media_picker');
 
   @override
   void initState() {
     super.initState();
     _isVideoEnabled = widget.isVideo;
-    _isSpeaker = widget.isVideo; // Video default to speaker
+    _isSpeaker = widget.isVideo;
+
+    _status = widget.isIncoming ? CallStatus.connected : CallStatus.connecting;
 
     _pulseController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1600),
+      duration: const Duration(milliseconds: 1500),
     )..repeat(reverse: true);
-
-    _initiateCallSignaling();
 
     if (_isVideoEnabled) {
       _initializeHardwareCamera(useFront: true);
     }
+
+    if (widget.isIncoming) {
+      _startConnectedTimers();
+    } else {
+      _initiateOutgoingSignaling();
+    }
   }
 
-  void _initiateCallSignaling() {
-    // 1. Connecting state -> 1.0s -> Ringing
-    Timer(const Duration(milliseconds: 1000), () {
-      if (!mounted || _status == CallStatus.ended) return;
-      setState(() {
-        _status = CallStatus.ringing;
-      });
+  void _startConnectedTimers() {
+    _status = CallStatus.connected;
+    _callDurationSeconds = 0;
+    _callTimer?.cancel();
+    _callTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) {
+        setState(() => _callDurationSeconds++);
+      }
+    });
 
-      // 2. Ringing state -> 1.8s -> Connected (Call Answered)
-      Timer(const Duration(milliseconds: 1800), () {
-        if (!mounted || _status == CallStatus.ended) return;
-        HapticFeedback.mediumImpact();
+    _waveformTimer?.cancel();
+    _waveformTimer = Timer.periodic(const Duration(milliseconds: 140), (_) {
+      if (mounted) {
+        final rand = math.Random();
         setState(() {
-          _status = CallStatus.connected;
-          _callDurationSeconds = 0;
+          _voiceWaveAmplitudes = List.generate(8, (_) => 0.15 + rand.nextDouble() * 0.85);
         });
+      }
+    });
 
-        // 3. Start Call Duration Counter
-        _callTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-          if (!mounted) return;
-          setState(() {
-            _callDurationSeconds++;
-          });
-        });
+    // Also poll to detect if remote peer hangs up
+    if (widget.callId != null) {
+      _signalingTimer?.cancel();
+      _signalingTimer = Timer.periodic(const Duration(seconds: 2), (_) => _checkCallState());
+    }
+  }
 
-        // 4. Start Voice Wave Animation
-        _simulatedVoiceTimer = Timer.periodic(const Duration(milliseconds: 150), (_) {
-          if (!mounted) return;
-          final rand = math.Random();
-          setState(() {
-            _voiceWaveAmplitudes = List.generate(8, (_) => 0.15 + rand.nextDouble() * 0.85);
-          });
+  void _initiateOutgoingSignaling() {
+    // Transition connecting -> ringing after 600ms
+    Timer(const Duration(milliseconds: 600), () {
+      if (!mounted || _status == CallStatus.ended) return;
+      setState(() => _status = CallStatus.ringing);
+
+      if (widget.callId != null) {
+        _signalingTimer = Timer.periodic(const Duration(seconds: 1), (_) => _checkCallState());
+      } else {
+        // Fallback simulation timer if callId was not supplied
+        Timer(const Duration(milliseconds: 2200), () {
+          if (!mounted || _status == CallStatus.ended) return;
+          HapticFeedback.mediumImpact();
+          _startConnectedTimers();
         });
-      });
+      }
     });
   }
 
+  Future<void> _checkCallState() async {
+    if (!mounted || widget.callId == null) return;
+    try {
+      final baseUrl = await AuthService.instance.getBaseUrl();
+      final uri = Uri.parse('$baseUrl/v1/calls/session/${widget.callId}');
+      final res = await AuthService.instance.getJson(uri);
+
+      if (res != null && res['session'] is Map) {
+        final session = Map<String, dynamic>.from(res['session'] as Map);
+        final remoteStatus = (session['status'] as String?) ?? '';
+
+        if (remoteStatus == 'connected' && _status != CallStatus.connected) {
+          HapticFeedback.mediumImpact();
+          _signalingTimer?.cancel();
+          _startConnectedTimers();
+        } else if (remoteStatus == 'declined' && _status != CallStatus.declined) {
+          HapticFeedback.heavyImpact();
+          _signalingTimer?.cancel();
+          setState(() => _status = CallStatus.declined);
+          Future.delayed(const Duration(milliseconds: 1400), () {
+            if (mounted) Navigator.pop(context);
+          });
+        } else if (remoteStatus == 'ended' && _status != CallStatus.ended) {
+          _endCall(notifyServer: false);
+        }
+      }
+    } catch (_) {}
+  }
+
   // =====================================================================
-  // HARDWARE CAMERA INITIALIZATION & LENS SWITCHING
+  // HARDWARE CAMERA INITIALIZATION & CONTROLS
   // =====================================================================
   Future<void> _initializeHardwareCamera({required bool useFront}) async {
     if (!mounted) return;
     setState(() {
       _isCameraInitializing = true;
-      _cameraErrorMessage = null;
     });
 
     try {
-      // Ensure Android runtime camera permission is requested
       try {
         await _nativeMediaChannel.invokeMethod('requestNativePermission', {'permission': 'camera'});
       } catch (_) {}
 
-      // Discover physical camera sensors on the device
       _availableCameras = await availableCameras();
       if (_availableCameras.isEmpty) {
         if (mounted) {
           setState(() {
             _isCameraInitializing = false;
-            _cameraErrorMessage = 'No physical camera hardware detected on this device.';
           });
         }
         return;
       }
 
-      // Locate preferred sensor (Front vs Back)
       final preferredDirection = useFront ? CameraLensDirection.front : CameraLensDirection.back;
       CameraDescription? targetCamera;
       for (final cam in _availableCameras) {
@@ -139,7 +182,6 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> with SingleTickerPr
       }
       targetCamera ??= _availableCameras.first;
 
-      // Dispose prior controller before initializing new one
       final old = _cameraController;
       _cameraController = null;
       if (old != null) {
@@ -165,11 +207,10 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> with SingleTickerPr
         _isCameraInitializing = false;
       });
     } catch (e) {
-      debugPrint('Real camera initialization error: $e');
+      debugPrint('[ActiveCall] Camera initialization error: $e');
       if (mounted) {
         setState(() {
           _isCameraInitializing = false;
-          _cameraErrorMessage = 'Hardware Camera Error: $e';
         });
       }
     }
@@ -179,17 +220,6 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> with SingleTickerPr
     HapticFeedback.lightImpact();
     final newUseFront = !_isFrontCamera;
     await _initializeHardwareCamera(useFront: newUseFront);
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            newUseFront ? 'Switched to Front Camera' : 'Switched to Rear / Back Camera',
-          ),
-          duration: const Duration(milliseconds: 900),
-        ),
-      );
-    }
   }
 
   void _toggleVideo() {
@@ -206,40 +236,42 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> with SingleTickerPr
     }
   }
 
-  @override
-  void dispose() {
-    _callTimer?.cancel();
-    _simulatedVoiceTimer?.cancel();
-    _pulseController.dispose();
-    _cameraController?.dispose();
-    super.dispose();
+  void _toggleMute() {
+    HapticFeedback.lightImpact();
+    setState(() => _isMuted = !_isMuted);
   }
 
-  void _endCall() {
+  void _toggleSpeaker() {
+    HapticFeedback.lightImpact();
+    setState(() => _isSpeaker = !_isSpeaker);
+  }
+
+  void _endCall({bool notifyServer = true}) {
     _callTimer?.cancel();
-    _simulatedVoiceTimer?.cancel();
+    _signalingTimer?.cancel();
+    _waveformTimer?.cancel();
     _cameraController?.dispose();
     _cameraController = null;
     HapticFeedback.heavyImpact();
 
-    setState(() {
-      _status = CallStatus.ended;
-    });
+    if (notifyServer && widget.callId != null) {
+      AuthService.instance.postJson('/v1/calls/end', {'call_id': widget.callId}).catchError((_) => null);
+    }
 
-    final durationFormatted = _formatDuration(_callDurationSeconds);
+    if (mounted) {
+      setState(() => _status = CallStatus.ended);
+      Navigator.pop(context);
+    }
+  }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          _callDurationSeconds > 0
-              ? 'Encrypted Call Ended • Duration: $durationFormatted'
-              : 'Call cancelled.',
-        ),
-        duration: const Duration(seconds: 2),
-      ),
-    );
-
-    Navigator.pop(context);
+  @override
+  void dispose() {
+    _callTimer?.cancel();
+    _signalingTimer?.cancel();
+    _waveformTimer?.cancel();
+    _pulseController.dispose();
+    _cameraController?.dispose();
+    super.dispose();
   }
 
   String _formatDuration(int seconds) {
@@ -248,54 +280,42 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> with SingleTickerPr
     return '$mins:$secs';
   }
 
-  void _toggleMute() {
-    HapticFeedback.lightImpact();
-    setState(() {
-      _isMuted = !_isMuted;
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(_isMuted ? 'Microphone muted' : 'Microphone active'),
-        duration: const Duration(milliseconds: 900),
-      ),
-    );
-  }
-
-  void _toggleSpeaker() {
-    HapticFeedback.lightImpact();
-    setState(() {
-      _isSpeaker = !_isSpeaker;
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0F172A),
+      backgroundColor: const Color(0xFF0A0E17),
       body: SafeArea(
+        top: false,
+        bottom: false,
         child: Stack(
           children: [
-            // Background Viewport: Real Video Hardware Stream OR Audio Wave Viewport
-            if (_isVideoEnabled) ...[
-              _buildRealVideoViewport(),
-            ] else ...[
-              _buildAudioViewport(),
-            ],
-
-            // Top Header Overlay: DTLS-SRTP Encryption HUD & Flip Camera
-            Positioned(
-              top: 12,
-              left: 16,
-              right: 16,
-              child: _buildTopHeader(),
+            // 1. MAIN BACKGROUND / VISION VIEW
+            Positioned.fill(
+              child: _isVideoEnabled ? _buildMainVideoVision() : _buildVoiceCallCanvas(),
             ),
 
-            // Bottom In-Call Tactile Controls
+            // 2. PICTURE-IN-PICTURE (PIP) CAMERA VISION (for Video Calls)
+            if (_isVideoEnabled)
+              Positioned(
+                top: 48,
+                right: 16,
+                child: _buildPipCameraVision(),
+              ),
+
+            // 3. TOP HEADER (Caller info, Duration, Security badge)
             Positioned(
-              left: 0,
-              right: 0,
-              bottom: 24,
-              child: _buildCallControls(),
+              top: 48,
+              left: 20,
+              right: _isVideoEnabled ? 130 : 20,
+              child: _buildTopCallHeader(),
+            ),
+
+            // 4. BOTTOM FLOATING CONTROL DOCK
+            Positioned(
+              bottom: 36,
+              left: 20,
+              right: 20,
+              child: _buildBottomControlDock(),
             ),
           ],
         ),
@@ -304,430 +324,417 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> with SingleTickerPr
   }
 
   // =====================================================================
-  // TOP HEADER OVERLAY
+  // VIDEO CALL VISION COMPONENT
   // =====================================================================
-  Widget _buildTopHeader() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 20),
-          onPressed: _endCall,
-        ),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.55),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
+  Widget _buildMainVideoVision() {
+    // If local is NOT PIP, main view is the local hardware camera
+    if (!_isLocalPip && _cameraController != null && _cameraController!.value.isInitialized) {
+      return SizedBox.expand(
+        child: FittedBox(
+          fit: BoxFit.cover,
+          child: SizedBox(
+            width: _cameraController!.value.previewSize?.height ?? 1080,
+            height: _cameraController!.value.previewSize?.width ?? 1920,
+            child: CameraPreview(_cameraController!),
           ),
-          child: const Row(
+        ),
+      );
+    }
+
+    // Remote camera vision feed
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xFF0F172A), Color(0xFF020617)],
+        ),
+      ),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          // Simulated live peer video vision backdrop
+          Positioned.fill(
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  center: Alignment.center,
+                  radius: 1.2,
+                  colors: [
+                    const Color(0xFF00E5FF).withValues(alpha: 0.12),
+                    Colors.black.withValues(alpha: 0.8),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          // Central peer vision identity avatar & status
+          Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.lock, color: NexaColors.emeraldSecure, size: 13),
-              SizedBox(width: 6),
-              Text(
-                'WebRTC DTLS-SRTP E2EE',
-                style: TextStyle(color: NexaColors.emeraldSecure, fontSize: 11, fontWeight: FontWeight.bold),
+              AnimatedBuilder(
+                animation: _pulseController,
+                builder: (context, _) {
+                  final ringScale = 1.0 + (_pulseController.value * 0.06);
+                  return Transform.scale(
+                    scale: ringScale,
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: const Color(0xFF00E5FF).withValues(alpha: 0.6),
+                          width: 2,
+                        ),
+                      ),
+                      child: CircleAvatar(
+                        radius: 54,
+                        backgroundColor: const Color(0xFF1E293B),
+                        child: Text(
+                          widget.peerName.isNotEmpty ? widget.peerName.substring(0, 1).toUpperCase() : '?',
+                          style: const TextStyle(fontSize: 44, fontWeight: FontWeight.bold, color: Colors.white),
+                        ),
+                      ),
+                    ),
+                  );
+                },
               ),
+              const SizedBox(height: 16),
+              Text(
+                widget.peerName,
+                style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                _getStatusText(),
+                style: TextStyle(
+                  color: _status == CallStatus.connected ? const Color(0xFF00E5FF) : const Color(0xFF94A3B8),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.4,
+                ),
+              ),
+              const SizedBox(height: 8),
+              if (_status == CallStatus.connected)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.black45,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.white12),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.videocam, size: 12, color: Color(0xFF00E5FF)),
+                      SizedBox(width: 5),
+                      Text('Remote Camera Vision Live', style: TextStyle(color: Colors.white70, fontSize: 11)),
+                    ],
+                  ),
+                ),
             ],
           ),
+        ],
+      ),
+    );
+  }
+
+  // =====================================================================
+  // PICTURE-IN-PICTURE (PIP) LOCAL CAMERA FEED
+  // =====================================================================
+  Widget _buildPipCameraVision() {
+    return GestureDetector(
+      onTap: () {
+        setState(() => _isLocalPip = !_isLocalPip);
+      },
+      child: Container(
+        width: 105,
+        height: 155,
+        decoration: BoxDecoration(
+          color: const Color(0xFF1E293B),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFF00E5FF).withValues(alpha: 0.6), width: 1.5),
+          boxShadow: const [
+            BoxShadow(color: Colors.black54, blurRadius: 16, offset: Offset(0, 6)),
+          ],
         ),
-        if (_isVideoEnabled)
-          IconButton(
-            icon: const Icon(Icons.flip_camera_ios, color: Colors.white, size: 24),
-            tooltip: 'Flip Camera (Front / Back)',
-            onPressed: _switchCamera,
-          )
-        else
-          const SizedBox(width: 44),
+        clipBehavior: Clip.antiAlias,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (_cameraController != null && _cameraController!.value.isInitialized)
+              FittedBox(
+                fit: BoxFit.cover,
+                child: SizedBox(
+                  width: _cameraController!.value.previewSize?.height ?? 105,
+                  height: _cameraController!.value.previewSize?.width ?? 155,
+                  child: CameraPreview(_cameraController!),
+                ),
+              )
+            else
+              Container(
+                color: const Color(0xFF0F172A),
+                child: Center(
+                  child: _isCameraInitializing
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF00E5FF)))
+                      : const Icon(Icons.videocam_off, color: Colors.white54, size: 28),
+                ),
+              ),
+
+            // PIP Label Badge
+            Positioned(
+              bottom: 6,
+              left: 6,
+              right: 6,
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.65),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: const Text(
+                  'Local Vision',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // =====================================================================
+  // VOICE CALL CANVAS & WAVEFORMS
+  // =====================================================================
+  Widget _buildVoiceCallCanvas() {
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xFF0A0E17), Color(0xFF0F172A)],
+        ),
+      ),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Pulsing Audio Ring
+            AnimatedBuilder(
+              animation: _pulseController,
+              builder: (context, _) {
+                final scale = 1.0 + (_pulseController.value * 0.08);
+                return Transform.scale(
+                  scale: scale,
+                  child: Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: const Color(0xFF10B981).withValues(alpha: 0.5),
+                        width: 2.5,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFF10B981).withValues(alpha: 0.2),
+                          blurRadius: 32,
+                          spreadRadius: 4,
+                        ),
+                      ],
+                    ),
+                    child: CircleAvatar(
+                      radius: 58,
+                      backgroundColor: const Color(0xFF1E293B),
+                      child: Text(
+                        widget.peerName.isNotEmpty ? widget.peerName.substring(0, 1).toUpperCase() : '?',
+                        style: const TextStyle(fontSize: 48, fontWeight: FontWeight.bold, color: Colors.white),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 22),
+
+            // Peer Identity
+            Text(
+              widget.peerName,
+              style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              _getStatusText(),
+              style: TextStyle(
+                color: _status == CallStatus.connected ? const Color(0xFF10B981) : const Color(0xFF94A3B8),
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 24),
+
+            // Voice Waveform Equalizer (When Connected)
+            if (_status == CallStatus.connected)
+              SizedBox(
+                height: 38,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: List.generate(_voiceWaveAmplitudes.length, (i) {
+                    final amp = _voiceWaveAmplitudes[i];
+                    return AnimatedContainer(
+                      duration: const Duration(milliseconds: 140),
+                      width: 4,
+                      height: 8 + (amp * 28),
+                      margin: const EdgeInsets.symmetric(horizontal: 3),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF10B981),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                    );
+                  }),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // =====================================================================
+  // TOP HEADER & BADGES
+  // =====================================================================
+  Widget _buildTopCallHeader() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.white12),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    widget.isVideo ? Icons.videocam : Icons.phone_in_talk,
+                    size: 13,
+                    color: widget.isVideo ? const Color(0xFF00E5FF) : const Color(0xFF10B981),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    _status == CallStatus.connected
+                        ? _formatDuration(_callDurationSeconds)
+                        : _getStatusText().toUpperCase(),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: Colors.black38,
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white10),
+              ),
+              child: const Icon(Icons.lock, size: 12, color: Color(0xFF10B981)),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          widget.peerName,
+          style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+          overflow: TextOverflow.ellipsis,
+        ),
+        Text(
+          widget.peerNexaId,
+          style: const TextStyle(color: Colors.white54, fontSize: 11),
+        ),
       ],
     );
   }
 
   // =====================================================================
-  // REAL PHYSICAL HARDWARE VIDEO VIEWPORT
+  // BOTTOM MINIMALIST CONTROL DOCK
   // =====================================================================
-  Widget _buildRealVideoViewport() {
-    if (_isCameraInitializing) {
-      return Container(
-        color: const Color(0xFF0F172A),
-        child: const Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CircularProgressIndicator(color: NexaColors.primary),
-              SizedBox(height: 18),
-              Text(
-                'Opening Device Camera Hardware...',
-                style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
-              ),
-              SizedBox(height: 6),
-              Text(
-                'Activating native sensor lens & AEAD video pipeline',
-                style: TextStyle(color: Colors.white60, fontSize: 12),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    if (_cameraController != null && _cameraController!.value.isInitialized) {
-      return Positioned.fill(
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            // Physical Live Camera Stream
-            FittedBox(
-              fit: BoxFit.cover,
-              child: SizedBox(
-                width: _cameraController!.value.previewSize?.height ?? 1080,
-                height: _cameraController!.value.previewSize?.width ?? 1920,
-                child: CameraPreview(_cameraController!),
-              ),
-            ),
-
-            // Top Gradient Shadow for Contrast
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              height: 140,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Colors.black.withValues(alpha: 0.7),
-                      Colors.transparent,
-                    ],
-                  ),
-                ),
-              ),
-            ),
-
-            // Bottom Gradient Shadow for Controls
-            Positioned(
-              bottom: 0,
-              left: 0,
-              right: 0,
-              height: 160,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.bottomCenter,
-                    end: Alignment.topCenter,
-                    colors: [
-                      Colors.black.withValues(alpha: 0.75),
-                      Colors.transparent,
-                    ],
-                  ),
-                ),
-              ),
-            ),
-
-            // Sensor HUD Indicator (Front / Back Camera & Timer)
-            Positioned(
-              top: 68,
-              left: 18,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.65),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 8,
-                      height: 8,
-                      decoration: const BoxDecoration(
-                        color: NexaColors.emeraldSecure,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      '${_isFrontCamera ? "FRONT SENSOR" : "REAR SENSOR"} • ${_formatDuration(_callDurationSeconds)}',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        fontFamily: 'Courier',
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-            // Peer Call Status Header
-            Positioned(
-              top: 68,
-              right: 18,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.65),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.videocam, color: Colors.white70, size: 14),
-                    const SizedBox(width: 5),
-                    Text(
-                      widget.peerName,
-                      style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    // Hardware Error / Unavailable View
+  Widget _buildBottomControlDock() {
     return Container(
-      color: const Color(0xFF0F172A),
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(28.0),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.videocam_off, color: Colors.white54, size: 54),
-              const SizedBox(height: 16),
-              Text(
-                _cameraErrorMessage ?? 'Physical camera sensor unavailable.',
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white70, fontSize: 14),
-              ),
-              const SizedBox(height: 16),
-              ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: NexaColors.primary,
-                  foregroundColor: Colors.white,
-                ),
-                icon: const Icon(Icons.refresh, size: 18),
-                label: const Text('Retry Camera Hardware'),
-                onPressed: () => _initializeHardwareCamera(useFront: _isFrontCamera),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  // =====================================================================
-  // AUDIO VIEWPORT (CALLING / RINGING / CONNECTED WAVES)
-  // =====================================================================
-  Widget _buildAudioViewport() {
-    String statusLabel;
-    Color statusColor;
-
-    switch (_status) {
-      case CallStatus.connecting:
-        statusLabel = 'Connecting Encrypted Tunnel...';
-        statusColor = NexaColors.amberAttention;
-        break;
-      case CallStatus.ringing:
-        statusLabel = 'Ringing Peer Device...';
-        statusColor = NexaColors.primary;
-        break;
-      case CallStatus.connected:
-        statusLabel = _formatDuration(_callDurationSeconds);
-        statusColor = Colors.white;
-        break;
-      case CallStatus.ended:
-        statusLabel = 'Call Terminated';
-        statusColor = NexaColors.rubyDestructive;
-        break;
-    }
-
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          // Peer Avatar with Pulsing Signal Ripple
-          AnimatedBuilder(
-            animation: _pulseController,
-            builder: (context, child) {
-              final scale = 1.0 + (_pulseController.value * 0.08);
-              return Transform.scale(
-                scale: _status != CallStatus.connected ? scale : 1.0,
-                child: Container(
-                  width: 140,
-                  height: 140,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: NexaColors.primary.withValues(alpha: 0.15),
-                    border: Border.all(
-                      color: _status == CallStatus.connected
-                          ? NexaColors.emeraldSecure
-                          : NexaColors.primary.withValues(alpha: 0.5),
-                      width: 2.5,
-                    ),
-                  ),
-                  child: Center(
-                    child: CircleAvatar(
-                      radius: 54,
-                      backgroundColor: NexaColors.primary,
-                      child: Text(
-                        widget.peerName.isNotEmpty ? widget.peerName.substring(0, 1).toUpperCase() : '?',
-                        style: const TextStyle(fontSize: 44, fontWeight: FontWeight.bold, color: Colors.white),
-                      ),
-                    ),
-                  ),
-                ),
-              );
-            },
-          ),
-          const SizedBox(height: 28),
-
-          // Peer Name
-          Text(
-            widget.peerName,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 0.3,
-            ),
-          ),
-          const SizedBox(height: 6),
-
-          // NEXA Cryptographic ID
-          Text(
-            widget.peerNexaId,
-            style: const TextStyle(
-              color: Colors.white54,
-              fontFamily: 'Courier',
-              fontSize: 13,
-              letterSpacing: 1.1,
-            ),
-          ),
-          const SizedBox(height: 18),
-
-          // Call Status Pill Badge
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.4),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Text(
-              statusLabel,
-              style: TextStyle(
-                color: statusColor,
-                fontSize: _status == CallStatus.connected ? 18 : 14,
-                fontFamily: _status == CallStatus.connected ? 'Courier' : null,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-
-          // Dynamic Voice Visualizer Wave when connected
-          if (_status == CallStatus.connected) ...[
-            const SizedBox(height: 24),
-            SizedBox(
-              height: 32,
-              width: 140,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: _voiceWaveAmplitudes.map((amp) {
-                  return Container(
-                    width: 4,
-                    height: (30 * amp).clamp(6.0, 30.0),
-                    decoration: BoxDecoration(
-                      color: _isMuted ? Colors.white30 : NexaColors.emeraldSecure,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  );
-                }).toList(),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  // =====================================================================
-  // IN-CALL CONTROLS BAR
-  // =====================================================================
-  Widget _buildCallControls() {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 24),
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
-        color: const Color(0xFF1E293B).withValues(alpha: 0.95),
+        color: const Color(0xFF0F172A).withValues(alpha: 0.88),
         borderRadius: BorderRadius.circular(32),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.5),
-            blurRadius: 20,
-            offset: const Offset(0, 8),
-          ),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+        boxShadow: const [
+          BoxShadow(color: Colors.black54, blurRadius: 24, offset: Offset(0, 8)),
         ],
       ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
-          // Mute Button
-          _buildCallActionButton(
+          // Mute Microphone
+          _buildActionButton(
             icon: _isMuted ? Icons.mic_off : Icons.mic,
-            label: _isMuted ? 'Muted' : 'Mute',
             isActive: _isMuted,
-            activeColor: NexaColors.rubyDestructive,
+            activeColor: const Color(0xFFE11D48),
             onTap: _toggleMute,
           ),
 
-          // Speaker Button
-          _buildCallActionButton(
+          // Speaker Toggle
+          _buildActionButton(
             icon: _isSpeaker ? Icons.volume_up : Icons.volume_down,
-            label: _isSpeaker ? 'Speaker' : 'Ear',
             isActive: _isSpeaker,
-            activeColor: NexaColors.primary,
+            activeColor: const Color(0xFF00E5FF),
             onTap: _toggleSpeaker,
           ),
 
-          // Video On/Off Button
-          _buildCallActionButton(
-            icon: _isVideoEnabled ? Icons.videocam : Icons.videocam_off,
-            label: 'Video',
-            isActive: _isVideoEnabled,
-            activeColor: NexaColors.emeraldSecure,
-            onTap: _toggleVideo,
-          ),
+          // Camera Toggle (For Video Calls)
+          if (widget.isVideo)
+            _buildActionButton(
+              icon: _isVideoEnabled ? Icons.videocam : Icons.videocam_off,
+              isActive: !_isVideoEnabled,
+              activeColor: const Color(0xFFE11D48),
+              onTap: _toggleVideo,
+            ),
 
-          // End Call Button
+          // Flip Camera (For Video Calls)
+          if (widget.isVideo)
+            _buildActionButton(
+              icon: Icons.flip_camera_ios,
+              isActive: false,
+              onTap: _switchCamera,
+            ),
+
+          // End Call Button (Red circle)
           GestureDetector(
-            onTap: _endCall,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 52,
-                  height: 52,
-                  decoration: const BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: NexaColors.rubyDestructive,
+            onTap: () => _endCall(notifyServer: true),
+            child: Container(
+              width: 52,
+              height: 52,
+              decoration: BoxDecoration(
+                color: const Color(0xFFE11D48),
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFFE11D48).withValues(alpha: 0.5),
+                    blurRadius: 16,
+                    offset: const Offset(0, 4),
                   ),
-                  child: const Icon(Icons.call_end, color: Colors.white, size: 24),
-                ),
-                const SizedBox(height: 6),
-                const Text('End', style: TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.w600)),
-              ],
+                ],
+              ),
+              child: const Icon(Icons.call_end, color: Colors.white, size: 26),
             ),
           ),
         ],
@@ -735,42 +742,46 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> with SingleTickerPr
     );
   }
 
-  Widget _buildCallActionButton({
+  Widget _buildActionButton({
     required IconData icon,
-    required String label,
     required bool isActive,
-    required Color activeColor,
+    Color? activeColor,
     required VoidCallback onTap,
   }) {
+    final bg = isActive
+        ? (activeColor ?? const Color(0xFF00E5FF)).withValues(alpha: 0.25)
+        : Colors.white.withValues(alpha: 0.08);
+    final ic = isActive ? (activeColor ?? const Color(0xFF00E5FF)) : Colors.white;
+
     return GestureDetector(
       onTap: onTap,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 50,
-            height: 50,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: isActive ? activeColor : const Color(0xFF334155),
-            ),
-            child: Icon(
-              icon,
-              color: Colors.white,
-              size: 22,
-            ),
+      child: Container(
+        width: 46,
+        height: 46,
+        decoration: BoxDecoration(
+          color: bg,
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: isActive ? (activeColor ?? const Color(0xFF00E5FF)) : Colors.white12,
           ),
-          const SizedBox(height: 6),
-          Text(
-            label,
-            style: TextStyle(
-              color: isActive ? activeColor : Colors.white70,
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
+        ),
+        child: Icon(icon, color: ic, size: 22),
       ),
     );
+  }
+
+  String _getStatusText() {
+    switch (_status) {
+      case CallStatus.connecting:
+        return 'Connecting...';
+      case CallStatus.ringing:
+        return 'Ringing...';
+      case CallStatus.connected:
+        return 'Connected • E2EE Active';
+      case CallStatus.declined:
+        return 'Call Declined';
+      case CallStatus.ended:
+        return 'Call Ended';
+    }
   }
 }

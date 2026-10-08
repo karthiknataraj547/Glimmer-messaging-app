@@ -30,6 +30,8 @@ class UserSession extends ChangeNotifier {
   // Getters
   String get name => _name;
   String get handle => _handle;
+  String get username => _handle.replaceAll('@', '');
+  String get fullName => _name.isNotEmpty ? _name : username;
   String get nexaId => _nexaId;
   String get status => _status;
   String get bio => _bio;
