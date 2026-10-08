@@ -28,8 +28,12 @@ module.exports = async (req, res) => {
             host: targetUrl.host,
             'x-nexa-forwarded': 'true'
           },
-          timeout: 3000
+          timeout: 1500
         }, (proxyRes) => {
+          if (proxyRes.statusCode >= 500) {
+            console.warn('[Vercel Gateway] External backend returned ' + proxyRes.statusCode + ', falling back to embedded engine');
+            return resolve();
+          }
           proxied = true;
           res.writeHead(proxyRes.statusCode, proxyRes.headers);
           proxyRes.pipe(res);
@@ -38,7 +42,7 @@ module.exports = async (req, res) => {
 
         proxyReq.on('timeout', () => {
           proxyReq.destroy();
-          console.warn('[Vercel Gateway] BACKEND_URL timeout, falling back to embedded engine');
+          console.warn('[Vercel Gateway] BACKEND_URL timeout (1.5s), falling back to embedded engine');
           resolve();
         });
 
