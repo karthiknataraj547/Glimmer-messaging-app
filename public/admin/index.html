@@ -881,6 +881,9 @@
   <script>
     let adminToken = sessionStorage.getItem('nexa_admin_token') || '';
     let apiBaseUrl = localStorage.getItem('nexa_admin_api_base') || '';
+    if (!apiBaseUrl && (window.location.hostname.includes('vercel.app') || window.location.protocol === 'file:')) {
+      apiBaseUrl = 'https://genius-reserves-singing-assignment.trycloudflare.com';
+    }
     let cachedUsers = [];
     let refreshInterval = null;
 
