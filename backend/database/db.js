@@ -11,7 +11,9 @@ const path = require('path');
 const { Pool } = require('pg');
 
 const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
-const SEED_FILE = path.join(__dirname, '../data/nexa_database.json');
+const SEED_FILE = fs.existsSync(path.join(__dirname, 'seed_database.json')) 
+  ? path.join(__dirname, 'seed_database.json') 
+  : path.join(__dirname, '../data/nexa_database.json');
 const DB_DIR = isServerless ? path.join('/tmp', 'nexa_data') : path.join(__dirname, '../data');
 const DB_FILE = path.join(DB_DIR, 'nexa_database.json');
 const DB_TEMP_FILE = path.join(DB_DIR, 'nexa_database.tmp');

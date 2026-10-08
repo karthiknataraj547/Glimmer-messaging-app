@@ -1,0 +1,831 @@
+{
+  "users": {
+    "admin": {
+      "username": "admin",
+      "password_hash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+      "full_name": "Admin",
+      "about": "NEXA Relay Administrator",
+      "phone": "",
+      "nexa_id": "NX-0000-ADMN",
+      "role": "admin",
+      "status": "active",
+      "created_at": 1791367546745
+    },
+    "karthik_official": {
+      "username": "karthik_official",
+      "password_hash": "ef92b778bafe771e89245b89ecbc08a44a4e166c06659911881f383d4473e94f",
+      "full_name": "Karthik N",
+      "about": "Zero Knowledge User",
+      "phone": "+919876543210",
+      "nexa_id": "NX-C53E-AEE9",
+      "created_at": 1791367546745
+    },
+    "test_user_19943": {
+      "username": "test_user_19943",
+      "password_hash": "ef92b778bafe771e89245b89ecbc08a44a4e166c06659911881f383d4473e94f",
+      "full_name": "Test User",
+      "about": "Zero-knowledge encrypted peer.",
+      "phone": "",
+      "nexa_id": "NX-AFC5-BFEA",
+      "created_at": 1791372320045
+    },
+    "brand_new_user_99": {
+      "username": "brand_new_user_99",
+      "password_hash": "2a8610aefdd0028c6bf074dd18721c0ef8bc43241cc7a653d7aedf2036bdf6b3",
+      "full_name": "brand_new_user_99",
+      "about": "Zero-knowledge encrypted peer.",
+      "phone": "",
+      "nexa_id": "NX-DFE8-BCEE",
+      "created_at": 1791372550483
+    },
+    "test_user_54223": {
+      "username": "test_user_54223",
+      "password_hash": "ef92b778bafe771e89245b89ecbc08a44a4e166c06659911881f383d4473e94f",
+      "full_name": "Test User",
+      "about": "Zero-knowledge encrypted peer.",
+      "phone": "",
+      "nexa_id": "NX-C440-543D",
+      "created_at": 1791372654359
+    },
+    "test_user_36342": {
+      "username": "test_user_36342",
+      "password_hash": "ef92b778bafe771e89245b89ecbc08a44a4e166c06659911881f383d4473e94f",
+      "full_name": "Test User",
+      "about": "Zero-knowledge encrypted peer.",
+      "phone": "",
+      "nexa_id": "NX-84E7-D1BB",
+      "created_at": 1791385539227
+    },
+    "ammu_547": {
+      "username": "ammu_547",
+      "password_hash": "6c94e35ccc352d4e9ef0b99562cff995a5741ce8de8ad11b568892934daee366",
+      "full_name": "ammu_547",
+      "about": "Zero-knowledge encrypted peer.",
+      "phone": "",
+      "nexa_id": "NX-F544-DB48",
+      "created_at": 1791386672991
+    },
+    "test_user_16940": {
+      "username": "test_user_16940",
+      "password_hash": "ef92b778bafe771e89245b89ecbc08a44a4e166c06659911881f383d4473e94f",
+      "full_name": "Test User",
+      "about": "Zero-knowledge encrypted peer.",
+      "phone": "",
+      "nexa_id": "NX-B4E8-D30A",
+      "created_at": 1791387118641
+    },
+    "test_user_53226": {
+      "username": "test_user_53226",
+      "password_hash": "ef92b778bafe771e89245b89ecbc08a44a4e166c06659911881f383d4473e94f",
+      "full_name": "Test User",
+      "about": "Zero-knowledge encrypted peer.",
+      "phone": "",
+      "nexa_id": "NX-B9ED-2A42",
+      "created_at": 1791423254383
+    },
+    "harshith_123": {
+      "username": "harshith_123",
+      "password_hash": "03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4",
+      "full_name": "Harshith",
+      "about": "Encrypted & Focused",
+      "phone": "",
+      "nexa_id": "NX-7F76-B468",
+      "created_at": 1791424908453
+    }
+  },
+  "user_devices": {},
+  "prekey_bundles": {},
+  "mailbox_queue": {},
+  "activity_logs": [
+    {
+      "id": "LOG-muyx74k3-F5SH",
+      "timestamp": 1791426690003,
+      "type": "admin",
+      "action": "app_update_published",
+      "target": "v1.0.3+4",
+      "actor": "admin",
+      "details": "Published application update v1.0.3+4",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muyx74k2-NEHK",
+      "timestamp": 1791426690002,
+      "type": "admin",
+      "action": "push_app_update",
+      "target": "v1.0.3+4",
+      "actor": "admin",
+      "details": "App update released: Real device contacts sync, peer ID servicing option, real-time message delivery enhancements, and security upgrades.",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muyx5ii3-VBV0",
+      "timestamp": 1791426614763,
+      "type": "admin",
+      "action": "app_update_published",
+      "target": "v1.0.3+4",
+      "actor": "admin",
+      "details": "Published application update v1.0.3+4",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muyx5ii2-QCC0",
+      "timestamp": 1791426614762,
+      "type": "admin",
+      "action": "push_app_update",
+      "target": "v1.0.3+4",
+      "actor": "admin",
+      "details": "App update released: Real device contacts sync, peer ID servicing option, real-time message delivery enhancements, and security upgrades.",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muywze4h-W001",
+      "timestamp": 1791426329153,
+      "type": "admin",
+      "action": "app_update_published",
+      "target": "v1.0.2+3",
+      "actor": "admin",
+      "details": "Published application update v1.0.2+3",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muywze4f-6OJ5",
+      "timestamp": 1791426329151,
+      "type": "admin",
+      "action": "push_app_update",
+      "target": "v1.0.2+3",
+      "actor": "admin",
+      "details": "App update released: Encrypted mobile contacts matching, direct NEXA ID servicing, and real-time bidirectional message updates.",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muyw5e48-LQJA",
+      "timestamp": 1791424929464,
+      "type": "auth",
+      "action": "login_success",
+      "target": "ammu_547",
+      "actor": "ammu_547",
+      "details": "User authenticated successfully",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muyw5b40-UYSV",
+      "timestamp": 1791424925568,
+      "type": "security",
+      "action": "login_failed",
+      "target": "ammu_547",
+      "actor": "ammu_547",
+      "details": "Incorrect password or Master PIN provided",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muyw5akl-KVSR",
+      "timestamp": 1791424924869,
+      "type": "security",
+      "action": "login_failed",
+      "target": "ammu_547",
+      "actor": "ammu_547",
+      "details": "Incorrect password or Master PIN provided",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muyw4xwo-OK5I",
+      "timestamp": 1791424908456,
+      "type": "auth",
+      "action": "user_register",
+      "target": "harshith_123",
+      "actor": "harshith_123",
+      "details": "New account NX-7F76-B468 registered successfully",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muyvyoiw-7S5G",
+      "timestamp": 1791424616360,
+      "type": "admin",
+      "action": "delete_user",
+      "target": "test_user_62064",
+      "actor": "admin",
+      "details": "User account deleted permanently from database",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muyvylq8-QHUX",
+      "timestamp": 1791424612736,
+      "type": "admin",
+      "action": "delete_user",
+      "target": "test_user_21101",
+      "actor": "admin",
+      "details": "User account deleted permanently from database",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muyvyk5m-JI58",
+      "timestamp": 1791424610698,
+      "type": "admin",
+      "action": "delete_user",
+      "target": "karthik_n",
+      "actor": "admin",
+      "details": "User account deleted permanently from database",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muyvyh0t-9E2E",
+      "timestamp": 1791424606637,
+      "type": "admin",
+      "action": "delete_user",
+      "target": "karthik",
+      "actor": "admin",
+      "details": "User account deleted permanently from database",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muyvyfek-IIWW",
+      "timestamp": 1791424604540,
+      "type": "admin",
+      "action": "delete_user",
+      "target": "test_user_44336",
+      "actor": "admin",
+      "details": "User account deleted permanently from database",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muyvy8be-6KC2",
+      "timestamp": 1791424595354,
+      "type": "admin",
+      "action": "admin_login",
+      "target": "admin",
+      "actor": "admin",
+      "details": "Administrator logged into Admin Control Center",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muyvmddc-XOWA",
+      "timestamp": 1791424042032,
+      "type": "security",
+      "action": "login_denied_user_not_found",
+      "target": "crazy_547",
+      "actor": "crazy_547",
+      "details": "Login attempt for non-existent account",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muyvm10r-3Y09",
+      "timestamp": 1791424026027,
+      "type": "admin",
+      "action": "delete_user",
+      "target": "crazy_547",
+      "actor": "admin",
+      "details": "User account deleted permanently from database",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muyvls4z-821Z",
+      "timestamp": 1791424014515,
+      "type": "admin",
+      "action": "admin_login",
+      "target": "admin",
+      "actor": "admin",
+      "details": "Administrator logged into Admin Control Center",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muyvgsou-WF3W",
+      "timestamp": 1791423781950,
+      "type": "auth",
+      "action": "login_success",
+      "target": "admin",
+      "actor": "admin",
+      "details": "User authenticated successfully",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muyvgsin-XWEY",
+      "timestamp": 1791423781727,
+      "type": "security",
+      "action": "login_failed",
+      "target": "admin",
+      "actor": "admin",
+      "details": "Incorrect password or Master PIN provided",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muyvg9m0-GYX3",
+      "timestamp": 1791423757224,
+      "type": "auth",
+      "action": "login_success",
+      "target": "crazy_547",
+      "actor": "crazy_547",
+      "details": "User authenticated successfully",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muyvg7nf-JLOW",
+      "timestamp": 1791423754683,
+      "type": "security",
+      "action": "login_failed",
+      "target": "crazy_547",
+      "actor": "crazy_547",
+      "details": "Incorrect password or Master PIN provided",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muyvfyrd-ELYA",
+      "timestamp": 1791423743161,
+      "type": "auth",
+      "action": "user_register",
+      "target": "crazy_547",
+      "actor": "crazy_547",
+      "details": "New account NX-FE46-5DAF registered successfully",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muyvfnxj-SESB",
+      "timestamp": 1791423729127,
+      "type": "auth",
+      "action": "login_success",
+      "target": "admin",
+      "actor": "admin",
+      "details": "User authenticated successfully",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muyvfnnf-WTVX",
+      "timestamp": 1791423728763,
+      "type": "security",
+      "action": "login_failed",
+      "target": "admin",
+      "actor": "admin",
+      "details": "Incorrect password or Master PIN provided",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muyvfbsa-ZU85",
+      "timestamp": 1791423713386,
+      "type": "auth",
+      "action": "login_success",
+      "target": "ammu_547",
+      "actor": "ammu_547",
+      "details": "User authenticated successfully",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muyvf6rl-664R",
+      "timestamp": 1791423706881,
+      "type": "security",
+      "action": "login_denied_user_not_found",
+      "target": "ammu_457",
+      "actor": "ammu_457",
+      "details": "Login attempt for non-existent account",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muyv5hm9-TPFI",
+      "timestamp": 1791423254385,
+      "type": "auth",
+      "action": "user_register",
+      "target": "test_user_53226",
+      "actor": "test_user_53226",
+      "details": "New account NX-B9ED-2A42 registered successfully",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muyv58cs-F55F",
+      "timestamp": 1791423242380,
+      "type": "admin",
+      "action": "admin_login",
+      "target": "admin",
+      "actor": "admin",
+      "details": "Administrator logged into Admin Control Center",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muyv58bv-6T06",
+      "timestamp": 1791423242347,
+      "type": "security",
+      "action": "admin_bad_credentials",
+      "target": "admin",
+      "actor": "admin",
+      "details": "Invalid admin Master PIN entered",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muyus1xn-FM37",
+      "timestamp": 1791422627531,
+      "type": "admin",
+      "action": "admin_login",
+      "target": "admin",
+      "actor": "admin",
+      "details": "Administrator logged into Admin Control Center",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muyarusu-R3EU",
+      "timestamp": 1791389025966,
+      "type": "admin",
+      "action": "admin_login",
+      "target": "admin",
+      "actor": "admin",
+      "details": "Administrator logged into Admin Control Center",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muyar5dn-M0PQ",
+      "timestamp": 1791388993019,
+      "type": "admin",
+      "action": "admin_login",
+      "target": "admin",
+      "actor": "admin",
+      "details": "Administrator logged into Admin Control Center",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muyaq0ae-3VEG",
+      "timestamp": 1791388939766,
+      "type": "auth",
+      "action": "login_success",
+      "target": "ammu_547",
+      "actor": "ammu_547",
+      "details": "User authenticated successfully",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muyappt3-3QAB",
+      "timestamp": 1791388926183,
+      "type": "security",
+      "action": "login_denied_user_not_found",
+      "target": "aakhd_547",
+      "actor": "aakhd_547",
+      "details": "Login attempt for non-existent account",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muy9ww8a-JEUO",
+      "timestamp": 1791387581482,
+      "type": "security",
+      "action": "login_denied_user_not_found",
+      "target": "fake_user_test",
+      "actor": "fake_user_test",
+      "details": "Login attempt for non-existent account",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muy9mz3o-JZI8",
+      "timestamp": 1791387118644,
+      "type": "auth",
+      "action": "user_register",
+      "target": "test_user_16940",
+      "actor": "test_user_16940",
+      "details": "New account NX-B4E8-D30A registered successfully",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muy9mn87-E7GL",
+      "timestamp": 1791387103255,
+      "type": "admin",
+      "action": "admin_login",
+      "target": "admin",
+      "actor": "admin",
+      "details": "Administrator logged into Admin Control Center",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muy9mn0l-XI78",
+      "timestamp": 1791387102981,
+      "type": "security",
+      "action": "admin_bad_credentials",
+      "target": "admin",
+      "actor": "admin",
+      "details": "Invalid admin Master PIN entered",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muy9liov-T7PB",
+      "timestamp": 1791387050719,
+      "type": "auth",
+      "action": "login_success",
+      "target": "admin",
+      "actor": "admin",
+      "details": "User authenticated successfully",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muy9kss5-REKR",
+      "timestamp": 1791387017141,
+      "type": "security",
+      "action": "login_failed",
+      "target": "admin",
+      "actor": "admin",
+      "details": "Incorrect password or Master PIN provided",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muy9ksrz-LE9R",
+      "timestamp": 1791387017135,
+      "type": "security",
+      "action": "login_failed",
+      "target": "admin",
+      "actor": "admin",
+      "details": "Incorrect password or Master PIN provided",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muy9ksri-PW6K",
+      "timestamp": 1791387017118,
+      "type": "security",
+      "action": "login_denied_user_not_found",
+      "target": "nonexistentuser_1791387017051",
+      "actor": "nonexistentuser_1791387017051",
+      "details": "Login attempt for non-existent account",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muy9h9qb-YG6W",
+      "timestamp": 1791386852483,
+      "type": "auth",
+      "action": "login_success",
+      "target": "admin",
+      "actor": "admin",
+      "details": "User authenticated successfully",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muy9h313-0MME",
+      "timestamp": 1791386843799,
+      "type": "security",
+      "action": "login_failed",
+      "target": "karthik_n",
+      "actor": "karthik_n",
+      "details": "Incorrect password or Master PIN provided",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muy9gw6f-UL0F",
+      "timestamp": 1791386834919,
+      "type": "security",
+      "action": "login_denied_user_not_found",
+      "target": "non_existent_user_9999",
+      "actor": "non_existent_user_9999",
+      "details": "Login attempt for non-existent account",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muy9df8k-69S7",
+      "timestamp": 1791386672996,
+      "type": "auth",
+      "action": "auto_provision_login",
+      "target": "ammu_547",
+      "actor": "ammu_547",
+      "details": "Auto-provisioned account NX-F544-DB48 via simple login",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muy9d5sf-2F9J",
+      "timestamp": 1791386660751,
+      "type": "admin",
+      "action": "user_deleted",
+      "target": "ammu_547",
+      "actor": "admin",
+      "details": "Permanently deleted user account @ammu_547 and associated device keys",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muy9d5rx-YIWU",
+      "timestamp": 1791386660735,
+      "type": "admin",
+      "action": "delete_user",
+      "target": "ammu_547",
+      "actor": "admin",
+      "details": "User account deleted permanently from database",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muy97mye-2JUY",
+      "timestamp": 1791386403062,
+      "type": "auth",
+      "action": "login_success",
+      "target": "ammu_547",
+      "actor": "ammu_547",
+      "details": "User authenticated successfully",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muy8p4f1-EEZZ",
+      "timestamp": 1791385539229,
+      "type": "auth",
+      "action": "user_register",
+      "target": "test_user_36342",
+      "actor": "test_user_36342",
+      "details": "New account NX-84E7-D1BB registered successfully",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muy8ou9z-OCA6",
+      "timestamp": 1791385526087,
+      "type": "admin",
+      "action": "admin_login",
+      "target": "admin",
+      "actor": "admin",
+      "details": "Administrator logged into Admin Control Center",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muy8ou71-SS75",
+      "timestamp": 1791385525981,
+      "type": "security",
+      "action": "admin_bad_credentials",
+      "target": "admin",
+      "actor": "admin",
+      "details": "Invalid admin Master PIN entered",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muy8js0x-T46N",
+      "timestamp": 1791385289889,
+      "type": "security",
+      "action": "login_failed",
+      "target": "karthik_n",
+      "actor": "karthik_n",
+      "details": "Incorrect password or Master PIN provided",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muy8cmkh-GEZU",
+      "timestamp": 1791384956225,
+      "type": "admin",
+      "action": "admin_login",
+      "target": "admin",
+      "actor": "admin",
+      "details": "Administrator authenticated successfully on dedicated portal",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muy87j9e-3C72",
+      "timestamp": 1791384718658,
+      "type": "admin",
+      "action": "delete_user",
+      "target": "test_user_88872",
+      "actor": "admin",
+      "details": "User account deleted permanently from database",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muy87hc6-WXD0",
+      "timestamp": 1791384716166,
+      "type": "admin",
+      "action": "delete_user",
+      "target": "test_user_60691",
+      "actor": "admin",
+      "details": "User account deleted permanently from database",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muy86mup-QXSY",
+      "timestamp": 1791384676657,
+      "type": "admin",
+      "action": "admin_login",
+      "target": "admin",
+      "actor": "admin",
+      "details": "Administrator logged into Admin Control Center",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muy86kcw-MV9D",
+      "timestamp": 1791384673424,
+      "type": "security",
+      "action": "admin_bad_credentials",
+      "target": "admin",
+      "actor": "admin",
+      "details": "Invalid admin Master PIN entered",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muy7lgtt-D1UC",
+      "timestamp": 1791383689073,
+      "type": "auth",
+      "action": "user_register",
+      "target": "test_user_88872",
+      "actor": "test_user_88872",
+      "details": "New account NX-1361-5442 registered successfully",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muy7l3o4-2QLF",
+      "timestamp": 1791383672020,
+      "type": "admin",
+      "action": "admin_login",
+      "target": "admin",
+      "actor": "admin",
+      "details": "Administrator logged into Admin Control Center",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muy7l3n2-W1RT",
+      "timestamp": 1791383671982,
+      "type": "security",
+      "action": "admin_bad_credentials",
+      "target": "admin",
+      "actor": "admin",
+      "details": "Invalid admin Master PIN entered",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muy7klkl-BHDR",
+      "timestamp": 1791383648565,
+      "type": "admin",
+      "action": "admin_login",
+      "target": "admin",
+      "actor": "admin",
+      "details": "Administrator logged into Admin Control Center",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muy7klji-O30T",
+      "timestamp": 1791383648526,
+      "type": "security",
+      "action": "admin_bad_credentials",
+      "target": "admin",
+      "actor": "admin",
+      "details": "Invalid admin Master PIN entered",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muy7ia6y-33B4",
+      "timestamp": 1791383540506,
+      "type": "admin",
+      "action": "admin_login",
+      "target": "admin",
+      "actor": "admin",
+      "details": "Administrator logged into Admin Control Center",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muy7ia61-X5M4",
+      "timestamp": 1791383540473,
+      "type": "security",
+      "action": "admin_bad_credentials",
+      "target": "admin",
+      "actor": "admin",
+      "details": "Invalid admin Master PIN entered",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muy7efjg-SVCV",
+      "timestamp": 1791383360812,
+      "type": "auth",
+      "action": "user_register",
+      "target": "test_user_60691",
+      "actor": "test_user_60691",
+      "details": "New account NX-F822-7280 registered successfully",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muy74mvt-HGVX",
+      "timestamp": 1791382903769,
+      "type": "admin",
+      "action": "admin_login",
+      "target": "admin",
+      "actor": "admin",
+      "details": "Administrator logged into Admin Control Center",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "LOG-muy32ly1-DA1W",
+      "timestamp": 1791376090777,
+      "type": "security",
+      "action": "admin_login_denied",
+      "target": "admin",
+      "actor": "admin",
+      "details": "Unauthorized admin panel access attempt",
+      "ip": "127.0.0.1"
+    }
+  ],
+  "meta": {
+    "initialized_at": 1791366922819,
+    "last_saved_at": 1791426690003,
+    "version": "1.0.0"
+  },
+  "messages": [
+    {
+      "id": "msg_1791426689949_itgf5j",
+      "sender_handle": "alice",
+      "sender_nexa_id": "NX-ALICE-1001",
+      "recipient_handle": "bob",
+      "recipient_nexa_id": "NX-BOB-2002",
+      "text": "Hey Bob, checking in via NEXA encrypted relay!",
+      "type": "text",
+      "audio_path": null,
+      "audio_duration": 0,
+      "timestamp": 1791426689949,
+      "created_at": 1791426689949
+    }
+  ],
+  "app_version": {
+    "latest_version": "1.0.3",
+    "build_number": 4,
+    "release_date": "2026-10-08",
+    "release_notes": "Real device contacts sync, peer ID servicing option, real-time message delivery enhancements, and security upgrades.",
+    "download_url": "https://glimmer-messaging-app-web.vercel.app/nexa-release.apk",
+    "web_url": "https://glimmer-messaging-app-web.vercel.app/",
+    "mandatory": false,
+    "published_at": 1791426690000
+  }
+}

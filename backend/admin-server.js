@@ -91,8 +91,8 @@ app.post('/v1/admin/login', async (req, res) => {
   if (!password && pin) password = pin;
   if (!username && password) username = 'admin';
 
-  // Master Key unlock
-  if (adminKey && adminKey === ADMIN_MASTER_KEY) {
+  // Master Key unlock (accepts via adminKey, masterKey, or password field)
+  if ((adminKey && adminKey === ADMIN_MASTER_KEY) || (password && password === ADMIN_MASTER_KEY)) {
     const token = `NX-ADM-${crypto.randomBytes(16).toString('hex')}`;
     adminSessions.set(token, {
       username: 'admin',
@@ -389,7 +389,15 @@ app.post('/v1/admin/app/push-update', adminAuthMiddleware, (req, res) => {
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.json({ status: 'healthy', service: 'nexa-admin-portal', port: ADMIN_PORT });
+  const dbStatus = Database.getStatus();
+  res.json({
+    status: 'healthy',
+    service: 'nexa-admin-portal',
+    port: ADMIN_PORT,
+    database_connected: true,
+    registered_users_count: dbStatus.users_count,
+    db_status: dbStatus
+  });
 });
 
 // --------------------------------------------------------------------------

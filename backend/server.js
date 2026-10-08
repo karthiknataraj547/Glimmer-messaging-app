@@ -31,7 +31,22 @@ app.use((req, res, next) => {
 
 app.use(express.json({ limit: '10mb' }));
 
-// 2. Host built Flutter Web application (with fallback paths)
+// 2. Host Admin Control Center Web Application (Priority Route)
+const adminWebPaths = [
+  path.join(__dirname, 'public/admin'),
+  path.join(__dirname, '../public/admin')
+];
+for (const ap of adminWebPaths) {
+  if (fs.existsSync(ap)) {
+    app.use('/admin', express.static(ap));
+    app.get('/admin', (req, res) => {
+      res.sendFile(path.join(ap, 'index.html'));
+    });
+    break;
+  }
+}
+
+// 3. Host built Flutter Web application (with fallback paths)
 const staticWebPaths = [
   path.join(__dirname, '../app/build/web'),
   path.join(__dirname, 'public'),
@@ -42,15 +57,6 @@ for (const p of staticWebPaths) {
     app.use(express.static(p));
     break;
   }
-}
-
-// 3. Host Admin Control Center Web Application
-const adminWebPath = path.join(__dirname, 'public/admin');
-if (fs.existsSync(adminWebPath)) {
-  app.use('/admin', express.static(adminWebPath));
-  app.get('/admin', (req, res) => {
-    res.sendFile(path.join(adminWebPath, 'index.html'));
-  });
 }
 
 const activeConnections = new Map(); // device_id -> WebSocket
@@ -318,8 +324,8 @@ app.post('/v1/admin/login', async (req, res) => {
   if (!password && pin) password = pin;
   if (!username && password) username = 'admin';
 
-  // Master Key unlock
-  if (adminKey && adminKey === ADMIN_MASTER_KEY) {
+  // Master Key unlock (accepts via adminKey, masterKey, or password field)
+  if ((adminKey && adminKey === ADMIN_MASTER_KEY) || (password && password === ADMIN_MASTER_KEY)) {
     const token = `NX-ADM-${crypto.randomBytes(16).toString('hex')}`;
     adminSessions.set(token, {
       username: 'admin',

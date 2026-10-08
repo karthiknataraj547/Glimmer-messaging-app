@@ -577,13 +577,26 @@
         <input type="password" id="adminPin" class="form-control" placeholder="Default: 123456" autofocus>
       </div>
 
-      <div style="font-size: 11px; color: var(--text-dim); margin-bottom: 20px; text-align: left;">
+      <div style="font-size: 11px; color: var(--text-dim); margin-bottom: 12px; text-align: left;">
         Or enter Admin Master Key directly.
       </div>
 
       <button class="btn btn-primary" style="width: 100%; justify-content: center; padding: 12px;" onclick="handleAdminLogin()">
         Unlock Admin Center
       </button>
+
+      <div style="margin-top: 14px; padding: 10px; background: var(--bg-elevated); border-radius: 8px; border: 1px solid var(--border-subtle); font-size: 11px; text-align: left;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+          <span style="color: var(--text-dim);">Database Target:</span>
+          <span id="loginTargetDisp" style="color: var(--accent-cyan); font-weight: bold;">Auto</span>
+        </div>
+        <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+          <button type="button" class="btn btn-secondary" style="font-size: 10px; padding: 4px 8px;" onclick="setLoginTarget('')">Auto</button>
+          <button type="button" class="btn btn-secondary" style="font-size: 10px; padding: 4px 8px;" onclick="setLoginTarget('http://localhost:8080')">:8080</button>
+          <button type="button" class="btn btn-secondary" style="font-size: 10px; padding: 4px 8px;" onclick="setLoginTarget('http://localhost:8081')">:8081</button>
+          <button type="button" class="btn btn-secondary" style="font-size: 10px; padding: 4px 8px;" onclick="setLoginTarget('custom')">Custom URL</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -598,8 +611,18 @@
     </div>
 
     <div class="nav-actions">
+      <div style="display: flex; align-items: center; gap: 8px; background: var(--bg-elevated); padding: 4px 10px; border-radius: 8px; border: 1px solid var(--border-subtle); font-size: 12px;">
+        <span style="color: var(--text-dim); font-weight: 600;">Target:</span>
+        <select id="apiTargetSelect" onchange="changeApiTarget(this.value)" style="background: transparent; color: var(--accent-cyan); border: none; font-family: inherit; font-size: 12px; font-weight: 700; cursor: pointer; outline: none;">
+          <option value="">Auto (Current Host)</option>
+          <option value="http://localhost:8080">Local Relay (:8080)</option>
+          <option value="http://localhost:8081">Local Gateway (:8081)</option>
+          <option value="https://glimmer-messaging-app-web.vercel.app">Vercel Production</option>
+          <option value="custom">Custom URL...</option>
+        </select>
+      </div>
       <div class="live-indicator">
-        <div class="live-dot"></div>
+        <div class="live-dot" id="dbStatusDot"></div>
         <span id="liveStatusText">Live Relay Active</span>
       </div>
       <button class="btn btn-secondary" onclick="fetchFullDashboard(true)">↻ Refresh</button>
@@ -853,11 +876,109 @@
 
   <script>
     let adminToken = sessionStorage.getItem('nexa_admin_token') || '';
+    let apiBaseUrl = localStorage.getItem('nexa_admin_api_base') || '';
     let cachedUsers = [];
     let refreshInterval = null;
 
+    function getApiUrl(endpoint) {
+      if (!apiBaseUrl) return endpoint;
+      return apiBaseUrl.replace(/\/+$/, '') + endpoint;
+    }
+
+    async function adminFetch(endpoint, options = {}) {
+      const url = getApiUrl(endpoint);
+      try {
+        const res = await fetch(url, options);
+        if (res.ok) setDbStatus(true);
+        return res;
+      } catch (err) {
+        // If relative URL failed and no custom base set, auto-probe localhost ports
+        if (!apiBaseUrl) {
+          const candidates = ['http://localhost:8081', 'http://localhost:8080'];
+          for (const cand of candidates) {
+            try {
+              const probeRes = await fetch(cand + endpoint, options);
+              apiBaseUrl = cand;
+              localStorage.setItem('nexa_admin_api_base', cand);
+              updateTargetUI();
+              setDbStatus(true);
+              return probeRes;
+            } catch (_) {}
+          }
+        }
+        setDbStatus(false, err.message);
+        throw err;
+      }
+    }
+
+    function setDbStatus(online, detail = '') {
+      const dot = document.getElementById('dbStatusDot');
+      const text = document.getElementById('liveStatusText');
+      if (!dot || !text) return;
+      if (online) {
+        dot.style.background = 'var(--accent-emerald)';
+        text.textContent = 'Database Connected' + (detail ? ` (${detail})` : '');
+        text.style.color = 'var(--accent-emerald)';
+      } else {
+        dot.style.background = 'var(--accent-rose)';
+        text.textContent = 'Database Offline' + (detail ? ` (${detail})` : '');
+        text.style.color = 'var(--accent-rose)';
+      }
+    }
+
+    function updateTargetUI() {
+      const sel = document.getElementById('apiTargetSelect');
+      const disp = document.getElementById('loginTargetDisp');
+      if (sel) {
+        if (!apiBaseUrl) sel.value = '';
+        else if (apiBaseUrl === 'http://localhost:8080') sel.value = 'http://localhost:8080';
+        else if (apiBaseUrl === 'http://localhost:8081') sel.value = 'http://localhost:8081';
+        else if (apiBaseUrl.includes('vercel.app')) sel.value = 'https://glimmer-messaging-app-web.vercel.app';
+        else sel.value = 'custom';
+      }
+      if (disp) {
+        disp.textContent = apiBaseUrl || 'Auto (Current Host)';
+      }
+    }
+
+    function setLoginTarget(val) {
+      if (val === 'custom') {
+        const custom = prompt('Enter custom backend target URL:', apiBaseUrl || 'http://localhost:8080');
+        if (custom) apiBaseUrl = custom.trim().replace(/\/+$/, '');
+      } else {
+        apiBaseUrl = val;
+      }
+      localStorage.setItem('nexa_admin_api_base', apiBaseUrl);
+      updateTargetUI();
+      testDbConnection();
+    }
+
+    function changeApiTarget(val) {
+      setLoginTarget(val);
+      if (adminToken) fetchFullDashboard(true);
+    }
+
+    async function testDbConnection() {
+      try {
+        const res = await adminFetch('/health');
+        if (res.ok) {
+          const data = await res.json().catch(() => ({}));
+          const count = data.registered_users_count !== undefined ? `${data.registered_users_count} Users` : 'Active';
+          setDbStatus(true, count);
+          return true;
+        }
+      } catch (err) {
+        setDbStatus(false, err.message);
+        return false;
+      }
+      setDbStatus(false);
+      return false;
+    }
+
     // Check existing authentication
     window.addEventListener('DOMContentLoaded', () => {
+      updateTargetUI();
+      testDbConnection();
       if (adminToken) {
         document.getElementById('authOverlay').style.display = 'none';
         startDashboard();
@@ -872,7 +993,7 @@
       const errBox = document.getElementById('loginError');
 
       try {
-        const res = await fetch('/v1/admin/login', {
+        const res = await adminFetch('/v1/admin/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ username, password })
@@ -891,7 +1012,7 @@
         }
       } catch (err) {
         errBox.style.display = 'block';
-        errBox.textContent = 'Server connection failed: ' + err.message;
+        errBox.textContent = 'Server/Database connection failed. Check backend target above or verify server is running.';
       }
     }
 
@@ -915,9 +1036,9 @@
       if (!adminToken) return;
       try {
         const [overviewRes, usersRes, activityRes] = await Promise.all([
-          fetch('/v1/admin/overview', { headers: { 'Authorization': 'Bearer ' + adminToken } }),
-          fetch('/v1/admin/users', { headers: { 'Authorization': 'Bearer ' + adminToken } }),
-          fetch('/v1/admin/activity?limit=50', { headers: { 'Authorization': 'Bearer ' + adminToken } })
+          adminFetch('/v1/admin/overview', { headers: { 'Authorization': 'Bearer ' + adminToken } }),
+          adminFetch('/v1/admin/users', { headers: { 'Authorization': 'Bearer ' + adminToken } }),
+          adminFetch('/v1/admin/activity?limit=50', { headers: { 'Authorization': 'Bearer ' + adminToken } })
         ]);
 
         if (overviewRes.status === 401 || overviewRes.status === 403) {
@@ -933,7 +1054,7 @@
         if (users.success) renderUsers(users.users);
         if (activity.success) renderActivity(activity.logs);
 
-        if (showFeedback) showToast('Dashboard synchronized with server');
+        if (showFeedback) showToast('Dashboard synchronized with database');
       } catch (e) {
         console.error('Dashboard sync error:', e);
       }
@@ -1045,7 +1166,7 @@
 
     async function toggleUserStatus(username, newStatus) {
       try {
-        const res = await fetch('/v1/admin/users/status', {
+        const res = await adminFetch('/v1/admin/users/status', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + adminToken },
           body: JSON.stringify({ username, status: newStatus })
@@ -1070,7 +1191,7 @@
         return;
       }
       try {
-        const res = await fetch('/v1/admin/users/reset-pin', {
+        const res = await adminFetch('/v1/admin/users/reset-pin', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + adminToken },
           body: JSON.stringify({ username, newPin: pin })
@@ -1092,7 +1213,7 @@
         return;
       }
       try {
-        const res = await fetch(`/v1/admin/users/${username}`, {
+        const res = await adminFetch(`/v1/admin/users/${username}`, {
           method: 'DELETE',
           headers: { 'Authorization': 'Bearer ' + adminToken }
         });
@@ -1111,7 +1232,7 @@
     async function purgeMailboxQueue() {
       if (!confirm('Purge all pending zero-knowledge message envelopes in the blind mailbox queue?')) return;
       try {
-        const res = await fetch('/v1/admin/purge-queue', {
+        const res = await adminFetch('/v1/admin/purge-queue', {
           method: 'POST',
           headers: { 'Authorization': 'Bearer ' + adminToken }
         });
@@ -1127,7 +1248,7 @@
 
     async function fetchAppVersionInfo() {
       try {
-        const res = await fetch('/v1/app/check-update');
+        const res = await adminFetch('/v1/app/check-update');
         const data = await res.json();
         if (data.success) {
           const badge = document.getElementById('currentVerBadge');
@@ -1179,7 +1300,7 @@
       btn.textContent = 'Publishing release...';
 
       try {
-        const res = await fetch('/v1/admin/app/push-update', {
+        const res = await adminFetch('/v1/admin/app/push-update', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

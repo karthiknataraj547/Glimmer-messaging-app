@@ -14,39 +14,53 @@ module.exports = async (req, res) => {
   const externalBackend = process.env.BACKEND_URL;
 
   if (externalBackend && !req.headers['x-nexa-forwarded']) {
-    try {
-      const targetUrl = new URL(req.url, externalBackend);
-      const isHttps = targetUrl.protocol === 'https:';
-      const client = isHttps ? https : http;
+    let proxied = false;
+    await new Promise((resolve) => {
+      try {
+        const targetUrl = new URL(req.url, externalBackend);
+        const isHttps = targetUrl.protocol === 'https:';
+        const client = isHttps ? https : http;
 
-      const proxyReq = client.request(targetUrl, {
-        method: req.method,
-        headers: {
-          ...req.headers,
-          host: targetUrl.host,
-          'x-nexa-forwarded': 'true'
+        const proxyReq = client.request(targetUrl, {
+          method: req.method,
+          headers: {
+            ...req.headers,
+            host: targetUrl.host,
+            'x-nexa-forwarded': 'true'
+          },
+          timeout: 3000
+        }, (proxyRes) => {
+          proxied = true;
+          res.writeHead(proxyRes.statusCode, proxyRes.headers);
+          proxyRes.pipe(res);
+          proxyRes.on('end', resolve);
+        });
+
+        proxyReq.on('timeout', () => {
+          proxyReq.destroy();
+          console.warn('[Vercel Gateway] BACKEND_URL timeout, falling back to embedded engine');
+          resolve();
+        });
+
+        proxyReq.on('error', (err) => {
+          console.warn('[Vercel Gateway] Forwarding failed (' + err.message + '), falling back to embedded engine');
+          resolve();
+        });
+
+        if (req.body && (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH')) {
+          const payload = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+          proxyReq.write(payload);
         }
-      }, (proxyRes) => {
-        res.writeHead(proxyRes.statusCode, proxyRes.headers);
-        proxyRes.pipe(res);
-      });
-
-      proxyReq.on('error', (err) => {
-        console.warn('[Vercel Gateway] Forwarding to BACKEND_URL failed, falling back to embedded engine:', err.message);
-        return app(req, res);
-      });
-
-      if (req.body && (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH')) {
-        const payload = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
-        proxyReq.write(payload);
+        proxyReq.end();
+      } catch (err) {
+        console.warn('[Vercel Gateway] Proxy setup error:', err.message);
+        resolve();
       }
-      proxyReq.end();
-      return;
-    } catch (err) {
-      console.warn('[Vercel Gateway] Forwarding error, falling back to embedded engine:', err.message);
-    }
+    });
+
+    if (proxied) return;
   }
 
-  // Autonomous serverless execution
+  // Autonomous serverless execution on Vercel
   return app(req, res);
 };
