@@ -14,7 +14,7 @@ class AuthService {
 
   // Candidate server endpoints: Active Cloudflare tunnel, Vercel gateway, LAN IP, and loopback
   static const List<String> _defaultCandidateUrls = [
-    'https://karl-apparel-seeks-blind.trycloudflare.com',            // Active Public secure HTTPS Cloudflare tunnel
+    'https://indoor-york-cleaners-isbn.trycloudflare.com',            // Active Public secure HTTPS Cloudflare tunnel
     'https://glimmer-messaging-app-web.vercel.app',                 // Vercel Production Web & API Gateway
     'http://192.168.31.54:8080',                                     // Host LAN Wi-Fi IP for physical mobile phones
     'http://10.0.2.2:8080',                                         // Android Emulator host loopback

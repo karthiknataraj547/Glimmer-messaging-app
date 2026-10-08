@@ -594,8 +594,8 @@
           <button type="button" class="btn btn-secondary" style="font-size: 10px; padding: 4px 8px;" onclick="setLoginTarget('')">Auto</button>
           <button type="button" class="btn btn-secondary" style="font-size: 10px; padding: 4px 8px;" onclick="setLoginTarget('http://localhost:8081')">:8081 (Admin)</button>
           <button type="button" class="btn btn-secondary" style="font-size: 10px; padding: 4px 8px;" onclick="setLoginTarget('http://localhost:8080')">:8080 (Relay)</button>
-          <button type="button" class="btn btn-secondary" style="font-size: 10px; padding: 4px 8px;" onclick="setLoginTarget('https://genius-reserves-singing-assignment.trycloudflare.com')">Cloudflare Admin</button>
-          <button type="button" class="btn btn-secondary" style="font-size: 10px; padding: 4px 8px;" onclick="setLoginTarget('https://karl-apparel-seeks-blind.trycloudflare.com')">Cloudflare Relay</button>
+          <button type="button" class="btn btn-secondary" style="font-size: 10px; padding: 4px 8px;" onclick="setLoginTarget('https://corporation-settle-asn-fabrics.trycloudflare.com')">Cloudflare Admin</button>
+          <button type="button" class="btn btn-secondary" style="font-size: 10px; padding: 4px 8px;" onclick="setLoginTarget('https://indoor-york-cleaners-isbn.trycloudflare.com')">Cloudflare Relay</button>
           <button type="button" class="btn btn-secondary" style="font-size: 10px; padding: 4px 8px;" onclick="setLoginTarget('custom')">Custom URL</button>
         </div>
       </div>
@@ -619,8 +619,8 @@
           <option value="">Auto (Current Host)</option>
           <option value="http://localhost:8081">Local Dedicated Admin (:8081)</option>
           <option value="http://localhost:8080">Local Relay Server (:8080)</option>
-          <option value="https://genius-reserves-singing-assignment.trycloudflare.com">Cloudflare Admin Portal</option>
-          <option value="https://karl-apparel-seeks-blind.trycloudflare.com">Cloudflare Relay Server</option>
+          <option value="https://corporation-settle-asn-fabrics.trycloudflare.com">Cloudflare Admin Portal</option>
+          <option value="https://indoor-york-cleaners-isbn.trycloudflare.com">Cloudflare Relay Server</option>
           <option value="https://glimmer-messaging-app-web.vercel.app">Vercel Production</option>
           <option value="custom">Custom URL...</option>
         </select>
@@ -882,7 +882,7 @@
     let adminToken = sessionStorage.getItem('nexa_admin_token') || '';
     let apiBaseUrl = localStorage.getItem('nexa_admin_api_base') || '';
     if (!apiBaseUrl && (window.location.hostname.includes('vercel.app') || window.location.protocol === 'file:')) {
-      apiBaseUrl = 'https://genius-reserves-singing-assignment.trycloudflare.com';
+      apiBaseUrl = 'https://corporation-settle-asn-fabrics.trycloudflare.com';
     }
     let cachedUsers = [];
     let refreshInterval = null;
@@ -922,8 +922,8 @@
           const candidates = [
             'http://localhost:8081',
             'http://localhost:8080',
-            'https://genius-reserves-singing-assignment.trycloudflare.com',
-            'https://karl-apparel-seeks-blind.trycloudflare.com'
+            'https://corporation-settle-asn-fabrics.trycloudflare.com',
+            'https://indoor-york-cleaners-isbn.trycloudflare.com'
           ];
           for (const cand of candidates) {
             try {
@@ -965,8 +965,8 @@
         if (!apiBaseUrl) sel.value = '';
         else if (apiBaseUrl === 'http://localhost:8081') sel.value = 'http://localhost:8081';
         else if (apiBaseUrl === 'http://localhost:8080') sel.value = 'http://localhost:8080';
-        else if (apiBaseUrl.includes('genius-reserves')) sel.value = 'https://genius-reserves-singing-assignment.trycloudflare.com';
-        else if (apiBaseUrl.includes('karl-apparel')) sel.value = 'https://karl-apparel-seeks-blind.trycloudflare.com';
+        else if (apiBaseUrl.includes('genius-reserves')) sel.value = 'https://corporation-settle-asn-fabrics.trycloudflare.com';
+        else if (apiBaseUrl.includes('karl-apparel')) sel.value = 'https://indoor-york-cleaners-isbn.trycloudflare.com';
         else if (apiBaseUrl.includes('vercel.app')) sel.value = 'https://glimmer-messaging-app-web.vercel.app';
         else sel.value = 'custom';
       }
