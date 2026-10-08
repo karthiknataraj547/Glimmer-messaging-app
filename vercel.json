@@ -1,32 +1,39 @@
 {
-  "rewrites": [
+  "version": 2,
+  "builds": [
     {
-      "source": "/admin",
-      "destination": "/admin/index.html"
+      "src": "backend/server.js",
+      "use": "@vercel/node"
     },
     {
-      "source": "/admin/:path*",
-      "destination": "/admin/index.html"
+      "src": "public/**",
+      "use": "@vercel/static"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/admin",
+      "dest": "public/admin/index.html"
     },
     {
-      "source": "/health",
-      "destination": "/api"
+      "src": "/admin/(.*)",
+      "dest": "public/admin/index.html"
     },
     {
-      "source": "/v1/:path*",
-      "destination": "/api"
+      "src": "/health",
+      "dest": "backend/server.js"
     },
     {
-      "source": "/api/:path*",
-      "destination": "/api"
+      "src": "/v1/(.*)",
+      "dest": "backend/server.js"
     },
     {
-      "source": "/api",
-      "destination": "/api"
+      "src": "/api/(.*)",
+      "dest": "backend/server.js"
     },
     {
-      "source": "/((?!admin|api|health|v1|assets|canvaskit|icons|favicon\\.png|flutter\\.js|flutter_bootstrap\\.js|flutter_service_worker\\.js|main\\.dart\\.js|manifest\\.json|version\\.json|nexa-release\\.apk).*)",
-      "destination": "/index.html"
+      "src": "/(.*)",
+      "dest": "public/$1"
     }
   ]
 }
