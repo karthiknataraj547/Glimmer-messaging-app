@@ -2,6 +2,14 @@
   "version": 2,
   "rewrites": [
     {
+      "source": "/admin",
+      "destination": "/admin/index.html"
+    },
+    {
+      "source": "/admin/:path*",
+      "destination": "/admin/index.html"
+    },
+    {
       "source": "/health",
       "destination": "https://dude-living-poll-expert.trycloudflare.com/health"
     },
@@ -10,7 +18,7 @@
       "destination": "https://dude-living-poll-expert.trycloudflare.com/v1/:path*"
     },
     {
-      "source": "/((?!assets|canvaskit|icons|favicon\\.png|flutter\\.js|flutter_bootstrap\\.js|flutter_service_worker\\.js|main\\.dart\\.js|manifest\\.json|version\\.json).*)",
+      "source": "/((?!admin|assets|canvaskit|icons|favicon\\.png|flutter\\.js|flutter_bootstrap\\.js|flutter_service_worker\\.js|main\\.dart\\.js|manifest\\.json|version\\.json).*)",
       "destination": "/index.html"
     }
   ]
