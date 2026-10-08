@@ -1,0 +1,9 @@
+{
+  "name": "nexa-web-serverless",
+  "version": "1.0.0",
+  "description": "NEXA Zero-Knowledge Serverless Relay & Web App",
+  "main": "api/index.js",
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}
