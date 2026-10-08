@@ -10,26 +10,15 @@
 const express = require('express');
 const http = require('http');
 const path = require('path');
+const fs = require('fs');
 const { WebSocketServer } = require('ws');
 
 const crypto = require('crypto');
 const Database = require('./database/db');
 
 const app = express();
-app.use(express.json({ limit: '10mb' }));
 
-// Host built Flutter Web application
-const staticWebPath = path.join(__dirname, '../app/build/web');
-app.use(express.static(staticWebPath));
-
-// Host Admin Control Center Web Application
-const adminWebPath = path.join(__dirname, 'public/admin');
-app.use('/admin', express.static(adminWebPath));
-app.get('/admin', (req, res) => {
-  res.sendFile(path.join(adminWebPath, 'index.html'));
-});
-
-// CORS Middleware for Mobile, Web, and Desktop Clients
+// 1. CORS Middleware for Mobile, Web, and Desktop Clients (Must precede all routes)
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
@@ -39,6 +28,30 @@ app.use((req, res, next) => {
   }
   next();
 });
+
+app.use(express.json({ limit: '10mb' }));
+
+// 2. Host built Flutter Web application (with fallback paths)
+const staticWebPaths = [
+  path.join(__dirname, '../app/build/web'),
+  path.join(__dirname, 'public'),
+  path.join(__dirname, '../public')
+];
+for (const p of staticWebPaths) {
+  if (fs.existsSync(p)) {
+    app.use(express.static(p));
+    break;
+  }
+}
+
+// 3. Host Admin Control Center Web Application
+const adminWebPath = path.join(__dirname, 'public/admin');
+if (fs.existsSync(adminWebPath)) {
+  app.use('/admin', express.static(adminWebPath));
+  app.get('/admin', (req, res) => {
+    res.sendFile(path.join(adminWebPath, 'index.html'));
+  });
+}
 
 const activeConnections = new Map(); // device_id -> WebSocket
 const userDevices = new Map();       // user_id -> Map(device_id -> { identity_key, ... })

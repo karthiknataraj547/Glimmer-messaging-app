@@ -10,7 +10,9 @@ const fs = require('fs');
 const path = require('path');
 const { Pool } = require('pg');
 
-const DB_DIR = path.join(__dirname, '../data');
+const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+const SEED_FILE = path.join(__dirname, '../data/nexa_database.json');
+const DB_DIR = isServerless ? path.join('/tmp', 'nexa_data') : path.join(__dirname, '../data');
 const DB_FILE = path.join(DB_DIR, 'nexa_database.json');
 const DB_TEMP_FILE = path.join(DB_DIR, 'nexa_database.tmp');
 
@@ -31,16 +33,27 @@ let dbState = {
 let pgPool = null;
 let isPgConnected = false;
 
-// Ensure database directory exists
-if (!fs.existsSync(DB_DIR)) {
-  fs.mkdirSync(DB_DIR, { recursive: true });
+// Ensure database directory exists safely
+try {
+  if (!fs.existsSync(DB_DIR)) {
+    fs.mkdirSync(DB_DIR, { recursive: true });
+  }
+} catch (err) {
+  console.warn('[NEXA DB] Directory creation note:', err.message);
 }
 
 // Load persistent data from disk on boot
 function loadFromDisk() {
   try {
-    if (fs.existsSync(DB_FILE)) {
-      const raw = fs.readFileSync(DB_FILE, 'utf8');
+    if (isServerless && !fs.existsSync(DB_FILE) && fs.existsSync(SEED_FILE)) {
+      try {
+        fs.mkdirSync(DB_DIR, { recursive: true });
+        fs.copyFileSync(SEED_FILE, DB_FILE);
+      } catch (_) {}
+    }
+    const targetFile = fs.existsSync(DB_FILE) ? DB_FILE : (fs.existsSync(SEED_FILE) ? SEED_FILE : null);
+    if (targetFile) {
+      const raw = fs.readFileSync(targetFile, 'utf8');
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed === 'object') {
         dbState.users = parsed.users || {};
@@ -49,7 +62,7 @@ function loadFromDisk() {
         dbState.mailbox_queue = parsed.mailbox_queue || {};
         dbState.activity_logs = parsed.activity_logs || [];
         dbState.meta = parsed.meta || dbState.meta;
-        console.log(`[NEXA DB] Loaded persistent database from disk (${Object.keys(dbState.users).length} registered users).`);
+        console.log(`[NEXA DB] Loaded persistent database (${Object.keys(dbState.users).length} registered users).`);
       }
     } else {
       saveToDiskSync();
@@ -63,6 +76,9 @@ function loadFromDisk() {
 // Atomic persistence write
 function saveToDiskSync() {
   try {
+    if (!fs.existsSync(DB_DIR)) {
+      fs.mkdirSync(DB_DIR, { recursive: true });
+    }
     dbState.meta.last_saved_at = Date.now();
     const serialized = JSON.stringify(dbState, null, 2);
     fs.writeFileSync(DB_TEMP_FILE, serialized, 'utf8');

@@ -12,9 +12,10 @@ class AuthService {
   static final AuthService instance = AuthService._internal();
   AuthService._internal();
 
-  // Candidate server endpoints: Cloudflare HTTPS tunnel (works anywhere on 4G/5G/Wi-Fi), LAN IP, and loopback
+  // Candidate server endpoints: Active Cloudflare tunnel, Vercel gateway, LAN IP, and loopback
   static const List<String> _defaultCandidateUrls = [
-    'https://strategy-measurements-metric-retain.trycloudflare.com', // Public secure HTTPS Cloudflare tunnel
+    'https://dude-living-poll-expert.trycloudflare.com',            // Active Public secure HTTPS Cloudflare tunnel
+    'https://glimmer-messaging-app-web.vercel.app',                 // Vercel Production Web & API Gateway
     'http://192.168.31.54:8080',                                     // Host LAN Wi-Fi IP for physical mobile phones
     'http://10.0.2.2:8080',                                         // Android Emulator host loopback
     'http://127.0.0.1:8080',                                        // Localhost loopback
@@ -49,11 +50,19 @@ class AuthService {
     checkHealthAsync();
   }
 
-  /// Returns ordered candidates: custom first, then resolved, then defaults
+  /// Returns ordered candidates: custom first, web origin (if browser), then resolved, then defaults
   List<String> getAllCandidateUrls() {
     final list = <String>[];
     if (_customServerUrl != null && _customServerUrl!.isNotEmpty) {
       list.add(_customServerUrl!);
+    }
+    if (kIsWeb) {
+      try {
+        final origin = Uri.base.origin;
+        if (origin.isNotEmpty && !origin.startsWith('file:') && !list.contains(origin)) {
+          list.add(origin);
+        }
+      } catch (_) {}
     }
     if (_resolvedBaseUrl != null && !list.contains(_resolvedBaseUrl)) {
       list.add(_resolvedBaseUrl!);

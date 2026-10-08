@@ -1,0 +1,16 @@
+{
+  "name": "glimmer-messaging-app",
+  "version": "1.0.0",
+  "description": "NEXA Zero-Knowledge Blind Relay & Web Application",
+  "main": "api/index.js",
+  "scripts": {
+    "start": "node backend/server.js",
+    "admin": "node backend/admin-server.js",
+    "test": "node backend/test/api_test.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "pg": "^8.23.1",
+    "ws": "^8.18.0"
+  }
+}
