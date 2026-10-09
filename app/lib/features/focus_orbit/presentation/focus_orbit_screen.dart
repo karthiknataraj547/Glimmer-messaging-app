@@ -417,7 +417,11 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
       final q = _chatSearchQuery.toLowerCase();
       final n = (c['name'] as String).toLowerCase();
       final m = (c['message'] as String).toLowerCase();
-      return n.contains(q) || m.contains(q);
+      final id = ((c['nexaId'] as String?) ?? '').toLowerCase();
+      final qAlpha = q.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '');
+      final idAlpha = id.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '');
+      return n.contains(q) || m.contains(q) || id.contains(q) ||
+          (qAlpha.length >= 3 && idAlpha.contains(qAlpha));
     }).toList();
 
     return Column(
@@ -874,13 +878,15 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
         },
       );
     } else {
-      // TAB 2: DIRECTORY / NEXA ID SEARCH
       final list = _directoryUsers.where((u) {
         if (query.isEmpty) return true;
         final un = (u['username'] ?? '').toString().toLowerCase();
         final fn = (u['full_name'] ?? u['fullName'] ?? '').toString().toLowerCase();
         final nid = (u['nexa_id'] ?? u['nexaId'] ?? '').toString().toLowerCase();
-        return un.contains(query) || fn.contains(query) || nid.contains(query);
+        final qAlpha = query.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '');
+        final nidAlpha = nid.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '');
+        return un.contains(query) || fn.contains(query) || nid.contains(query) ||
+            (qAlpha.length >= 3 && nidAlpha.contains(qAlpha));
       }).toList();
 
       return ListView.separated(
@@ -1427,7 +1433,10 @@ class _NewChatSheetState extends State<_NewChatSheet> {
       final fn = (u['full_name'] ?? u['fullName'] ?? '').toString().toLowerCase();
       final nid = (u['nexa_id'] ?? u['nexaId'] ?? '').toString().toLowerCase();
       final ph = (u['phone'] ?? '').toString().toLowerCase();
-      return un.contains(query) || fn.contains(query) || nid.contains(query) || ph.contains(query);
+      final qAlpha = query.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '');
+      final nidAlpha = nid.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '');
+      return un.contains(query) || fn.contains(query) || nid.contains(query) || ph.contains(query) ||
+          (qAlpha.length >= 3 && nidAlpha.contains(qAlpha));
     }).toList();
 
     // Construct unified list based on active filter
@@ -1708,13 +1717,16 @@ class _NewChatSheetState extends State<_NewChatSheet> {
   ) {
     final cleanInput = rawInput.trim();
     final cleanLower = cleanInput.toLowerCase().replaceAll('@', '');
+    final cleanAlpha = cleanInput.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '').toLowerCase();
 
     // Check for exact or best matching registered user
     Map<String, dynamic>? match;
     for (final u in filteredDirectory) {
       final un = (u['username'] ?? '').toString().toLowerCase().replaceAll('@', '');
       final nid = (u['nexa_id'] ?? u['nexaId'] ?? '').toString().toLowerCase();
-      if (un == cleanLower || nid == cleanLower || nid == cleanInput.toLowerCase()) {
+      final nidAlpha = nid.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '').toLowerCase();
+      if (un == cleanLower || nid == cleanLower || nid == cleanInput.toLowerCase() ||
+          (cleanAlpha.isNotEmpty && (nidAlpha == cleanAlpha || (cleanAlpha.length >= 4 && (nidAlpha.endsWith(cleanAlpha) || nidAlpha.contains(cleanAlpha)))))) {
         match = u;
         break;
       }
@@ -1724,8 +1736,11 @@ class _NewChatSheetState extends State<_NewChatSheet> {
       for (final c in onNexaContacts) {
         final un = (c['handle'] ?? '').toString().toLowerCase().replaceAll('@', '');
         final nid = (c['nexaId'] ?? '').toString().toLowerCase();
+        final nidAlpha = nid.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '').toLowerCase();
         final ph = (c['phone'] ?? '').toString().replaceAll(RegExp(r'[^0-9]'), '');
-        if (un == cleanLower || nid == cleanLower || (ph.isNotEmpty && ph == cleanInput.replaceAll(RegExp(r'[^0-9]'), ''))) {
+        if (un == cleanLower || nid == cleanLower ||
+            (cleanAlpha.isNotEmpty && (nidAlpha == cleanAlpha || (cleanAlpha.length >= 4 && (nidAlpha.endsWith(cleanAlpha) || nidAlpha.contains(cleanAlpha))))) ||
+            (ph.isNotEmpty && ph == cleanInput.replaceAll(RegExp(r'[^0-9]'), ''))) {
           match = c;
           break;
         }

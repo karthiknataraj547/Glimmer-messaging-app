@@ -271,13 +271,28 @@ app.get(['/v1/auth/users', '/v1/directory/users'], async (req, res) => {
   });
 });
 
+app.get(['/v1/users/lookup', '/v1/users/lookup/:query'], async (req, res) => {
+  if (Database.syncFromCloud) await Database.syncFromCloud(true);
+  const query = req.query.q || req.query.query || req.params.query || '';
+  const results = Database.searchUsers(query);
+  return res.json({
+    success: true,
+    count: results.length,
+    users: results
+  });
+});
+
 app.get('/v1/directory/resolve/:identifier', async (req, res) => {
+  if (Database.syncFromCloud) await Database.syncFromCloud();
   const raw = (req.params.identifier || '').trim();
   const clean = sanitizeUsername(raw);
 
   let user = await Database.findUser(clean);
   if (!user && raw.toUpperCase().startsWith('NX-')) {
     user = await Database.findUserByNexaId(raw.toUpperCase());
+  }
+  if (!user) {
+    user = Database.resolveUser(raw);
   }
 
   if (!user) {
@@ -288,18 +303,21 @@ app.get('/v1/directory/resolve/:identifier', async (req, res) => {
     user_id: user.nexa_id,
     handle: user.handle || `@${user.username}`,
     username: user.username,
-    full_name: user.full_name
+    full_name: user.full_name,
+    phone: user.phone || ''
   });
 });
 
 // --------------------------------------------------------------------------
 // 5. MESSAGING & THREADS
 // --------------------------------------------------------------------------
-app.post('/v1/messages/send', (req, res) => {
+app.post('/v1/messages/send', async (req, res) => {
   const { sender_handle, sender_nexa_id, recipient_handle, recipient_nexa_id, text, type, audio_path, audio_duration, timestamp } = req.body || {};
   if (!sender_handle || (!recipient_handle && !recipient_nexa_id) || (!text && !audio_path)) {
     return res.status(400).json({ error: 'Missing required message parameters' });
   }
+
+  if (Database.syncFromCloud) await Database.syncFromCloud(true);
 
   const newMsg = Database.saveMessage({
     sender_handle,
@@ -313,16 +331,24 @@ app.post('/v1/messages/send', (req, res) => {
     timestamp: timestamp || Date.now()
   });
 
+  if (Database.syncToCloud) {
+    await Database.syncToCloud();
+  }
+
   return res.status(201).json({
     success: true,
     message: newMsg
   });
 });
 
-app.get('/v1/messages/thread/:user1/:user2', (req, res) => {
+app.get('/v1/messages/thread/:user1/:user2', async (req, res) => {
+  if (Database.syncFromCloud) await Database.syncFromCloud(true);
   const { user1, user2 } = req.params;
   const { peer_id, my_id } = req.query || {};
   const messages = Database.getMessageThread(user1, user2, { peer_id, my_id });
+  if (Database.syncToCloud) {
+    await Database.syncToCloud();
+  }
   return res.json({
     success: true,
     count: messages.length,
@@ -330,10 +356,14 @@ app.get('/v1/messages/thread/:user1/:user2', (req, res) => {
   });
 });
 
-app.get('/v1/messages/inbox/:user', (req, res) => {
+app.get('/v1/messages/inbox/:user', async (req, res) => {
+  if (Database.syncFromCloud) await Database.syncFromCloud(true);
   const { user } = req.params;
   const { nexa_id } = req.query || {};
   const messages = Database.getInbox(user, nexa_id);
+  if (Database.syncToCloud) {
+    await Database.syncToCloud();
+  }
   return res.json({
     success: true,
     count: messages.length,

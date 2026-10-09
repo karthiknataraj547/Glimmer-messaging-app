@@ -571,10 +571,10 @@ app.get('/v1/users/lookup/:query', (req, res) => {
 /**
  * Dispatch message between two users
  */
-app.post('/v1/messages/send', (req, res) => {
+app.post('/v1/messages/send', async (req, res) => {
   const { sender_handle, sender_nexa_id, recipient_handle, recipient_nexa_id, text, type, audio_path, audio_duration, timestamp } = req.body;
-  if (!sender_handle || !recipient_handle || (!text && !audio_path)) {
-    return res.status(400).json({ error: 'Missing sender_handle, recipient_handle, or message content.' });
+  if (!sender_handle || (!recipient_handle && !recipient_nexa_id) || (!text && !audio_path)) {
+    return res.status(400).json({ error: 'Missing sender_handle, recipient identifier, or message content.' });
   }
 
   const record = Database.saveMessage({
@@ -588,6 +588,10 @@ app.post('/v1/messages/send', (req, res) => {
     audio_duration,
     timestamp
   });
+
+  if (Database.syncToCloud) {
+    await Database.syncToCloud();
+  }
 
   // Notify recipient via active WebSocket connection if connected
   for (const [deviceId, conn] of activeConnections.entries()) {
@@ -608,10 +612,13 @@ app.post('/v1/messages/send', (req, res) => {
 /**
  * Get conversation history thread between two users
  */
-app.get('/v1/messages/thread/:user1/:user2', (req, res) => {
+app.get('/v1/messages/thread/:user1/:user2', async (req, res) => {
   const { user1, user2 } = req.params;
   const { peer_id, my_id } = req.query || {};
   const messages = Database.getMessageThread(user1, user2, { peer_id, my_id });
+  if (Database.syncToCloud) {
+    await Database.syncToCloud();
+  }
   res.json({
     success: true,
     count: messages.length,
@@ -622,10 +629,13 @@ app.get('/v1/messages/thread/:user1/:user2', (req, res) => {
 /**
  * Get incoming inbox messages for user
  */
-app.get('/v1/messages/inbox/:user', (req, res) => {
+app.get('/v1/messages/inbox/:user', async (req, res) => {
   const { user } = req.params;
   const { nexa_id } = req.query || {};
   const messages = Database.getInbox(user, nexa_id);
+  if (Database.syncToCloud) {
+    await Database.syncToCloud();
+  }
   res.json({
     success: true,
     count: messages.length,

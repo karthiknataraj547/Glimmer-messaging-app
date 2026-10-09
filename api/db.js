@@ -23,10 +23,10 @@ let dbState = {
   messages: [],
   user_locations: {},
   app_version: {
-    latest_version: '1.2.5',
-    build_number: 9,
+    latest_version: '1.2.6',
+    build_number: 10,
     release_date: '2026-10-09',
-    release_notes: 'Real device GPS location sharing, strictly chronological local chat storage, ephemeral store-and-forward server retention, and military-grade audited admin monitor.',
+    release_notes: 'Instant peer message reception after NEXA ID search, cloud message sync across serverless instances, and alphanumeric ID query resilience.',
     download_url: 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk',
     web_url: 'https://glimmer-messaging-app-web.vercel.app/',
     mandatory: false,
@@ -143,6 +143,30 @@ async function syncFromCloud(force = false) {
             const id = log.id || `${log.timestamp}_${log.action}`;
             if (!existingIds.has(id)) {
               dbState.activity_logs.push(log);
+            }
+          }
+        }
+        if (Array.isArray(remote.messages) && remote.messages.length > 0) {
+          if (!dbState.messages) dbState.messages = [];
+          const existingMap = new Map();
+          for (let i = 0; i < dbState.messages.length; i++) {
+            const m = dbState.messages[i];
+            if (m && m.id) existingMap.set(m.id, i);
+          }
+          for (const msg of remote.messages) {
+            if (!msg || !msg.id) continue;
+            if (!existingMap.has(msg.id)) {
+              dbState.messages.push(msg);
+              existingMap.set(msg.id, dbState.messages.length - 1);
+              changed = true;
+            } else {
+              const idx = existingMap.get(msg.id);
+              const localMsg = dbState.messages[idx];
+              if (localMsg.status !== msg.status && msg.status === 'delivered') {
+                localMsg.status = msg.status;
+                localMsg.delivered_at = msg.delivered_at || Date.now();
+                changed = true;
+              }
             }
           }
         }
@@ -279,6 +303,8 @@ const Database = {
     const clean = raw.replace(/^@+/, '').toLowerCase();
     const cleanUpper = raw.toUpperCase();
     const cleanDigits = raw.replace(/\D/g, '');
+    const cleanAlpha = clean.replace(/[^a-z0-9]/g, '');
+    const cleanUpperAlpha = cleanUpper.replace(/[^A-Z0-9]/g, '');
 
     if (dbState.users && dbState.users[clean]) return dbState.users[clean];
 
@@ -286,11 +312,15 @@ const Database = {
       if (!u) continue;
       const uUsername = (u.username || '').toLowerCase();
       const uNexaId = (u.nexa_id || '').toUpperCase();
+      const uNexaIdAlpha = uNexaId.replace(/[^A-Z0-9]/g, '');
       const uFullName = (u.full_name || '').toLowerCase();
       const uPhoneDigits = (u.phone || '').replace(/\D/g, '');
 
       if (uUsername === clean) return u;
       if (uNexaId === cleanUpper || uNexaId.toLowerCase() === clean) return u;
+      if (cleanUpperAlpha.length >= 4 && (uNexaIdAlpha === cleanUpperAlpha || uNexaIdAlpha.endsWith(cleanUpperAlpha) || cleanUpperAlpha.endsWith(uNexaIdAlpha))) {
+        return u;
+      }
       if (cleanDigits.length >= 7 && uPhoneDigits.length >= 7) {
         if (cleanDigits === uPhoneDigits || cleanDigits.endsWith(uPhoneDigits) || uPhoneDigits.endsWith(cleanDigits)) {
           return u;
@@ -313,16 +343,20 @@ const Database = {
       aliases.add(v.replace(/^@+/, '').toLowerCase());
       const digits = v.replace(/\D/g, '');
       if (digits.length >= 7) aliases.add(digits);
+      const alpha = v.replace(/[^a-z0-9]/g, '').toLowerCase();
+      if (alpha.length >= 4) aliases.add(alpha);
     };
 
     addIdent(identifier);
     if (extraId) addIdent(extraId);
 
-    const clean = identifier ? identifier.trim().replace(/^@+/, '').toLowerCase() : '';
-    const user = (clean && dbState.users && dbState.users[clean]) ? dbState.users[clean] : null;
+    const user = this.resolveUser(identifier) || (extraId ? this.resolveUser(extraId) : null);
     if (user) {
       addIdent(user.username);
       addIdent(user.nexa_id);
+      if (user.nexa_id) {
+        aliases.add(user.nexa_id.replace(/[^a-zA-Z0-9]/g, '').toLowerCase());
+      }
       if (user.full_name) addIdent(user.full_name);
       if (user.phone) addIdent(user.phone);
     }
@@ -474,7 +508,6 @@ const Database = {
   },
 
   cleanupMessages() {
-    loadFromDisk();
     if (!dbState.messages || !Array.isArray(dbState.messages)) return;
     const hours = Number(dbState.meta?.messageRetentionHours) || 168; // default 1 week
     const retentionMs = hours * 60 * 60 * 1000;
@@ -675,15 +708,17 @@ const Database = {
       const sH = (m.sender_handle || '').toLowerCase();
       const sHClean = sH.replace(/^@+/, '');
       const sId = (m.sender_nexa_id || '').toLowerCase();
+      const sIdAlpha = sId.replace(/[^a-z0-9]/g, '');
       const rH = (m.recipient_handle || '').toLowerCase();
       const rHClean = rH.replace(/^@+/, '');
       const rId = (m.recipient_nexa_id || '').toLowerCase();
+      const rIdAlpha = rId.replace(/[^a-z0-9]/g, '');
 
-      const senderIs1 = aliases1.has(sH) || aliases1.has(sHClean) || (sId && aliases1.has(sId));
-      const recipientIs2 = aliases2.has(rH) || aliases2.has(rHClean) || (rId && aliases2.has(rId));
+      const senderIs1 = aliases1.has(sH) || aliases1.has(sHClean) || (sId && aliases1.has(sId)) || (sIdAlpha && aliases1.has(sIdAlpha));
+      const recipientIs2 = aliases2.has(rH) || aliases2.has(rHClean) || (rId && aliases2.has(rId)) || (rIdAlpha && aliases2.has(rIdAlpha));
 
-      const senderIs2 = aliases2.has(sH) || aliases2.has(sHClean) || (sId && aliases2.has(sId));
-      const recipientIs1 = aliases1.has(rH) || aliases1.has(rHClean) || (rId && aliases1.has(rId));
+      const senderIs2 = aliases2.has(sH) || aliases2.has(sHClean) || (sId && aliases2.has(sId)) || (sIdAlpha && aliases2.has(sIdAlpha));
+      const recipientIs1 = aliases1.has(rH) || aliases1.has(rHClean) || (rId && aliases1.has(rId)) || (rIdAlpha && aliases1.has(rIdAlpha));
 
       if (recipientIs1 && m.status !== 'delivered') {
         m.status = 'delivered';
@@ -715,7 +750,8 @@ const Database = {
       const rH = (m.recipient_handle || '').toLowerCase();
       const rHClean = rH.replace(/^@+/, '');
       const rId = (m.recipient_nexa_id || '').toLowerCase();
-      const isRecipient = aliases.has(rH) || aliases.has(rHClean) || (rId && aliases.has(rId));
+      const rIdAlpha = rId.replace(/[^a-z0-9]/g, '');
+      const isRecipient = aliases.has(rH) || aliases.has(rHClean) || (rId && aliases.has(rId)) || (rIdAlpha && aliases.has(rIdAlpha));
 
       if (isRecipient && m.status !== 'delivered') {
         m.status = 'delivered';
@@ -768,7 +804,11 @@ const Database = {
       const nid = (u.nexa_id || '').toLowerCase();
       const ph = (u.phone || '').replace(/\s+/g, '').replace(/-/g, '').toLowerCase();
 
-      if (un.includes(q) || fn.includes(q) || nid.includes(q) || (ph.length >= 3 && ph.includes(q))) {
+      const nidAlpha = nid.replace(/[^a-z0-9]/g, '');
+      const qAlpha = q.replace(/[^a-z0-9]/g, '');
+
+      if (un.includes(q) || fn.includes(q) || nid.includes(q) || (ph.length >= 3 && ph.includes(q)) ||
+          (qAlpha.length >= 3 && (nidAlpha.includes(qAlpha) || un.includes(qAlpha)))) {
         results.push({
           username: u.username,
           handle: u.handle || `@${u.username}`,
