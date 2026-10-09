@@ -89,11 +89,56 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
     }
   }
 
-  /// Synchronize incoming chat messages from server relay
+  /// Synchronize incoming chat messages and canonical conversations from server relay
   Future<void> _syncInbox() async {
     if (!mounted || !_session.isLoggedIn) return;
     try {
-      if (_chats.isEmpty) {
+      // 1. Fetch server-persisted canonical conversations
+      final serverConvs = await ChatService.instance.fetchConversations();
+      if (serverConvs.isNotEmpty) {
+        final List<Map<String, dynamic>> updatedChats = [];
+        final myHandle = UserSession.instance.handle.replaceAll('@', '').toLowerCase();
+        final myNexaId = UserSession.instance.nexaId.toLowerCase();
+
+        for (final conv in serverConvs) {
+          final convId = conv['id']?.toString() ?? '';
+          final p1 = (conv['participant_1'] as String?) ?? '';
+          final p2 = (conv['participant_2'] as String?) ?? '';
+          final isP1Me = p1.toLowerCase() == myNexaId || p1.toLowerCase() == myHandle;
+          final peerId = isP1Me ? p2 : p1;
+          if (peerId.isEmpty) continue;
+
+          final lastMsg = (conv['last_message'] as String?) ?? 'Direct Conversation';
+          final lastTs = (conv['last_message_at'] as num?)?.toInt() ??
+              (conv['created_at'] as num?)?.toInt() ??
+              DateTime.now().millisecondsSinceEpoch;
+          final timeStr = _formatTimestamp(lastTs);
+
+          final canonicalKey = ChatService.getCanonicalKey(peerId);
+          final lastReadTs = await ChatService.instance.getReadTimestamp(canonicalKey);
+          final unreadCount = (conv['unread_count'] as int?) ?? (lastTs > lastReadTs ? 1 : 0);
+
+          updatedChats.add({
+            'conversationId': convId,
+            'name': peerId.startsWith('NX-') ? peerId : '@$peerId',
+            'nexaId': peerId.startsWith('NX-') ? peerId : 'NX-${peerId.toUpperCase()}',
+            'message': lastMsg,
+            'time': timeStr,
+            'timestamp': lastTs,
+            'unread': unreadCount,
+          });
+        }
+
+        updatedChats.sort((a, b) => ((b['timestamp'] as num?)?.toInt() ?? 0).compareTo((a['timestamp'] as num?)?.toInt() ?? 0));
+
+        if (mounted) {
+          setState(() {
+            _chats.clear();
+            _chats.addAll(updatedChats);
+          });
+          ChatService.instance.saveRecentChats(_chats);
+        }
+      } else if (_chats.isEmpty) {
         final cached = await ChatService.instance.loadRecentChats();
         if (cached.isNotEmpty && mounted) {
           setState(() {
@@ -101,6 +146,8 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
           });
         }
       }
+
+      // 2. Also check real-time inbox messages
       final messages = await ChatService.instance.fetchInbox();
       if (messages.isEmpty) return;
 
@@ -125,7 +172,6 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
       for (final entry in bySender.entries) {
         final peerMessages = entry.value;
         if (peerMessages.isEmpty) continue;
-        // Sort ascending by timestamp
         peerMessages.sort((a, b) => ((a['timestamp'] as num?)?.toInt() ?? 0).compareTo((b['timestamp'] as num?)?.toInt() ?? 0));
         final lastMsg = peerMessages.last;
 
@@ -134,13 +180,13 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
         final text = (lastMsg['text'] as String?) ?? 'Encrypted Memo';
         final ts = (lastMsg['timestamp'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch;
         final timeStr = _formatTimestamp(ts);
+        final convId = lastMsg['conversation_id'] as String?;
 
         final canonicalKey = ChatService.getCanonicalKey(senderNexaId.isNotEmpty ? senderNexaId : senderHandle);
         final readTs1 = await ChatService.instance.getReadTimestamp(canonicalKey);
         final readTs2 = await ChatService.instance.getReadTimestamp(ChatService.getCanonicalKey(senderHandle));
         final lastReadTs = readTs1 > readTs2 ? readTs1 : readTs2;
 
-        // Calculate unread count strictly: count messages timestamped AFTER lastReadTs
         final unreadCount = peerMessages.where((m) {
           final mTs = (m['timestamp'] as num?)?.toInt() ?? 0;
           return mTs > lastReadTs;
@@ -161,6 +207,7 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
             _chats[idx]['message'] = text;
             _chats[idx]['time'] = timeStr;
             _chats[idx]['unread'] = unreadCount;
+            if (convId != null) _chats[idx]['conversationId'] = convId;
             if (currentMsg != text) {
               final item = _chats.removeAt(idx);
               _chats.insert(0, item);
@@ -169,6 +216,7 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
           }
         } else {
           _chats.insert(0, {
+            'conversationId': convId,
             'name': '@$senderHandle',
             'nexaId': senderNexaId,
             'message': text,
@@ -216,7 +264,7 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
     return '${dt.month}/${dt.day}';
   }
 
-  void _openChat(String contactName, String nexaId) async {
+  void _openChat(String contactName, String nexaId, {String? conversationId}) async {
     final canonicalKey = ChatService.getCanonicalKey(nexaId.isNotEmpty ? nexaId : contactName);
     final now = DateTime.now().millisecondsSinceEpoch;
     await ChatService.instance.saveReadTimestamp(canonicalKey, now);
@@ -245,6 +293,7 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
         builder: (_) => ChatScreen(
           contactName: contactName,
           nexaId: nexaId,
+          conversationId: conversationId,
         ),
       ),
     );
@@ -506,7 +555,7 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
 
                     return ListTile(
                       contentPadding: const EdgeInsets.symmetric(vertical: 4),
-                      onTap: () => _openChat(name, nexaId),
+                      onTap: () => _openChat(name, nexaId, conversationId: item['conversationId'] as String?),
                       leading: CircleAvatar(
                         radius: 22,
                         backgroundColor: const Color(0xFF1E293B),

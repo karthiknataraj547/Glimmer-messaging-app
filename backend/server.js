@@ -86,6 +86,49 @@ const activeConnections = new Map(); // device_id -> WebSocket
 const userDevices = new Map();       // user_id -> Map(device_id -> { identity_key, ... })
 const prekeyBundles = new Map();     // `${user_id}:${device_id}` -> { signed_prekey, opks: [] }
 const mailboxQueue = new Map();      // device_id -> Array of encrypted envelopes
+const activeUserSockets = new Map(); // canonical_user_id -> Set<WebSocket>
+
+function registerUserSocket(userIdent, ws) {
+  if (!userIdent || !ws) return;
+  const cUser = (Database.resolveCanonicalUserId ? Database.resolveCanonicalUserId(userIdent) : userIdent).toLowerCase();
+  if (!cUser) return;
+  if (!activeUserSockets.has(cUser)) {
+    activeUserSockets.set(cUser, new Set());
+  }
+  activeUserSockets.get(cUser).add(ws);
+  if (!ws._userSet) ws._userSet = new Set();
+  ws._userSet.add(cUser);
+}
+
+function unregisterUserSocket(userIdent, ws) {
+  if (!userIdent) return;
+  const cUser = (Database.resolveCanonicalUserId ? Database.resolveCanonicalUserId(userIdent) : userIdent).toLowerCase();
+  if (activeUserSockets.has(cUser)) {
+    activeUserSockets.get(cUser).delete(ws);
+    if (activeUserSockets.get(cUser).size === 0) {
+      activeUserSockets.delete(cUser);
+    }
+  }
+}
+
+function sendToUser(userIdent, payload) {
+  if (!userIdent) return 0;
+  const cUser = (Database.resolveCanonicalUserId ? Database.resolveCanonicalUserId(userIdent) : userIdent).toLowerCase();
+  const sockets = activeUserSockets.get(cUser);
+  let sent = 0;
+  if (sockets) {
+    for (const ws of sockets) {
+      if (ws.readyState === 1) {
+        try {
+          ws.send(JSON.stringify(payload));
+          sent++;
+        } catch (_) {}
+      }
+    }
+  }
+  return sent;
+}
+
 
 // Helper to clean username
 function sanitizeUsername(input) {
@@ -567,17 +610,94 @@ app.get('/v1/users/lookup/:query', (req, res) => {
   });
 });
 
-// --- 1.09 REAL-TIME BIDIRECTIONAL MESSAGING API ---
+// --- 1.085 CANONICAL CONVERSATIONS API ---
 /**
- * Dispatch message between two users
+ * Atomically find or create canonical direct conversation
  */
-app.post('/v1/messages/send', async (req, res) => {
-  const { sender_handle, sender_nexa_id, recipient_handle, recipient_nexa_id, text, type, audio_path, audio_duration, timestamp } = req.body;
-  if (!sender_handle || (!recipient_handle && !recipient_nexa_id) || (!text && !audio_path)) {
-    return res.status(400).json({ error: 'Missing sender_handle, recipient identifier, or message content.' });
+app.post('/v1/conversations/direct', async (req, res) => {
+  const { user1, user2, recipient_handle, recipient_nexa_id, sender_handle, sender_nexa_id } = req.body || {};
+  const peerA = user1 || sender_nexa_id || sender_handle;
+  const peerB = user2 || recipient_nexa_id || recipient_handle;
+
+  if (!peerA || !peerB) {
+    return res.status(400).json({ error: 'Both user identities are required to establish a direct conversation.' });
   }
 
-  const record = Database.saveMessage({
+  const conv = Database.findOrCreateDirectConversation(peerA, peerB);
+  if (!conv) {
+    return res.status(500).json({ error: 'Failed to create or resolve canonical direct conversation.' });
+  }
+
+  if (Database.syncToCloud) {
+    await Database.syncToCloud();
+  }
+
+  return res.json({
+    success: true,
+    conversation_id: conv.id,
+    conversation: conv
+  });
+});
+
+/**
+ * Get all server-persisted conversations for authenticated user
+ */
+app.get('/v1/conversations', async (req, res) => {
+  if (Database.syncFromCloud) await Database.syncFromCloud();
+  const user = req.query.userId || req.query.user || req.headers['x-user-id'] || req.headers['authorization'];
+  if (!user) {
+    return res.status(400).json({ error: 'User identifier required.' });
+  }
+
+  const conversations = Database.getConversationsForUser(user);
+  return res.json({
+    success: true,
+    count: conversations.length,
+    conversations
+  });
+});
+
+/**
+ * Get messages for a canonical conversation with cursor pagination & membership verification
+ */
+app.get('/v1/conversations/:id/messages', async (req, res) => {
+  if (Database.syncFromCloud) await Database.syncFromCloud();
+  const convId = req.params.id;
+  const { limit, cursor, user, userId } = req.query || {};
+
+  try {
+    const result = Database.getConversationMessages(convId, {
+      limit,
+      cursor,
+      requestingUser: userId || user || req.headers['x-user-id']
+    });
+
+    if (Database.syncToCloud) {
+      await Database.syncToCloud();
+    }
+
+    return res.json({
+      success: true,
+      conversation_id: convId,
+      count: result.messages.length,
+      ...result
+    });
+  } catch (err) {
+    if (err.message === 'UNAUTHORIZED_CONVERSATION_MEMBER') {
+      return res.status(403).json({ error: 'Unauthorized: User is not an active member of this conversation.' });
+    }
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// --- 1.09 REAL-TIME BIDIRECTIONAL MESSAGING API ---
+/**
+ * Dispatch message between two users with idempotency and targeted WebSocket delivery
+ */
+app.post('/v1/messages/send', async (req, res) => {
+  const {
+    client_message_id,
+    conversation_id,
     sender_handle,
     sender_nexa_id,
     recipient_handle,
@@ -586,31 +706,74 @@ app.post('/v1/messages/send', async (req, res) => {
     type,
     audio_path,
     audio_duration,
+    attachment_id,
+    attachment_url,
+    attachment_type,
+    attachment_name,
+    attachment_size,
+    location_data,
+    timestamp
+  } = req.body || {};
+
+  if (!sender_handle || (!recipient_handle && !recipient_nexa_id) || (!text && !audio_path && !attachment_id && !location_data)) {
+    return res.status(400).json({ error: 'Missing sender_handle, recipient identifier, or message content.' });
+  }
+
+  const record = Database.saveMessage({
+    client_message_id,
+    conversation_id,
+    sender_handle,
+    sender_nexa_id,
+    recipient_handle,
+    recipient_nexa_id,
+    text: text || '',
+    type: type || (audio_path ? 'voice' : (attachment_id ? 'attachment' : (location_data ? 'location' : 'text'))),
+    audio_path,
+    audio_duration,
+    attachment_id,
+    attachment_url,
+    attachment_type,
+    attachment_name,
+    attachment_size,
+    location_data,
     timestamp
   });
+
+  if (record && record.is_duplicate) {
+    return res.status(200).json({
+      success: true,
+      duplicate: true,
+      message: record,
+      delivered_live: false
+    });
+  }
 
   if (Database.syncToCloud) {
     await Database.syncToCloud();
   }
 
-  // Notify recipient via active WebSocket connection if connected
-  for (const [deviceId, conn] of activeConnections.entries()) {
-    if (conn.readyState === 1) {
-      conn.send(JSON.stringify({
-        event: 'NEW_CHAT_MESSAGE',
-        message: record
-      }));
-    }
-  }
+  // Targeted WebSocket dispatch: Send strictly to recipient's active socket(s)
+  const targetRecipient = recipient_nexa_id || recipient_handle;
+  const sentCount = sendToUser(targetRecipient, {
+    event: 'NEW_CHAT_MESSAGE',
+    message: record
+  });
+
+  // Also notify sender's other sockets for cross-device sync
+  sendToUser(sender_nexa_id || sender_handle, {
+    event: 'MESSAGE_ACK',
+    message: record
+  });
 
   res.status(201).json({
     success: true,
-    message: record
+    message: record,
+    delivered_live: sentCount > 0
   });
 });
 
 /**
- * Get conversation history thread between two users
+ * Get conversation history thread between two users (backward compatible)
  */
 app.get('/v1/messages/thread/:user1/:user2', async (req, res) => {
   const { user1, user2 } = req.params;
@@ -640,6 +803,103 @@ app.get('/v1/messages/inbox/:user', async (req, res) => {
     success: true,
     count: messages.length,
     messages
+  });
+});
+
+app.post('/v1/attachments/upload', express.raw({ type: (req) => !req.is('application/json'), limit: '50mb' }), express.json({ limit: '50mb' }), async (req, res) => {
+  let name, media_type, data_base64, uploader, size_bytes;
+
+  if (Buffer.isBuffer(req.body)) {
+    try {
+      const parsed = JSON.parse(req.body.toString('utf8'));
+      if (parsed && typeof parsed === 'object' && parsed.data_base64) {
+        ({ name, media_type, data_base64, uploader, size_bytes } = parsed);
+      }
+    } catch (_) {}
+
+    if (!data_base64) {
+      data_base64 = req.body.toString('base64');
+      name = req.headers['x-file-name'] || 'attachment.dat';
+      media_type = req.headers['x-media-type'] || 'application/octet-stream';
+      uploader = req.headers['x-uploader'] || 'anonymous';
+      size_bytes = req.body.length;
+    }
+  } else if (req.body && typeof req.body === 'object') {
+    ({ name, media_type, data_base64, uploader, size_bytes } = req.body);
+  }
+
+  if (!data_base64) {
+    return res.status(400).json({ error: 'Missing attachment data_base64' });
+  }
+
+  const checksum = crypto.createHash('sha256').update(data_base64).digest('hex');
+  const size = size_bytes || Buffer.byteLength(data_base64, 'base64');
+
+  const record = Database.saveAttachment({
+    name: name || 'attachment',
+    media_type: media_type || 'application/octet-stream',
+    data_base64,
+    uploader: uploader || 'anonymous',
+    size_bytes: size,
+    checksum
+  });
+
+  return res.status(201).json({
+    success: true,
+    attachmentId: record.id,
+    url: record.download_url,
+    fileName: record.name,
+    sizeBytes: record.size_bytes,
+    attachment: record
+  });
+});
+
+app.get('/v1/attachments/:id', (req, res) => {
+  const att = Database.getAttachment(req.params.id);
+  if (!att) {
+    return res.status(404).json({ error: 'Attachment not found or expired.' });
+  }
+
+  if (req.query.raw === '1' && att.data_base64) {
+    const buf = Buffer.from(att.data_base64, 'base64');
+    res.setHeader('Content-Type', att.media_type || 'application/octet-stream');
+    res.setHeader('Content-Length', buf.length);
+    res.setHeader('ETag', att.checksum || `"${att.id}"`);
+    return res.send(buf);
+  }
+
+  return res.json({
+    success: true,
+    attachment: att
+  });
+});
+
+// --- 1.094 DEVICE PUSH NOTIFICATION TOKEN REGISTRATION ---
+app.post('/v1/devices/push-token', (req, res) => {
+  const { user, userId, device_id, push_token, token, platform } = req.body || {};
+  const targetUser = userId || user;
+  const targetToken = push_token || token;
+  if (!targetUser || !targetToken) {
+    return res.status(400).json({ error: 'user and push_token are required.' });
+  }
+
+  const registered = Database.registerPushToken(targetUser, device_id || 'default', targetToken, platform || 'android');
+  return res.json({
+    success: registered,
+    message: registered ? 'Push token registered successfully.' : 'Failed to register push token.'
+  });
+});
+
+app.delete('/v1/devices/push-token', (req, res) => {
+  const { user, userId, device_id } = req.body || req.query || {};
+  const targetUser = userId || user;
+  if (!targetUser) {
+    return res.status(400).json({ error: 'user is required.' });
+  }
+  const removed = Database.unregisterPushToken(targetUser, device_id || 'default');
+  return res.json({
+    success: removed,
+    message: 'Push token unregistered.'
   });
 });
 
@@ -714,7 +974,16 @@ app.post('/v1/admin/app/push-update', adminAuthMiddleware, async (req, res) => {
  * User 1 initiates call to User 2 (Voice or Video)
  */
 app.post('/v1/calls/offer', (req, res) => {
-  const { caller_handle, caller_nexa_id, caller_name, recipient_handle, recipient_nexa_id, call_type, offer_id } = req.body || {};
+  const body = req.body || {};
+  const caller_handle = body.caller_handle || body.callerHandle || body.caller_id || body.callerId || 'anonymous';
+  const caller_nexa_id = body.caller_nexa_id || body.callerNexaId || body.callerId || null;
+  const caller_name = body.caller_name || body.callerName || caller_handle;
+  const recipient_handle = body.recipient_handle || body.recipientHandle || body.recipient_id || body.calleeId || body.callee_id || null;
+  const recipient_nexa_id = body.recipient_nexa_id || body.recipientNexaId || body.calleeId || null;
+  const call_type = body.call_type || body.callType || 'video';
+  const offer_id = body.offer_id || body.call_id || body.callId || `call_${Date.now()}`;
+  const sdp_offer = body.sdp_offer || body.sdpOffer || null;
+
   if (!caller_handle || (!recipient_handle && !recipient_nexa_id)) {
     return res.status(400).json({ error: 'caller_handle and recipient identifier are required.' });
   }
@@ -726,22 +995,23 @@ app.post('/v1/calls/offer', (req, res) => {
     caller_name,
     recipient_handle,
     recipient_nexa_id,
-    call_type: call_type || 'video'
+    call_type,
+    sdp_offer
   });
 
-  // Notify any active WebSockets of the incoming call
-  for (const [, conn] of activeConnections.entries()) {
-    if (conn.readyState === 1) {
-      conn.send(JSON.stringify({
-        event: 'INCOMING_CALL',
-        call: session
-      }));
-    }
+  // Targeted notification: Send strictly to recipient's active socket(s)
+  const targetRecipient = recipient_nexa_id || recipient_handle;
+  if (typeof sendToUser === 'function') {
+    sendToUser(targetRecipient, {
+      event: 'INCOMING_CALL',
+      call: session
+    });
   }
 
-  return res.status(201).json({
+  return res.status(200).json({
     success: true,
     call_id: session.call_id,
+    callId: session.call_id,
     session
   });
 });
@@ -760,22 +1030,80 @@ app.get('/v1/calls/incoming/:user', (req, res) => {
 });
 
 /**
- * Callee answers (accepts or declines) incoming call
+ * Callee answers (accepts or declines) incoming call with SDP answer
  */
 app.post('/v1/calls/answer', (req, res) => {
-  const { call_id, accepted } = req.body || {};
+  const body = req.body || {};
+  const call_id = body.call_id || body.callId || body.offer_id;
+  const accepted = body.accepted !== undefined ? body.accepted : true;
+  const sdp_answer = body.sdp_answer || body.sdpAnswer || null;
+
   if (!call_id) {
     return res.status(400).json({ error: 'call_id is required.' });
   }
 
-  const session = Database.answerCallSession(call_id, Boolean(accepted));
+  const session = Database.answerCallSession(call_id, Boolean(accepted), sdp_answer);
   if (!session) {
     return res.status(404).json({ error: 'Call session not found or already expired.' });
+  }
+
+  // Notify the caller of acceptance/rejection + SDP answer
+  if (typeof sendToUser === 'function') {
+    sendToUser(session.caller_nexa_id || session.caller_handle, {
+      event: 'CALL_ANSWERED',
+      accepted: Boolean(accepted),
+      call: session
+    });
   }
 
   return res.json({
     success: true,
     session
+  });
+});
+
+/**
+ * Exchange WebRTC ICE candidate
+ */
+app.post('/v1/calls/candidate', (req, res) => {
+  const body = req.body || {};
+  const call_id = body.call_id || body.callId;
+  const candidate = body.candidate;
+  const sender = body.sender || body.fromUserId || body.from_user_id || 'anonymous';
+
+  if (!call_id || !candidate) {
+    return res.status(400).json({ error: 'call_id and candidate are required.' });
+  }
+
+  const added = Database.addCallCandidate(call_id, candidate, sender);
+  const session = Database.getCallSession(call_id);
+  if (session && typeof sendToUser === 'function') {
+    // Relay candidate to the other peer
+    const cleanSender = (sender || '').toLowerCase().replace(/^@+/, '');
+    const isCaller = cleanSender === session.caller_handle.toLowerCase() || (session.caller_nexa_id && cleanSender === session.caller_nexa_id.toLowerCase());
+    const peerTarget = isCaller ? (session.recipient_nexa_id || session.recipient_handle) : (session.caller_nexa_id || session.caller_handle);
+    sendToUser(peerTarget, {
+      event: 'ICE_CANDIDATE',
+      call_id,
+      candidate,
+      sender
+    });
+  }
+
+  return res.json({
+    success: added
+  });
+});
+
+/**
+ * Poll buffered ICE candidates
+ */
+app.get('/v1/calls/candidates/:callId', (req, res) => {
+  const candidates = Database.getCallCandidates(req.params.callId, req.query.since || 0);
+  return res.json({
+    success: true,
+    count: candidates.length,
+    candidates
   });
 });
 
@@ -789,6 +1117,17 @@ app.post('/v1/calls/end', (req, res) => {
   }
 
   const session = Database.endCallSession(call_id);
+  if (session) {
+    sendToUser(session.recipient_nexa_id || session.recipient_handle, {
+      event: 'CALL_ENDED',
+      call_id
+    });
+    sendToUser(session.caller_nexa_id || session.caller_handle, {
+      event: 'CALL_ENDED',
+      call_id
+    });
+  }
+
   return res.json({
     success: true,
     session: session || { status: 'ended' }
@@ -1064,6 +1403,7 @@ const wss = new WebSocketServer({ server, path: '/v1/realtime' });
 
 wss.on('connection', (ws, req) => {
   let connectedDeviceId = null;
+  ws._userSet = new Set();
 
   ws.on('message', (raw) => {
     try {
@@ -1071,12 +1411,21 @@ wss.on('connection', (ws, req) => {
       if (msg.action === 'BIND_DEVICE') {
         connectedDeviceId = msg.device_id;
         activeConnections.set(connectedDeviceId, ws);
+        if (msg.user || msg.user_id || msg.handle || msg.nexa_id) {
+          registerUserSocket(msg.user || msg.user_id || msg.handle || msg.nexa_id, ws);
+        }
         ws.send(JSON.stringify({ event: 'BOUND', device_id: connectedDeviceId }));
 
         // Flush any pending mailbox envelopes
         const pending = mailboxQueue.get(connectedDeviceId) || [];
         if (pending.length > 0) {
           ws.send(JSON.stringify({ event: 'MAILBOX_FLUSH', envelopes: pending }));
+        }
+      } else if (msg.action === 'BIND_USER') {
+        const u = msg.user || msg.user_id || msg.handle || msg.nexa_id;
+        if (u) {
+          registerUserSocket(u, ws);
+          ws.send(JSON.stringify({ event: 'USER_BOUND', user: u }));
         }
       }
     } catch (e) {
@@ -1087,6 +1436,11 @@ wss.on('connection', (ws, req) => {
   ws.on('close', () => {
     if (connectedDeviceId && activeConnections.get(connectedDeviceId) === ws) {
       activeConnections.delete(connectedDeviceId);
+    }
+    if (ws._userSet) {
+      for (const u of ws._userSet) {
+        unregisterUserSocket(u, ws);
+      }
     }
   });
 });

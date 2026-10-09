@@ -309,27 +309,135 @@ app.get('/v1/directory/resolve/:identifier', async (req, res) => {
 });
 
 // --------------------------------------------------------------------------
-// 5. MESSAGING & THREADS
+// 5. CANONICAL CONVERSATIONS & MESSAGING
 // --------------------------------------------------------------------------
+app.post('/v1/conversations/direct', async (req, res) => {
+  const { user1, user2, recipient_handle, recipient_nexa_id, sender_handle, sender_nexa_id } = req.body || {};
+  const peerA = user1 || sender_nexa_id || sender_handle;
+  const peerB = user2 || recipient_nexa_id || recipient_handle;
+
+  if (!peerA || !peerB) {
+    return res.status(400).json({ error: 'Both user identities are required to establish a direct conversation.' });
+  }
+
+  if (Database.syncFromCloud) await Database.syncFromCloud(true);
+
+  const conv = Database.findOrCreateDirectConversation(peerA, peerB);
+  if (!conv) {
+    return res.status(500).json({ error: 'Failed to create or resolve canonical direct conversation.' });
+  }
+
+  if (Database.syncToCloud) {
+    await Database.syncToCloud();
+  }
+
+  return res.json({
+    success: true,
+    conversation_id: conv.id,
+    conversation: conv
+  });
+});
+
+app.get('/v1/conversations', async (req, res) => {
+  if (Database.syncFromCloud) await Database.syncFromCloud();
+  const user = req.query.userId || req.query.user || req.headers['x-user-id'] || req.headers['authorization'];
+  if (!user) {
+    return res.status(400).json({ error: 'User identifier required.' });
+  }
+
+  const conversations = Database.getConversationsForUser(user);
+  return res.json({
+    success: true,
+    count: conversations.length,
+    conversations
+  });
+});
+
+app.get('/v1/conversations/:id/messages', async (req, res) => {
+  if (Database.syncFromCloud) await Database.syncFromCloud();
+  const convId = req.params.id;
+  const { limit, cursor, user, userId } = req.query || {};
+
+  try {
+    const result = Database.getConversationMessages(convId, {
+      limit,
+      cursor,
+      requestingUser: userId || user || req.headers['x-user-id']
+    });
+
+    if (Database.syncToCloud) {
+      await Database.syncToCloud();
+    }
+
+    return res.json({
+      success: true,
+      conversation_id: convId,
+      count: result.messages.length,
+      ...result
+    });
+  } catch (err) {
+    if (err.message === 'UNAUTHORIZED_CONVERSATION_MEMBER') {
+      return res.status(403).json({ error: 'Unauthorized: User is not an active member of this conversation.' });
+    }
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/v1/messages/send', async (req, res) => {
-  const { sender_handle, sender_nexa_id, recipient_handle, recipient_nexa_id, text, type, audio_path, audio_duration, timestamp } = req.body || {};
-  if (!sender_handle || (!recipient_handle && !recipient_nexa_id) || (!text && !audio_path)) {
-    return res.status(400).json({ error: 'Missing required message parameters' });
+  const {
+    client_message_id,
+    conversation_id,
+    sender_handle,
+    sender_nexa_id,
+    recipient_handle,
+    recipient_nexa_id,
+    text,
+    type,
+    audio_path,
+    audio_duration,
+    attachment_id,
+    attachment_url,
+    attachment_type,
+    attachment_name,
+    attachment_size,
+    location_data,
+    timestamp
+  } = req.body || {};
+
+  if (!sender_handle || (!recipient_handle && !recipient_nexa_id) || (!text && !audio_path && !attachment_id && !location_data)) {
+    return res.status(400).json({ error: 'Missing required sender, recipient, or message payload.' });
   }
 
   if (Database.syncFromCloud) await Database.syncFromCloud(true);
 
   const newMsg = Database.saveMessage({
+    client_message_id,
+    conversation_id,
     sender_handle,
-    sender_nexa_id: sender_nexa_id || '',
-    recipient_handle: recipient_handle || '',
-    recipient_nexa_id: recipient_nexa_id || '',
+    sender_nexa_id,
+    recipient_handle,
+    recipient_nexa_id,
     text: text || '',
-    type: type || (audio_path ? 'voice' : 'text'),
-    audio_path: audio_path || null,
-    audio_duration: audio_duration || 0,
-    timestamp: timestamp || Date.now()
+    type: type || (audio_path ? 'voice' : (attachment_id ? 'attachment' : (location_data ? 'location' : 'text'))),
+    audio_path,
+    audio_duration,
+    attachment_id,
+    attachment_url,
+    attachment_type,
+    attachment_name,
+    attachment_size,
+    location_data,
+    timestamp
   });
+
+  if (newMsg && newMsg.is_duplicate) {
+    return res.status(200).json({
+      success: true,
+      duplicate: true,
+      message: newMsg,
+      delivered_live: false
+    });
+  }
 
   if (Database.syncToCloud) {
     await Database.syncToCloud();
@@ -371,6 +479,107 @@ app.get('/v1/messages/inbox/:user', async (req, res) => {
   });
 });
 
+app.post('/v1/attachments/upload', express.raw({ type: (req) => !req.is('application/json'), limit: '50mb' }), express.json({ limit: '50mb' }), async (req, res) => {
+  let name, media_type, data_base64, uploader, size_bytes;
+
+  if (Buffer.isBuffer(req.body)) {
+    try {
+      const parsed = JSON.parse(req.body.toString('utf8'));
+      if (parsed && typeof parsed === 'object' && parsed.data_base64) {
+        ({ name, media_type, data_base64, uploader, size_bytes } = parsed);
+      }
+    } catch (_) {}
+
+    if (!data_base64) {
+      data_base64 = req.body.toString('base64');
+      name = req.headers['x-file-name'] || 'attachment.dat';
+      media_type = req.headers['x-media-type'] || 'application/octet-stream';
+      uploader = req.headers['x-uploader'] || 'anonymous';
+      size_bytes = req.body.length;
+    }
+  } else if (req.body && typeof req.body === 'object') {
+    ({ name, media_type, data_base64, uploader, size_bytes } = req.body);
+  }
+
+  if (!data_base64) {
+    return res.status(400).json({ error: 'Missing attachment data_base64' });
+  }
+
+  if (Database.syncFromCloud) await Database.syncFromCloud(true);
+
+  const checksum = crypto.createHash('sha256').update(data_base64).digest('hex');
+  const size = size_bytes || Buffer.byteLength(data_base64, 'base64');
+
+  const record = Database.saveAttachment({
+    name: name || 'attachment',
+    media_type: media_type || 'application/octet-stream',
+    data_base64,
+    uploader: uploader || 'anonymous',
+    size_bytes: size,
+    checksum
+  });
+
+  if (Database.syncToCloud) await Database.syncToCloud();
+
+  return res.status(201).json({
+    success: true,
+    attachmentId: record.id,
+    url: record.download_url,
+    fileName: record.name,
+    sizeBytes: record.size_bytes,
+    attachment: record
+  });
+});
+
+app.get('/v1/attachments/:id', (req, res) => {
+  const att = Database.getAttachment(req.params.id);
+  if (!att) {
+    return res.status(404).json({ error: 'Attachment not found or expired.' });
+  }
+
+  if (req.query.raw === '1' && att.data_base64) {
+    const buf = Buffer.from(att.data_base64, 'base64');
+    res.setHeader('Content-Type', att.media_type || 'application/octet-stream');
+    res.setHeader('Content-Length', buf.length);
+    res.setHeader('ETag', att.checksum || `"${att.id}"`);
+    return res.send(buf);
+  }
+
+  return res.json({
+    success: true,
+    attachment: att
+  });
+});
+
+// --- 5.3 DEVICE PUSH NOTIFICATION TOKEN REGISTRATION ---
+app.post('/v1/devices/push-token', (req, res) => {
+  const { user, userId, device_id, push_token, token, platform } = req.body || {};
+  const targetUser = userId || user;
+  const targetToken = push_token || token;
+  if (!targetUser || !targetToken) {
+    return res.status(400).json({ error: 'user and push_token are required.' });
+  }
+
+  const registered = Database.registerPushToken(targetUser, device_id || 'default', targetToken, platform || 'android');
+  return res.json({
+    success: registered,
+    message: registered ? 'Push token registered successfully.' : 'Failed to register push token.'
+  });
+});
+
+app.delete('/v1/devices/push-token', (req, res) => {
+  const { user, userId, device_id } = req.body || req.query || {};
+  const targetUser = userId || user;
+  if (!targetUser) {
+    return res.status(400).json({ error: 'user is required.' });
+  }
+  const removed = Database.unregisterPushToken(targetUser, device_id || 'default');
+  return res.json({
+    success: removed,
+    message: 'Push token unregistered.'
+  });
+});
+
 app.post('/v1/users/telemetry/location', async (req, res) => {
   const { username, handle, nexa_id, full_name, latitude, longitude, accuracy, altitude, address, timestamp } = req.body || {};
   if (!username && !handle && !nexa_id) {
@@ -401,22 +610,20 @@ app.post('/v1/auth/contacts/sync', async (req, res) => {
   });
 });
 
-app.get(['/v1/users/lookup', '/v1/users/lookup/:query'], async (req, res) => {
-  const query = req.params.query || req.query.q || req.query.query || '';
-  if (Database.syncFromCloud) await Database.syncFromCloud();
-  const results = Database.searchUsers(query);
-  return res.json({
-    success: true,
-    count: results.length,
-    users: results
-  });
-});
-
 // --------------------------------------------------------------------------
 // 5.5 CALL SIGNALING & VIDEO/VOICE CALL INVITATION ENGINE
 // --------------------------------------------------------------------------
 app.post('/v1/calls/offer', (req, res) => {
-  const { caller_handle, caller_nexa_id, caller_name, recipient_handle, recipient_nexa_id, call_type, offer_id } = req.body || {};
+  const body = req.body || {};
+  const caller_handle = body.caller_handle || body.callerHandle || body.caller_id || body.callerId || 'anonymous';
+  const caller_nexa_id = body.caller_nexa_id || body.callerNexaId || body.callerId || null;
+  const caller_name = body.caller_name || body.callerName || caller_handle;
+  const recipient_handle = body.recipient_handle || body.recipientHandle || body.recipient_id || body.calleeId || body.callee_id || null;
+  const recipient_nexa_id = body.recipient_nexa_id || body.recipientNexaId || body.calleeId || null;
+  const call_type = body.call_type || body.callType || 'video';
+  const offer_id = body.offer_id || body.call_id || body.callId || `call_${Date.now()}`;
+  const sdp_offer = body.sdp_offer || body.sdpOffer || null;
+
   if (!caller_handle || (!recipient_handle && !recipient_nexa_id)) {
     return res.status(400).json({ error: 'caller_handle and recipient identifier are required.' });
   }
@@ -428,12 +635,14 @@ app.post('/v1/calls/offer', (req, res) => {
     caller_name,
     recipient_handle,
     recipient_nexa_id,
-    call_type: call_type || 'video'
+    call_type,
+    sdp_offer
   });
 
-  return res.status(201).json({
+  return res.status(200).json({
     success: true,
     call_id: session.call_id,
+    callId: session.call_id,
     session
   });
 });
@@ -449,12 +658,16 @@ app.get('/v1/calls/incoming/:user', (req, res) => {
 });
 
 app.post('/v1/calls/answer', (req, res) => {
-  const { call_id, accepted } = req.body || {};
+  const body = req.body || {};
+  const call_id = body.call_id || body.callId || body.offer_id;
+  const accepted = body.accepted !== undefined ? body.accepted : true;
+  const sdp_answer = body.sdp_answer || body.sdpAnswer || null;
+
   if (!call_id) {
     return res.status(400).json({ error: 'call_id is required.' });
   }
 
-  const session = Database.answerCallSession(call_id, Boolean(accepted));
+  const session = Database.answerCallSession(call_id, Boolean(accepted), sdp_answer);
   if (!session) {
     return res.status(404).json({ error: 'Call session not found or already expired.' });
   }
@@ -462,6 +675,31 @@ app.post('/v1/calls/answer', (req, res) => {
   return res.json({
     success: true,
     session
+  });
+});
+
+app.post('/v1/calls/candidate', (req, res) => {
+  const body = req.body || {};
+  const call_id = body.call_id || body.callId;
+  const candidate = body.candidate;
+  const sender = body.sender || body.fromUserId || body.from_user_id || 'anonymous';
+
+  if (!call_id || !candidate) {
+    return res.status(400).json({ error: 'call_id and candidate are required.' });
+  }
+
+  const added = Database.addCallCandidate(call_id, candidate, sender);
+  return res.json({
+    success: added
+  });
+});
+
+app.get('/v1/calls/candidates/:callId', (req, res) => {
+  const candidates = Database.getCallCandidates(req.params.callId, req.query.since || 0);
+  return res.json({
+    success: true,
+    count: candidates.length,
+    candidates
   });
 });
 

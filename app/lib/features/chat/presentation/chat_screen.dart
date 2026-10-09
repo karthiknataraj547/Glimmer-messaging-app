@@ -10,14 +10,18 @@ import '../../../core/services/call_service.dart';
 import '../../../core/session/user_session.dart';
 import '../../../core/theme/nexa_theme.dart';
 
+enum ChatState { initial, loading, empty, loaded, error }
+
 class ChatScreen extends StatefulWidget {
   final String contactName;
   final String nexaId;
+  final String? conversationId;
 
   const ChatScreen({
     super.key,
     required this.contactName,
     required this.nexaId,
+    this.conversationId,
   });
 
   @override
@@ -30,6 +34,10 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _isComposing = false;
   String _disappearingTimer = 'Off';
   bool _isSafetyNumberVerified = false;
+
+  ChatState _chatState = ChatState.initial;
+  String? _activeConversationId;
+  String? _errorMessage;
 
   static const MethodChannel _nativeMediaChannel = MethodChannel('com.nexa.media_picker');
 
@@ -116,77 +124,137 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _loadThread() async {
-    final history = await ChatService.instance.fetchThread(widget.contactName, peerNexaId: widget.nexaId);
-    if (!mounted) return;
-
-    final myHandle = UserSession.instance.handle.replaceAll('@', '').toLowerCase();
-    final myNexaId = UserSession.instance.nexaId.toLowerCase();
-
-    // Preserve local unconfirmed or existing messages
-    final Map<String, Map<String, dynamic>> merged = {};
-    for (final m in _messages) {
-      final id = (m['id'] ?? '').toString();
-      if (id.isNotEmpty) merged[id] = m;
+    if (_messages.isEmpty) {
+      setState(() => _chatState = ChatState.loading);
     }
 
-    for (final m in history) {
-      final senderHandle = (m['sender_handle'] ?? '').toString().toLowerCase();
-      final senderNexaId = (m['sender_nexa_id'] ?? '').toString().toLowerCase();
-      final isMe = senderHandle == myHandle || (myNexaId.isNotEmpty && (senderHandle == myNexaId || senderNexaId == myNexaId));
-      final ts = (m['timestamp'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch;
-      final dt = DateTime.fromMillisecondsSinceEpoch(ts);
-      final timeStr = '${dt.hour > 12 ? dt.hour - 12 : (dt.hour == 0 ? 12 : dt.hour)}:${dt.minute.toString().padLeft(2, '0')} ${dt.hour >= 12 ? 'PM' : 'AM'}';
-      final msgId = (m['id'] ?? 'm_${ts}_${merged.length}').toString();
-      final text = (m['text'] ?? '').toString();
-
-      // Deduplicate unconfirmed outgoing message
-      if (isMe) {
-        final localKeys = merged.entries
-            .where((e) => e.value['isMe'] == true && e.value['text'] == text && e.key.startsWith('m_'))
-            .map((e) => e.key)
-            .toList();
-        for (final k in localKeys) {
-          merged.remove(k);
+    try {
+      // 1. Resolve or establish canonical direct conversation atomically
+      if (_activeConversationId == null) {
+        if (widget.conversationId != null && widget.conversationId!.isNotEmpty) {
+          _activeConversationId = widget.conversationId;
+        } else {
+          final conv = await ChatService.instance.getOrCreateDirectConversation(widget.contactName, peerNexaId: widget.nexaId);
+          if (conv != null && conv['id'] != null) {
+            _activeConversationId = conv['id'] as String;
+          }
         }
       }
 
-      merged[msgId] = {
-        'id': msgId,
-        'isMe': isMe,
-        'text': text,
-        'time': timeStr,
-        'timestamp': ts,
-        'isAudio': m['type'] == 'voice',
-        'attachmentType': m['type'] != null && m['type'] != 'text' ? m['type'] : null,
-        'audioDuration': m['audio_duration'] != null && (m['audio_duration'] as num) > 0
-            ? _formatDuration((m['audio_duration'] as num).toInt())
-            : null,
-        'hasAction': false,
-        'actionAdded': false,
-        'actionDismissed': false,
-        'reactions': <String>[],
-      };
-    }
+      // 2. Fetch conversation messages
+      List<Map<String, dynamic>> history = [];
+      if (_activeConversationId != null) {
+        final res = await ChatService.instance.fetchConversationMessages(_activeConversationId!);
+        if (res != null && res['messages'] is List) {
+          history = List<Map<String, dynamic>>.from(res['messages'] as List);
+        }
+      }
 
-    final sortedList = merged.values.toList();
-    sortedList.sort((a, b) => ((a['timestamp'] as num?)?.toInt() ?? 0).compareTo((b['timestamp'] as num?)?.toInt() ?? 0));
+      // Fallback to thread query if conversation endpoint was empty
+      if (history.isEmpty) {
+        history = await ChatService.instance.fetchThread(widget.contactName, peerNexaId: widget.nexaId);
+      }
 
-    setState(() {
-      _messages.clear();
-      _messages.addAll(sortedList);
-    });
-    _scrollToBottom();
-    final now = DateTime.now().millisecondsSinceEpoch;
-    ChatService.instance.saveReadTimestamp(_threadKey, now);
-    ChatService.instance.saveLocalMessages(_threadKey, _messages);
-    if (widget.contactName.isNotEmpty) {
-      ChatService.instance.saveReadTimestamp(widget.contactName, now);
-      ChatService.instance.saveLocalMessages(widget.contactName, _messages);
+      if (!mounted) return;
+
+      final myHandle = UserSession.instance.handle.replaceAll('@', '').toLowerCase();
+      final myNexaId = UserSession.instance.nexaId.toLowerCase();
+
+      // Preserve local unconfirmed or existing messages
+      final Map<String, Map<String, dynamic>> merged = {};
+      for (final m in _messages) {
+        final id = (m['id'] ?? '').toString();
+        if (id.isNotEmpty) merged[id] = m;
+      }
+
+      for (final m in history) {
+        final senderHandle = (m['sender_handle'] ?? '').toString().toLowerCase();
+        final senderNexaId = (m['sender_nexa_id'] ?? '').toString().toLowerCase();
+        final isMe = senderHandle == myHandle || (myNexaId.isNotEmpty && (senderHandle == myNexaId || senderNexaId == myNexaId));
+        final ts = (m['timestamp'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch;
+        final dt = DateTime.fromMillisecondsSinceEpoch(ts);
+        final timeStr = '${dt.hour > 12 ? dt.hour - 12 : (dt.hour == 0 ? 12 : dt.hour)}:${dt.minute.toString().padLeft(2, '0')} ${dt.hour >= 12 ? 'PM' : 'AM'}';
+        final msgId = (m['id'] ?? 'm_${ts}_${merged.length}').toString();
+        final text = (m['text'] ?? '').toString();
+
+        final attId = (m['attachment_id'] ?? m['attachmentId'])?.toString();
+        final attUrl = (m['attachment_url'] ?? m['attachmentUrl'])?.toString();
+        final attType = (m['attachment_type'] ?? m['attachmentType'] ?? m['type'])?.toString();
+        final attName = (m['attachment_name'] ?? m['attachmentName'])?.toString();
+        final locData = m['location_data'] is Map
+            ? Map<String, dynamic>.from(m['location_data'] as Map)
+            : (m['extra'] is Map ? Map<String, dynamic>.from(m['extra'] as Map) : null);
+
+        // Deduplicate unconfirmed outgoing message
+        if (isMe) {
+          final localKeys = merged.entries
+              .where((e) => e.value['isMe'] == true && e.value['text'] == text && e.key.startsWith('m_'))
+              .map((e) => e.key)
+              .toList();
+          for (final k in localKeys) {
+            merged.remove(k);
+          }
+        }
+
+        merged[msgId] = {
+          'id': msgId,
+          'isMe': isMe,
+          'text': text,
+          'time': timeStr,
+          'timestamp': ts,
+          'isAudio': m['type'] == 'voice',
+          'attachmentId': attId,
+          'attachmentUrl': attUrl,
+          'attachmentName': attName,
+          'attachmentType': attType != null && attType != 'text' ? attType : null,
+          'extra': locData ?? m['extra'],
+          'audioDuration': m['audio_duration'] != null && (m['audio_duration'] as num) > 0
+              ? _formatDuration((m['audio_duration'] as num).toInt())
+              : null,
+          'hasAction': false,
+          'actionAdded': false,
+          'actionDismissed': false,
+          'reactions': <String>[],
+        };
+      }
+
+      final sortedList = merged.values.toList();
+      sortedList.sort((a, b) => ((a['timestamp'] as num?)?.toInt() ?? 0).compareTo((b['timestamp'] as num?)?.toInt() ?? 0));
+
+      setState(() {
+        _messages.clear();
+        _messages.addAll(sortedList);
+        _chatState = _messages.isEmpty ? ChatState.empty : ChatState.loaded;
+      });
+      _scrollToBottom();
+      final now = DateTime.now().millisecondsSinceEpoch;
+      ChatService.instance.saveReadTimestamp(_threadKey, now);
+      ChatService.instance.saveLocalMessages(_threadKey, _messages);
+      if (widget.contactName.isNotEmpty) {
+        ChatService.instance.saveReadTimestamp(widget.contactName, now);
+        ChatService.instance.saveLocalMessages(widget.contactName, _messages);
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _errorMessage = e.toString();
+          if (_messages.isEmpty) _chatState = ChatState.error;
+        });
+      }
     }
   }
 
   Future<void> _syncIncomingMessages() async {
-    final history = await ChatService.instance.fetchThread(widget.contactName, peerNexaId: widget.nexaId);
+    List<Map<String, dynamic>> history = [];
+    if (_activeConversationId != null) {
+      final res = await ChatService.instance.fetchConversationMessages(_activeConversationId!);
+      if (res != null && res['messages'] is List) {
+        history = List<Map<String, dynamic>>.from(res['messages'] as List);
+      }
+    }
+    if (history.isEmpty) {
+      history = await ChatService.instance.fetchThread(widget.contactName, peerNexaId: widget.nexaId);
+    }
     if (!mounted || history.isEmpty) return;
 
     final myHandle = UserSession.instance.handle.replaceAll('@', '').toLowerCase();
@@ -201,6 +269,14 @@ class _ChatScreenState extends State<ChatScreen> {
         final senderNexaId = (m['sender_nexa_id'] ?? '').toString().toLowerCase();
         final isMe = senderHandle == myHandle || (myNexaId.isNotEmpty && (senderHandle == myNexaId || senderNexaId == myNexaId));
         final msgText = (m['text'] ?? '').toString();
+
+        final attId = (m['attachment_id'] ?? m['attachmentId'])?.toString();
+        final attUrl = (m['attachment_url'] ?? m['attachmentUrl'])?.toString();
+        final attType = (m['attachment_type'] ?? m['attachmentType'] ?? m['type'])?.toString();
+        final attName = (m['attachment_name'] ?? m['attachmentName'])?.toString();
+        final locData = m['location_data'] is Map
+            ? Map<String, dynamic>.from(m['location_data'] as Map)
+            : (m['extra'] is Map ? Map<String, dynamic>.from(m['extra'] as Map) : null);
 
         // Check if there is an unconfirmed local outgoing message with the same content
         if (isMe) {
@@ -226,7 +302,11 @@ class _ChatScreenState extends State<ChatScreen> {
           'time': timeStr,
           'timestamp': ts,
           'isAudio': m['type'] == 'voice',
-          'attachmentType': m['type'] != null && m['type'] != 'text' ? m['type'] : null,
+          'attachmentId': attId,
+          'attachmentUrl': attUrl,
+          'attachmentName': attName,
+          'attachmentType': attType != null && attType != 'text' ? attType : null,
+          'extra': locData ?? m['extra'],
           'audioDuration': m['audio_duration'] != null && (m['audio_duration'] as num) > 0
               ? _formatDuration((m['audio_duration'] as num).toInt())
               : null,
@@ -242,7 +322,9 @@ class _ChatScreenState extends State<ChatScreen> {
 
     if (addedAny && mounted) {
       _messages.sort((a, b) => ((a['timestamp'] as num?)?.toInt() ?? 0).compareTo((b['timestamp'] as num?)?.toInt() ?? 0));
-      setState(() {});
+      setState(() {
+        _chatState = ChatState.loaded;
+      });
       _scrollToBottom();
       final now = DateTime.now().millisecondsSinceEpoch;
       ChatService.instance.saveReadTimestamp(_threadKey, now);
@@ -319,11 +401,15 @@ class _ChatScreenState extends State<ChatScreen> {
       unread: 0,
     );
 
+    final clientMessageId = 'cl_$ts';
+
     // 3. Transmit to server relay so recipient receives message in real time
     ChatService.instance.sendMessage(
       recipientHandle: widget.contactName,
       recipientNexaId: widget.nexaId,
       text: text,
+      conversationId: _activeConversationId,
+      clientMessageId: clientMessageId,
     );
 
     // Accelerated delivery confirmation polls
@@ -1152,27 +1238,68 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  void _sendAttachment(String type, String title, {String? subtitle, Map<String, dynamic>? extra}) {
+  void _sendAttachment(String type, String title, {String? subtitle, Map<String, dynamic>? extra}) async {
     final now = DateTime.now();
     final ts = now.millisecondsSinceEpoch;
+    final clientMessageId = 'cl_$ts';
     final tod = TimeOfDay.fromDateTime(now);
     final timeStr = '${tod.hourOfPeriod}:${tod.minute.toString().padLeft(2, '0')} ${tod.period == DayPeriod.am ? 'AM' : 'PM'}';
 
+    String? attachmentId;
+    String? attachmentUrl;
+    String? attachmentName;
+    int? attachmentSize;
+
+    // Check if there is a local file to upload to the server
+    final localPath = extra?['path'] as String?;
+    if (localPath != null && File(localPath).existsSync()) {
+      try {
+        final file = File(localPath);
+        final bytes = await file.readAsBytes();
+        final fileName = extra?['name']?.toString() ?? file.uri.pathSegments.last;
+        final mediaType = type.toLowerCase() == 'photo' || type.toLowerCase() == 'image'
+            ? 'image/jpeg'
+            : (type.toLowerCase() == 'document' ? 'application/octet-stream' : 'application/octet-stream');
+
+        final uploadResult = await ChatService.instance.uploadAttachment(
+          name: fileName,
+          mediaType: mediaType,
+          bytes: bytes,
+        );
+        if (uploadResult != null) {
+          attachmentId = uploadResult['attachmentId']?.toString();
+          attachmentUrl = uploadResult['url']?.toString();
+          attachmentName = uploadResult['fileName']?.toString() ?? fileName;
+          attachmentSize = uploadResult['sizeBytes'] is num ? (uploadResult['sizeBytes'] as num).toInt() : bytes.length;
+        }
+      } catch (e) {
+        debugPrint('[Attachment] Upload error: $e');
+      }
+    }
+
+    final messageMap = {
+      'id': 'm_$ts',
+      'clientMessageId': clientMessageId,
+      'conversationId': _activeConversationId,
+      'isMe': true,
+      'attachmentType': type.toLowerCase(),
+      'attachmentId': attachmentId,
+      'attachmentUrl': attachmentUrl,
+      'attachmentName': attachmentName,
+      'attachmentSize': attachmentSize,
+      'text': title,
+      'subtitle': subtitle,
+      'extra': extra,
+      'time': timeStr,
+      'timestamp': ts,
+      'hasAction': false,
+      'actionAdded': false,
+      'actionDismissed': false,
+      'reactions': <String>[],
+    };
+
     setState(() {
-      _messages.add({
-        'id': 'm_$ts',
-        'isMe': true,
-        'attachmentType': type.toLowerCase(),
-        'text': title,
-        'subtitle': subtitle,
-        'extra': extra,
-        'time': timeStr,
-        'timestamp': ts,
-        'hasAction': false,
-        'actionAdded': false,
-        'actionDismissed': false,
-        'reactions': <String>[],
-      });
+      _messages.add(messageMap);
       _messages.sort((a, b) => ((a['timestamp'] as num?)?.toInt() ?? 0).compareTo((b['timestamp'] as num?)?.toInt() ?? 0));
     });
 
@@ -1199,14 +1326,24 @@ class _ChatScreenState extends State<ChatScreen> {
       recipientNexaId: widget.nexaId,
       text: title,
       type: type.toLowerCase(),
+      conversationId: _activeConversationId,
+      clientMessageId: clientMessageId,
+      attachmentId: attachmentId,
+      attachmentUrl: attachmentUrl,
+      attachmentType: type.toLowerCase(),
+      attachmentName: attachmentName,
+      attachmentSize: attachmentSize,
+      locationData: (type.toLowerCase() == 'location' ? extra : null),
     );
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('$type encrypted and sent.'),
-        duration: const Duration(seconds: 2),
-      ),
-    );
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('$type encrypted and sent.'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
   }
 
   void _showAttachmentPanel() {
@@ -1393,7 +1530,11 @@ class _ChatScreenState extends State<ChatScreen> {
         );
       }
     } on MissingPluginException {
-      _openSimulatedCameraModal();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Camera hardware interface is unavailable on this device.')),
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1403,231 +1544,7 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  void _openSimulatedCameraModal() {
-    final TextEditingController captionController = TextEditingController();
-    bool photoCaptured = false;
-    bool isFrontLens = false;
-    String flashMode = 'Auto';
 
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.black,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            return SafeArea(
-              child: Padding(
-                padding: EdgeInsets.only(
-                  bottom: MediaQuery.of(ctx).viewInsets.bottom,
-                ),
-                child: SizedBox(
-                  height: MediaQuery.of(ctx).size.height * 0.75,
-                  child: Column(
-                    children: [
-                      // Top Bar
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            IconButton(
-                              icon: const Icon(Icons.close, color: Colors.white),
-                              onPressed: () => Navigator.pop(ctx),
-                            ),
-                            Row(
-                              children: [
-                                IconButton(
-                                  icon: Icon(
-                                    flashMode == 'On' ? Icons.flash_on : (flashMode == 'Off' ? Icons.flash_off : Icons.flash_auto),
-                                    color: Colors.white,
-                                  ),
-                                  onPressed: () {
-                                    setModalState(() {
-                                      flashMode = flashMode == 'Auto' ? 'On' : (flashMode == 'On' ? 'Off' : 'Auto');
-                                    });
-                                  },
-                                ),
-                                IconButton(
-                                  icon: const Icon(Icons.flip_camera_ios, color: Colors.white),
-                                  onPressed: () {
-                                    setModalState(() {
-                                      isFrontLens = !isFrontLens;
-                                    });
-                                  },
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-
-                      // Viewfinder / Captured Frame
-                      Expanded(
-                        child: Container(
-                          margin: const EdgeInsets.symmetric(horizontal: 16),
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(20),
-                            color: const Color(0xFF1E293B),
-                            border: Border.all(color: Colors.white24),
-                          ),
-                          child: Stack(
-                            alignment: Alignment.center,
-                            children: [
-                              if (!photoCaptured) ...[
-                                // Simulated Camera Sensor Preview
-                                Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(
-                                      isFrontLens ? Icons.face : Icons.camera_alt,
-                                      size: 72,
-                                      color: Colors.white.withValues(alpha: 0.3),
-                                    ),
-                                    const SizedBox(height: 12),
-                                    Text(
-                                      isFrontLens ? 'FRONT SENSOR (16MP HDR)' : 'MAIN SENSOR (48MP OIS)',
-                                      style: const TextStyle(color: Colors.white70, fontSize: 12, letterSpacing: 1.5, fontWeight: FontWeight.bold),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    const Text(
-                                      'Hardware Isolated • Direct Buffer Access',
-                                      style: TextStyle(color: NexaColors.emeraldSecure, fontSize: 11),
-                                    ),
-                                  ],
-                                ),
-                                // Viewfinder Grid Lines
-                                CustomPaint(
-                                  size: Size.infinite,
-                                  painter: _CameraGridPainter(),
-                                ),
-                              ] else ...[
-                                // Captured Photo Preview
-                                Container(
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(20),
-                                    gradient: const LinearGradient(
-                                      colors: [Color(0xFF0284C7), Color(0xFF0F172A)],
-                                      begin: Alignment.topLeft,
-                                      end: Alignment.bottomRight,
-                                    ),
-                                  ),
-                                  child: const Center(
-                                    child: Column(
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      children: [
-                                        Icon(Icons.check_circle_outline, color: NexaColors.emeraldSecure, size: 64),
-                                        SizedBox(height: 12),
-                                        Text('48MP Photo Captured & Encrypted', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-                                        SizedBox(height: 4),
-                                        Text('Encrypted with Pairwise Double Ratchet Key', style: TextStyle(color: Colors.white70, fontSize: 12)),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
-                      ),
-
-                      // Bottom Controls
-                      Padding(
-                        padding: const EdgeInsets.all(20),
-                        child: !photoCaptured
-                            ? Column(
-                                children: [
-                                  GestureDetector(
-                                    onTap: () {
-                                      setModalState(() => photoCaptured = true);
-                                    },
-                                    child: Container(
-                                      width: 72,
-                                      height: 72,
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        border: Border.all(color: Colors.white, width: 4),
-                                      ),
-                                      child: Container(
-                                        margin: const EdgeInsets.all(4),
-                                        decoration: const BoxDecoration(
-                                          shape: BoxShape.circle,
-                                          color: Colors.white,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(height: 10),
-                                  const Text('Tap to snap encrypted photo', style: TextStyle(color: Colors.white70, fontSize: 12)),
-                                ],
-                              )
-                            : Column(
-                                children: [
-                                  TextField(
-                                    controller: captionController,
-                                    style: const TextStyle(color: Colors.white),
-                                    decoration: InputDecoration(
-                                      hintText: 'Add an encrypted caption...',
-                                      hintStyle: const TextStyle(color: Colors.white54),
-                                      filled: true,
-                                      fillColor: const Color(0xFF1E293B),
-                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
-                                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                                    ),
-                                  ),
-                                  const SizedBox(height: 14),
-                                  Row(
-                                    children: [
-                                      Expanded(
-                                        child: OutlinedButton(
-                                          style: OutlinedButton.styleFrom(
-                                            foregroundColor: Colors.white,
-                                            side: const BorderSide(color: Colors.white30),
-                                            padding: const EdgeInsets.symmetric(vertical: 12),
-                                          ),
-                                          onPressed: () => setModalState(() => photoCaptured = false),
-                                          child: const Text('Retake'),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        child: ElevatedButton(
-                                          style: ElevatedButton.styleFrom(
-                                            backgroundColor: NexaColors.primary,
-                                            foregroundColor: Colors.white,
-                                            padding: const EdgeInsets.symmetric(vertical: 12),
-                                          ),
-                                          onPressed: () {
-                                            Navigator.pop(ctx);
-                                            final cap = captionController.text.trim();
-                                            _sendAttachment(
-                                              'Photo',
-                                              cap.isNotEmpty ? cap : '📷 Encrypted Camera Snapshot (48MP)',
-                                              subtitle: '2.8 MB • AES-256-GCM',
-                                              extra: {'size': '2.8 MB', 'tag': 'Camera Photo'},
-                                            );
-                                          },
-                                          child: const Text('Send Photo'),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
 
   // ==========================================
   void _openGalleryPickerModal() async {
@@ -1667,7 +1584,11 @@ class _ChatScreenState extends State<ChatScreen> {
         );
       }
     } on MissingPluginException {
-      _openSimulatedGalleryModal();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Photo gallery interface is unavailable on this device.')),
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1677,114 +1598,7 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  void _openSimulatedGalleryModal() {
-    int selectedIndex = 0;
-    final List<Map<String, String>> sampleImages = [
-      {'title': 'Schematic_PCB_v4.png', 'size': '2.1 MB', 'tag': 'Hardware Lab'},
-      {'title': 'Oscilloscope_DTLS_Trace.jpg', 'size': '1.8 MB', 'tag': 'Telemetry'},
-      {'title': 'Double_Ratchet_KeyEpoch.png', 'size': '940 KB', 'tag': 'Cryptography'},
-      {'title': 'Edge_Node_Deployment.jpg', 'size': '3.4 MB', 'tag': 'Field Photos'},
-      {'title': 'Mesh_Network_Topology.png', 'size': '1.2 MB', 'tag': 'Diagrams'},
-      {'title': 'Quantum_Lattice_Vector.png', 'size': '4.1 MB', 'tag': 'Benchmarks'},
-    ];
 
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: NexaColors.surfaceLight,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            return SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text('Select Photo from Gallery', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: NexaColors.textPrimary)),
-                        IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(ctx)),
-                      ],
-                    ),
-                    const Text('Zero-knowledge encrypted directly in RAM before leaving device', style: TextStyle(color: NexaColors.textSecondary, fontSize: 12)),
-                    const SizedBox(height: 16),
-                    GridView.builder(
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 3,
-                        crossAxisSpacing: 10,
-                        mainAxisSpacing: 10,
-                        childAspectRatio: 0.9,
-                      ),
-                      itemCount: sampleImages.length,
-                      itemBuilder: (context, i) {
-                        final isSel = selectedIndex == i;
-                        final img = sampleImages[i];
-                        return GestureDetector(
-                          onTap: () => setModalState(() => selectedIndex = i),
-                          child: Container(
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: isSel ? NexaColors.primary : NexaColors.borderLight, width: isSel ? 2.5 : 1),
-                              color: NexaColors.elevatedLight,
-                            ),
-                            child: Stack(
-                              children: [
-                                Center(
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Icon(Icons.photo_library, color: isSel ? NexaColors.primary : NexaColors.textMuted, size: 30),
-                                      const SizedBox(height: 4),
-                                      Text(img['tag']!, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: NexaColors.textPrimary)),
-                                      Text(img['size']!, style: const TextStyle(fontSize: 9, color: NexaColors.textMuted)),
-                                    ],
-                                  ),
-                                ),
-                                if (isSel)
-                                  const Positioned(
-                                    top: 6,
-                                    right: 6,
-                                    child: Icon(Icons.check_circle, color: NexaColors.primary, size: 18),
-                                  ),
-                              ],
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                    const SizedBox(height: 18),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        icon: const Icon(Icons.lock, size: 16),
-                        label: Text('Send ${sampleImages[selectedIndex]['title']}'),
-                        onPressed: () {
-                          Navigator.pop(ctx);
-                          final chosen = sampleImages[selectedIndex];
-                          _sendAttachment(
-                            'Image',
-                            '🖼️ ${chosen['title']}',
-                            subtitle: '${chosen['size']} • E2EE Photo',
-                            extra: {'size': chosen['size'], 'tag': chosen['tag']},
-                          );
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
 
   void _openDocumentPickerModal() async {
     final granted = await _requestDevicePermission(
@@ -1817,7 +1631,11 @@ class _ChatScreenState extends State<ChatScreen> {
         );
       }
     } on MissingPluginException {
-      _openSimulatedDocumentModal();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Document storage interface is unavailable on this device.')),
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1825,90 +1643,6 @@ class _ChatScreenState extends State<ChatScreen> {
         );
       }
     }
-  }
-
-  void _openSimulatedDocumentModal() {
-    int selectedIndex = 0;
-    final List<Map<String, String>> docs = [
-      {'name': 'audit_report_2026.pdf', 'size': '1.4 MB', 'type': 'PDF Document'},
-      {'name': 'double_ratchet_paper.pdf', 'size': '3.2 MB', 'type': 'PDF Document'},
-      {'name': 'secp256k1_test_vectors.json', 'size': '480 KB', 'type': 'JSON Dataset'},
-      {'name': 'hardware_schematic_v4.step', 'size': '8.9 MB', 'type': '3D CAD Model'},
-      {'name': 'prekey_bundle_backup.keys', 'size': '64 KB', 'type': 'Crypto Keyring'},
-    ];
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: NexaColors.surfaceLight,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            return SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text('Send Encrypted Document', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: NexaColors.textPrimary)),
-                        IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(ctx)),
-                      ],
-                    ),
-                    const Text('End-to-end encrypted with authenticated AEAD framing', style: TextStyle(color: NexaColors.textSecondary, fontSize: 12)),
-                    const SizedBox(height: 14),
-                    ...List.generate(docs.length, (i) {
-                      final doc = docs[i];
-                      final isSel = selectedIndex == i;
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 8),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: isSel ? NexaColors.primary : NexaColors.borderLight, width: isSel ? 2 : 1),
-                          color: isSel ? NexaColors.primary.withValues(alpha: 0.05) : NexaColors.surfaceLight,
-                        ),
-                        child: ListTile(
-                          leading: Icon(
-                            doc['name']!.endsWith('.pdf') ? Icons.picture_as_pdf : Icons.insert_drive_file,
-                            color: doc['name']!.endsWith('.pdf') ? const Color(0xFFEF4444) : NexaColors.primary,
-                          ),
-                          title: Text(doc['name']!, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                          subtitle: Text('${doc['size']} • ${doc['type']}', style: const TextStyle(fontSize: 12)),
-                          trailing: isSel ? const Icon(Icons.check_circle, color: NexaColors.primary) : null,
-                          onTap: () => setModalState(() => selectedIndex = i),
-                        ),
-                      );
-                    }),
-                    const SizedBox(height: 12),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        icon: const Icon(Icons.lock, size: 16),
-                        label: Text('Send ${docs[selectedIndex]['name']}'),
-                        onPressed: () {
-                          Navigator.pop(ctx);
-                          final chosen = docs[selectedIndex];
-                          _sendAttachment(
-                            'Document',
-                            '📄 ${chosen['name']}',
-                            subtitle: '${chosen['size']} • ${chosen['type']}',
-                            extra: {'size': chosen['size'], 'type': chosen['type']},
-                          );
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
   }
 
   void _openLocationPickerModal() async {
@@ -2702,45 +2436,73 @@ class _ChatScreenState extends State<ChatScreen> {
 
           // Message Stream
           Expanded(
-            child: _messages.isEmpty
-                ? Center(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 32),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(16),
-                            decoration: BoxDecoration(
-                              color: NexaColors.primary.withValues(alpha: 0.1),
-                              shape: BoxShape.circle,
-                            ),
-                            child: const Icon(Icons.lock_clock, color: NexaColors.primary, size: 36),
-                          ),
-                          const SizedBox(height: 16),
-                          Text(
-                            'End-to-End Encrypted Session',
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: NexaColors.textPrimary),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Messages and calls with ${widget.contactName} are end-to-end encrypted with Double Ratchet & hardware isolated keys. No one outside of this chat can read or listen to them.',
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(fontSize: 13, color: NexaColors.textSecondary, height: 1.4),
-                          ),
-                        ],
-                      ),
-                    ),
+            child: _chatState == ChatState.loading
+                ? const Center(
+                    child: CircularProgressIndicator(),
                   )
-                : ListView.builder(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    itemCount: _messages.length,
-                    itemBuilder: (context, index) {
-                      final msg = _messages[index];
-                      return _buildMessageItem(msg);
-                    },
-                  ),
+                : _chatState == ChatState.error
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 32),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.cloud_off, size: 48, color: NexaColors.rubyDestructive),
+                              const SizedBox(height: 12),
+                              Text(
+                                _errorMessage ?? 'Failed to load conversation history',
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(color: NexaColors.textPrimary, fontSize: 14),
+                              ),
+                              const SizedBox(height: 16),
+                              ElevatedButton.icon(
+                                icon: const Icon(Icons.refresh, size: 18),
+                                label: const Text('Retry Connection'),
+                                onPressed: () => _loadThread(),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                    : _messages.isEmpty
+                        ? Center(
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 32),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(16),
+                                    decoration: BoxDecoration(
+                                      color: NexaColors.primary.withValues(alpha: 0.1),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: const Icon(Icons.lock_clock, color: NexaColors.primary, size: 36),
+                                  ),
+                                  const SizedBox(height: 16),
+                                  const Text(
+                                    'No Messages Yet',
+                                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: NexaColors.textPrimary),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'Messages and calls with ${widget.contactName} are end-to-end encrypted with Double Ratchet & hardware isolated keys. No one outside of this chat can read or listen to them.',
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(fontSize: 13, color: NexaColors.textSecondary, height: 1.4),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          )
+                        : ListView.builder(
+                            controller: _scrollController,
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            itemCount: _messages.length,
+                            itemBuilder: (context, index) {
+                              final msg = _messages[index];
+                              return _buildMessageItem(msg);
+                            },
+                          ),
           ),
 
           // Chat Input Bar
@@ -2919,6 +2681,18 @@ class _ChatScreenState extends State<ChatScreen> {
                                         ),
                                       ),
                                     )
+                                  else if (msg['attachmentUrl'] != null && (msg['attachmentUrl'] as String).isNotEmpty)
+                                    Positioned.fill(
+                                      child: Image.network(
+                                        msg['attachmentUrl'].toString().startsWith('http')
+                                            ? msg['attachmentUrl'].toString()
+                                            : '${ChatService.instance.baseUrl}${msg['attachmentUrl']}?raw=1',
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (context, error, stackTrace) => Center(
+                                          child: Icon(Icons.broken_image, size: 48, color: Colors.white.withValues(alpha: 0.35)),
+                                        ),
+                                      ),
+                                    )
                                   else
                                     Container(
                                       decoration: const BoxDecoration(
@@ -3010,44 +2784,74 @@ class _ChatScreenState extends State<ChatScreen> {
                       ],
                     ),
                   ] else if ((msg['attachmentType'] as String?) == 'location') ...[
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(10),
-                          child: Container(
-                            height: 80,
-                            width: double.infinity,
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFE2E8F0),
-                              border: Border.all(color: NexaColors.borderLight),
-                            ),
-                            child: Stack(
-                              alignment: Alignment.center,
-                              children: [
-                                Icon(Icons.map, size: 44, color: Colors.blueGrey.withValues(alpha: 0.25)),
-                                const Icon(Icons.location_on, color: Color(0xFFEF4444), size: 28),
-                                Positioned(
-                                  bottom: 4,
-                                  left: 6,
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                                    decoration: BoxDecoration(
-                                      color: Colors.black.withValues(alpha: 0.6),
-                                      borderRadius: BorderRadius.circular(4),
+                    GestureDetector(
+                      onTap: () {
+                        final lat = msg['extra']?['latitude'] ?? msg['latitude'];
+                        final lng = msg['extra']?['longitude'] ?? msg['longitude'];
+                        if (lat != null && lng != null) {
+                          _nativeMediaChannel.invokeMethod('openUrlInBrowser', {
+                            'url': 'https://maps.google.com/?q=$lat,$lng',
+                          });
+                        }
+                      },
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child: Container(
+                              height: 80,
+                              width: double.infinity,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFE2E8F0),
+                                border: Border.all(color: NexaColors.borderLight),
+                              ),
+                              child: Stack(
+                                alignment: Alignment.center,
+                                children: [
+                                  Icon(Icons.map, size: 44, color: Colors.blueGrey.withValues(alpha: 0.25)),
+                                  const Icon(Icons.location_on, color: Color(0xFFEF4444), size: 28),
+                                  Positioned(
+                                    bottom: 4,
+                                    left: 6,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                      decoration: BoxDecoration(
+                                        color: Colors.black.withValues(alpha: 0.6),
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                      child: const Text('Live GPS • E2EE Pin', style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold)),
                                     ),
-                                    child: const Text('Live GPS • E2EE Pin', style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold)),
                                   ),
-                                ),
-                              ],
+                                  Positioned(
+                                    bottom: 4,
+                                    right: 6,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                      decoration: BoxDecoration(
+                                        color: NexaColors.primary.withValues(alpha: 0.8),
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                      child: const Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(Icons.open_in_new, color: Colors.white, size: 8),
+                                          SizedBox(width: 2),
+                                          Text('Open Map', style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold)),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(text, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: NexaColors.textPrimary)),
-                        const SizedBox(height: 2),
-                        Text(msg['subtitle'] as String? ?? '12.9716° N, 77.5946° E • Accurate to 3m', style: const TextStyle(fontSize: 11, color: NexaColors.textSecondary)),
-                      ],
+                          const SizedBox(height: 6),
+                          Text(text, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: NexaColors.textPrimary)),
+                          const SizedBox(height: 2),
+                          Text(msg['subtitle'] as String? ?? '12.9716° N, 77.5946° E • Accurate to 3m', style: const TextStyle(fontSize: 11, color: NexaColors.textSecondary)),
+                        ],
+                      ),
                     ),
                   ] else if ((msg['attachmentType'] as String?) == 'contact') ...[
                     Row(
@@ -3808,22 +3612,3 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 }
 
-class _CameraGridPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.15)
-      ..strokeWidth = 1;
-
-    // Vertical lines
-    canvas.drawLine(Offset(size.width / 3, 0), Offset(size.width / 3, size.height), paint);
-    canvas.drawLine(Offset(size.width * 2 / 3, 0), Offset(size.width * 2 / 3, size.height), paint);
-
-    // Horizontal lines
-    canvas.drawLine(Offset(0, size.height / 3), Offset(size.width, size.height / 3), paint);
-    canvas.drawLine(Offset(0, size.height * 2 / 3), Offset(size.width, size.height * 2 / 3), paint);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}

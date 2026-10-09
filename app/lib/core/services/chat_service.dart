@@ -17,6 +17,9 @@ class ChatService {
   List<Map<String, dynamic>>? _cachedRecentChats;
   final Map<String, int> _memoryReadState = {};
 
+  /// Active backend base URL for resolving attachment downloads and media assets
+  String get baseUrl => AuthService.instance.currentResolvedUrl ?? 'https://glimmer-messaging-app-web.vercel.app';
+
   /// Returns canonical peer key for safe indexing
   static String getCanonicalKey(String peerIdOrHandle) {
     return peerIdOrHandle.trim().toLowerCase().replaceAll('@', '');
@@ -267,6 +270,7 @@ class ChatService {
   }
 
   /// Send message to a peer by Handle or NEXA ID
+  /// Send message to a peer with strict idempotency, attachments, and location data
   Future<Map<String, dynamic>?> sendMessage({
     required String recipientHandle,
     required String recipientNexaId,
@@ -274,11 +278,21 @@ class ChatService {
     String type = 'text',
     String? audioPath,
     int audioDuration = 0,
+    String? clientMessageId,
+    String? conversationId,
+    String? attachmentId,
+    String? attachmentUrl,
+    String? attachmentType,
+    String? attachmentName,
+    int? attachmentSize,
+    Map<String, dynamic>? locationData,
   }) async {
     final senderHandle = UserSession.instance.handle.replaceAll('@', '');
     final senderNexaId = UserSession.instance.nexaId;
+    final cMsgId = clientMessageId ?? 'cl_${DateTime.now().millisecondsSinceEpoch}_${(1000 + (DateTime.now().microsecond % 9000))}';
 
-    final body = {
+    final Map<String, dynamic> body = {
+      'client_message_id': cMsgId,
       'sender_handle': senderHandle,
       'sender_nexa_id': senderNexaId,
       'recipient_handle': recipientHandle.replaceAll('@', ''),
@@ -289,6 +303,13 @@ class ChatService {
       'audio_duration': audioDuration,
       'timestamp': DateTime.now().millisecondsSinceEpoch,
     };
+    if (conversationId != null) body['conversation_id'] = conversationId;
+    if (attachmentId != null) body['attachment_id'] = attachmentId;
+    if (attachmentUrl != null) body['attachment_url'] = attachmentUrl;
+    if (attachmentType != null) body['attachment_type'] = attachmentType;
+    if (attachmentName != null) body['attachment_name'] = attachmentName;
+    if (attachmentSize != null) body['attachment_size'] = attachmentSize;
+    if (locationData != null) body['location_data'] = locationData;
 
     try {
       final res = await AuthService.instance.postJson('/v1/messages/send', body);
@@ -299,6 +320,117 @@ class ChatService {
       debugPrint('[ChatService] sendMessage error: $e');
     }
     return null;
+  }
+
+  /// Atomically resolve or create canonical direct conversation with peer
+  Future<Map<String, dynamic>?> getOrCreateDirectConversation(String peerHandleOrNexaId, {String? peerNexaId}) async {
+    final myHandle = UserSession.instance.handle.replaceAll('@', '');
+    final myNexaId = UserSession.instance.nexaId;
+    final cleanPeer = peerHandleOrNexaId.replaceAll('@', '');
+    final pNexaId = peerNexaId ?? (peerHandleOrNexaId.toUpperCase().startsWith('NX-') ? peerHandleOrNexaId : '');
+
+    final body = {
+      'sender_handle': myHandle,
+      'sender_nexa_id': myNexaId,
+      'recipient_handle': cleanPeer,
+      'recipient_nexa_id': pNexaId,
+    };
+
+    try {
+      final res = await AuthService.instance.postJson('/v1/conversations/direct', body);
+      if (res != null && res['success'] == true) {
+        return res['conversation'] as Map<String, dynamic>?;
+      }
+    } catch (e) {
+      debugPrint('[ChatService] getOrCreateDirectConversation error: $e');
+    }
+    return null;
+  }
+
+  /// Retrieve all server-persisted conversations for the current user
+  Future<List<Map<String, dynamic>>> fetchConversations() async {
+    final myIdent = UserSession.instance.nexaId.isNotEmpty ? UserSession.instance.nexaId : UserSession.instance.handle.replaceAll('@', '');
+    if (myIdent.isEmpty) return [];
+
+    try {
+      final baseUrl = await AuthService.instance.getBaseUrl();
+      final uri = Uri.parse('$baseUrl/v1/conversations?user=${Uri.encodeComponent(myIdent)}');
+      final res = await AuthService.instance.getJson(uri);
+      if (res != null && res['conversations'] is List) {
+        return List<Map<String, dynamic>>.from(res['conversations'] as List);
+      }
+    } catch (e) {
+      debugPrint('[ChatService] fetchConversations error: $e');
+    }
+    return [];
+  }
+
+  /// Retrieve messages for a canonical conversation with cursor pagination & verification
+  Future<Map<String, dynamic>?> fetchConversationMessages(String conversationId, {int limit = 50, int? cursor}) async {
+    final myIdent = UserSession.instance.nexaId.isNotEmpty ? UserSession.instance.nexaId : UserSession.instance.handle.replaceAll('@', '');
+    try {
+      final baseUrl = await AuthService.instance.getBaseUrl();
+      var uriStr = '$baseUrl/v1/conversations/$conversationId/messages?limit=$limit&user=${Uri.encodeComponent(myIdent)}';
+      if (cursor != null) {
+        uriStr += '&cursor=$cursor';
+      }
+      final uri = Uri.parse(uriStr);
+      final res = await AuthService.instance.getJson(uri);
+      if (res != null && res['success'] == true) {
+        return res;
+      }
+    } catch (e) {
+      debugPrint('[ChatService] fetchConversationMessages error: $e');
+    }
+    return null;
+  }
+
+  /// Upload an attachment to object storage
+  Future<Map<String, dynamic>?> uploadAttachment({
+    required String name,
+    required String mediaType,
+    required List<int> bytes,
+  }) async {
+    final myIdent = UserSession.instance.handle.isNotEmpty ? UserSession.instance.handle : UserSession.instance.nexaId;
+    final b64 = base64Encode(bytes);
+    final body = {
+      'name': name,
+      'media_type': mediaType,
+      'data_base64': b64,
+      'size_bytes': bytes.length,
+      'uploader': myIdent,
+    };
+
+    try {
+      final res = await AuthService.instance.postJson('/v1/attachments/upload', body);
+      if (res != null && res['success'] == true) {
+        return res['attachment'] as Map<String, dynamic>?;
+      }
+    } catch (e) {
+      debugPrint('[ChatService] uploadAttachment error: $e');
+    }
+    return null;
+  }
+
+  /// Register device push notification token
+  Future<bool> registerPushToken(String token, {String platform = 'android', String deviceId = 'default'}) async {
+    final myIdent = UserSession.instance.nexaId.isNotEmpty ? UserSession.instance.nexaId : UserSession.instance.handle.replaceAll('@', '');
+    if (myIdent.isEmpty || token.isEmpty) return false;
+
+    final body = {
+      'user': myIdent,
+      'device_id': deviceId,
+      'push_token': token,
+      'platform': platform,
+    };
+
+    try {
+      final res = await AuthService.instance.postJson('/v1/devices/push-token', body);
+      return res != null && res['success'] == true;
+    } catch (e) {
+      debugPrint('[ChatService] registerPushToken error: $e');
+      return false;
+    }
   }
 
   /// Fetch conversation thread between the logged-in user and a peer

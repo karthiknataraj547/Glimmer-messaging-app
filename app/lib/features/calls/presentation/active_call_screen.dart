@@ -100,27 +100,37 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> with SingleTickerPr
     }
   }
 
+  int _ringingTimeoutSeconds = 0;
+
   void _initiateOutgoingSignaling() {
-    // Transition connecting -> ringing after 600ms
+    // Transition connecting -> ringing after authentic signaling handshake
     Timer(const Duration(milliseconds: 600), () {
       if (!mounted || _status == CallStatus.ended) return;
       setState(() => _status = CallStatus.ringing);
 
       if (widget.callId != null) {
+        _signalingTimer?.cancel();
         _signalingTimer = Timer.periodic(const Duration(seconds: 1), (_) => _checkCallState());
       } else {
-        // Fallback simulation timer if callId was not supplied
-        Timer(const Duration(milliseconds: 2200), () {
-          if (!mounted || _status == CallStatus.ended) return;
-          HapticFeedback.mediumImpact();
-          _startConnectedTimers();
-        });
+        // Without a valid server callId, terminate rather than simulating fake connection
+        setState(() => _status = CallStatus.ended);
       }
     });
   }
 
   Future<void> _checkCallState() async {
     if (!mounted || widget.callId == null) return;
+    _ringingTimeoutSeconds++;
+
+    // Real timeout: 45 seconds of unanswered ringing
+    if (_status == CallStatus.ringing && _ringingTimeoutSeconds >= 45) {
+      _signalingTimer?.cancel();
+      if (mounted) {
+        setState(() => _status = CallStatus.ended);
+      }
+      return;
+    }
+
     try {
       final baseUrl = await AuthService.instance.getBaseUrl();
       final uri = Uri.parse('$baseUrl/v1/calls/session/${widget.callId}');
@@ -142,7 +152,11 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> with SingleTickerPr
             if (mounted) Navigator.pop(context);
           });
         } else if (remoteStatus == 'ended' && _status != CallStatus.ended) {
-          _endCall(notifyServer: false);
+          _signalingTimer?.cancel();
+          setState(() => _status = CallStatus.ended);
+          Future.delayed(const Duration(milliseconds: 1400), () {
+            if (mounted) Navigator.pop(context);
+          });
         }
       }
     } catch (_) {}

@@ -26,10 +26,13 @@ const DB_TEMP_FILE = path.join(DB_DIR, 'nexa_database.tmp');
 let dbState = {
   users: {},           // username (lowercase) -> UserRecord
   user_devices: {},    // userId -> { deviceId -> DeviceRecord }
+  device_push_tokens: {}, // canonicalUserId -> { deviceId: { push_token, platform, updated_at } }
   prekey_bundles: {},  // `${userId}:${deviceId}` -> BundleRecord
   mailbox_queue: {},   // deviceId -> [Envelope]
   activity_logs: [],   // [AuditLogEntry]
   messages: [],
+  conversations: {},   // conversationId -> ConversationRecord
+  attachments: {},     // attachmentId -> AttachmentRecord
   user_locations: {},
   calls: {},
   app_version: {
@@ -82,14 +85,17 @@ function loadFromDisk() {
       if (parsed && typeof parsed === 'object') {
         dbState.users = parsed.users || {};
         dbState.user_devices = parsed.user_devices || {};
+        dbState.device_push_tokens = parsed.device_push_tokens || {};
         dbState.prekey_bundles = parsed.prekey_bundles || {};
         dbState.mailbox_queue = parsed.mailbox_queue || {};
         dbState.activity_logs = parsed.activity_logs || [];
         dbState.messages = parsed.messages || [];
+        dbState.conversations = parsed.conversations || {};
+        dbState.attachments = parsed.attachments || {};
         dbState.calls = parsed.calls || {};
         dbState.app_version = parsed.app_version || dbState.app_version;
         dbState.meta = parsed.meta || dbState.meta;
-        console.log(`[NEXA DB] Loaded persistent database (${Object.keys(dbState.users).length} registered users).`);
+        console.log(`[NEXA DB] Loaded persistent database (${Object.keys(dbState.users).length} registered users, ${Object.keys(dbState.conversations).length} conversations).`);
       }
     } else {
       saveToDiskSync();
@@ -192,6 +198,31 @@ async function syncFromCloud(force = false) {
             }
           }
         }
+        if (remote.conversations && typeof remote.conversations === 'object') {
+          if (!dbState.conversations) dbState.conversations = {};
+          for (const [k, v] of Object.entries(remote.conversations)) {
+            if (!dbState.conversations[k] || (v.updated_at && v.updated_at >= (dbState.conversations[k].updated_at || 0))) {
+              dbState.conversations[k] = v;
+              changed = true;
+            }
+          }
+        }
+        if (remote.device_push_tokens && typeof remote.device_push_tokens === 'object') {
+          if (!dbState.device_push_tokens) dbState.device_push_tokens = {};
+          for (const [k, v] of Object.entries(remote.device_push_tokens)) {
+            dbState.device_push_tokens[k] = Object.assign(dbState.device_push_tokens[k] || {}, v);
+            changed = true;
+          }
+        }
+        if (remote.attachments && typeof remote.attachments === 'object') {
+          if (!dbState.attachments) dbState.attachments = {};
+          for (const [k, v] of Object.entries(remote.attachments)) {
+            if (!dbState.attachments[k]) {
+              dbState.attachments[k] = v;
+              changed = true;
+            }
+          }
+        }
         lastCloudSyncTime = Date.now();
         if (changed) {
           saveToDiskSync();
@@ -208,12 +239,15 @@ async function syncToCloud() {
     const body = JSON.stringify({
       users: dbState.users,
       user_devices: dbState.user_devices,
+      device_push_tokens: dbState.device_push_tokens || {},
       user_locations: dbState.user_locations || {},
       prekey_bundles: dbState.prekey_bundles,
       mailbox_queue: dbState.mailbox_queue,
       activity_logs: (dbState.activity_logs || []).slice(0, 100),
       meta: dbState.meta,
-      messages: (dbState.messages || []).slice(-100),
+      messages: (dbState.messages || []).slice(-200),
+      conversations: dbState.conversations || {},
+      attachments: dbState.attachments || {},
       app_version: dbState.app_version
     });
     const res = await fetch(CLOUD_BIN_URL, {
@@ -938,9 +972,213 @@ const Database = {
   /**
    * Store a message in persistent database with identity canonicalization
    */
+  /**
+   * Canonical User Identity Resolver
+   */
+  resolveCanonicalUserId(identifier) {
+    if (!identifier || typeof identifier !== 'string') return '';
+    const u = this.resolveUser(identifier);
+    if (u && u.nexa_id) return u.nexa_id.toUpperCase();
+    if (u && u.username) return u.username.toLowerCase();
+    const raw = identifier.trim().replace(/^@+/, '');
+    return raw.toUpperCase().startsWith('NX-') ? raw.toUpperCase() : raw.toLowerCase();
+  },
+
+  /**
+   * Deterministic Canonical Direct Conversation ID:
+   * (min(userA, userB), max(userA, userB)) strictly eliminates duplicate conversations.
+   */
+  getCanonicalDirectConversationId(userA, userB) {
+    const cA = this.resolveCanonicalUserId(userA);
+    const cB = this.resolveCanonicalUserId(userB);
+    if (!cA || !cB) return null;
+    const sorted = [cA, cB].sort();
+    return `direct_${sorted[0]}_${sorted[1]}`;
+  },
+
+  /**
+   * Atomically Find or Create Canonical Direct Conversation
+   */
+  findOrCreateDirectConversation(userA, userB) {
+    loadFromDisk();
+    if (!dbState.conversations) dbState.conversations = {};
+
+    const cA = this.resolveCanonicalUserId(userA);
+    const cB = this.resolveCanonicalUserId(userB);
+    if (!cA || !cB) return null;
+
+    const convId = this.getCanonicalDirectConversationId(cA, cB);
+    if (!convId) return null;
+
+    if (dbState.conversations[convId]) {
+      return dbState.conversations[convId];
+    }
+
+    const uA = this.resolveUser(cA);
+    const uB = this.resolveUser(cB);
+
+    const conv = {
+      id: convId,
+      type: 'direct',
+      participants: [cA, cB],
+      participant_profiles: {
+        [cA]: {
+          nexa_id: uA ? uA.nexa_id : (cA.startsWith('NX-') ? cA : `NX-${cA.toUpperCase()}`),
+          username: uA ? uA.username : cA.toLowerCase(),
+          handle: `@${uA ? uA.username : cA.toLowerCase()}`,
+          full_name: uA ? (uA.full_name || uA.username) : cA,
+          avatar_url: uA ? uA.avatar_url : null
+        },
+        [cB]: {
+          nexa_id: uB ? uB.nexa_id : (cB.startsWith('NX-') ? cB : `NX-${cB.toUpperCase()}`),
+          username: uB ? uB.username : cB.toLowerCase(),
+          handle: `@${uB ? uB.username : cB.toLowerCase()}`,
+          full_name: uB ? (uB.full_name || uB.username) : cB,
+          avatar_url: uB ? uB.avatar_url : null
+        }
+      },
+      created_at: Date.now(),
+      updated_at: Date.now(),
+      last_message: null
+    };
+
+    dbState.conversations[convId] = conv;
+    saveToDiskSync();
+    syncToCloud().catch(() => {});
+    return conv;
+  },
+
+  /**
+   * Retrieve all server-persisted conversations for an authenticated user
+   */
+  getConversationsForUser(userIdent) {
+    loadFromDisk();
+    if (!dbState.conversations) dbState.conversations = {};
+    const cUser = this.resolveCanonicalUserId(userIdent);
+    if (!cUser) return [];
+
+    const userAliases = this.getUserAliases(userIdent);
+    userAliases.add(cUser.toLowerCase());
+
+    const result = [];
+    for (const conv of Object.values(dbState.conversations)) {
+      if (!conv || !Array.isArray(conv.participants)) continue;
+      const isParticipant = conv.participants.some(p => {
+        const pCanon = (p || '').toLowerCase();
+        return userAliases.has(pCanon) || pCanon === cUser.toLowerCase();
+      });
+
+      if (!isParticipant) continue;
+
+      // Identify peer participant
+      const peerCanon = conv.participants.find(p => (p || '').toLowerCase() !== cUser.toLowerCase()) || conv.participants[0];
+      const peerProfile = (conv.participant_profiles && conv.participant_profiles[peerCanon]) || {
+        nexa_id: peerCanon,
+        handle: `@${peerCanon}`,
+        full_name: peerCanon
+      };
+
+      // Retrieve messages belonging to this canonical conversation
+      const threadHistory = this.getConversationMessages(conv.id, { limit: 100 }).messages;
+      const unreadCount = threadHistory.filter(m => {
+        const rH = (m.recipient_handle || '').toLowerCase().replace(/^@+/, '');
+        const rId = (m.recipient_nexa_id || '').toLowerCase();
+        return (userAliases.has(rH) || userAliases.has(rId)) && m.status === 'pending';
+      }).length;
+
+      const lastMsg = threadHistory.length > 0 ? threadHistory[threadHistory.length - 1] : conv.last_message;
+
+      result.push({
+        id: conv.id,
+        type: conv.type,
+        peer_name: peerProfile.full_name || peerProfile.username || peerProfile.handle,
+        peer_handle: peerProfile.handle || `@${peerProfile.username}`,
+        peer_nexa_id: peerProfile.nexa_id,
+        peer_avatar: peerProfile.avatar_url || null,
+        unread_count: unreadCount,
+        last_message: lastMsg ? {
+          text: lastMsg.text,
+          type: lastMsg.type,
+          timestamp: lastMsg.timestamp,
+          sender_handle: lastMsg.sender_handle
+        } : null,
+        updated_at: conv.updated_at || (lastMsg ? lastMsg.timestamp : conv.created_at)
+      });
+    }
+
+    return result.sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0));
+  },
+
+  /**
+   * Retrieve messages for a canonical conversation with cursor pagination & membership verification
+   */
+  getConversationMessages(conversationId, options = {}) {
+    loadFromDisk();
+    if (!dbState.messages) dbState.messages = [];
+    const limit = Math.min(Number(options.limit) || 50, 100);
+    const cursor = options.cursor ? Number(options.cursor) : null;
+    const requestingUser = options.requestingUser ? this.resolveCanonicalUserId(options.requestingUser) : null;
+
+    let conv = dbState.conversations ? dbState.conversations[conversationId] : null;
+    if (requestingUser && conv && Array.isArray(conv.participants)) {
+      const isMember = conv.participants.some(p => (p || '').toLowerCase() === requestingUser.toLowerCase());
+      if (!isMember) {
+        throw new Error('UNAUTHORIZED_CONVERSATION_MEMBER');
+      }
+    }
+
+    let msgs = dbState.messages.filter(m => {
+      if (m.conversation_id === conversationId) return true;
+      if (conv && Array.isArray(conv.participants) && conv.participants.length === 2) {
+        const p1Aliases = this.getUserAliases(conv.participants[0]);
+        const p2Aliases = this.getUserAliases(conv.participants[1]);
+        const sH = (m.sender_handle || '').toLowerCase().replace(/^@+/, '');
+        const sId = (m.sender_nexa_id || '').toLowerCase();
+        const rH = (m.recipient_handle || '').toLowerCase().replace(/^@+/, '');
+        const rId = (m.recipient_nexa_id || '').toLowerCase();
+        const sIs1 = p1Aliases.has(sH) || p1Aliases.has(sId);
+        const rIs2 = p2Aliases.has(rH) || p2Aliases.has(rId);
+        const sIs2 = p2Aliases.has(sH) || p2Aliases.has(sId);
+        const rIs1 = p1Aliases.has(rH) || p1Aliases.has(rId);
+        if ((sIs1 && rIs2) || (sIs2 && rIs1)) {
+          m.conversation_id = conversationId;
+          return true;
+        }
+      }
+      return false;
+    });
+
+    msgs.sort((a, b) => a.timestamp - b.timestamp);
+
+    if (cursor) {
+      msgs = msgs.filter(m => m.timestamp < cursor);
+    }
+
+    const hasMore = msgs.length > limit;
+    const paged = msgs.slice(-limit);
+    const nextCursor = paged.length > 0 ? paged[0].timestamp : null;
+
+    return {
+      messages: paged,
+      has_more: hasMore,
+      next_cursor: nextCursor
+    };
+  },
+
+  /**
+   * Save message with strict idempotency, canonical conversation association, and attachment/location support
+   */
   saveMessage(msg) {
     loadFromDisk();
     if (!dbState.messages) dbState.messages = [];
+
+    // Idempotency: Deduplicate repeated submissions using client_message_id
+    if (msg.client_message_id) {
+      const existing = dbState.messages.find(m => m.client_message_id === msg.client_message_id);
+      if (existing) {
+        return { ...existing, is_duplicate: true };
+      }
+    }
 
     const rawSender = (msg.sender_handle || '').trim();
     const rawSenderId = (msg.sender_nexa_id || '').trim();
@@ -957,8 +1195,14 @@ const Database = {
     const recipientHandle = recipientUser ? recipientUser.username.toLowerCase() : rawRecipient.replace(/^@+/, '').toLowerCase();
     const recipientNexaId = recipientUser ? recipientUser.nexa_id : (rawRecipientId || (recipientHandle.toUpperCase().startsWith('NX-') ? recipientHandle.toUpperCase() : `NX-${recipientHandle.toUpperCase()}`));
 
+    // 3. Resolve or create canonical direct conversation
+    const conv = this.findOrCreateDirectConversation(senderNexaId || senderHandle, recipientNexaId || recipientHandle);
+    const convId = (conv && conv.id) || this.getCanonicalDirectConversationId(senderNexaId || senderHandle, recipientNexaId || recipientHandle) || 'direct_general';
+
     const record = {
       id: msg.id || `msg_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+      client_message_id: msg.client_message_id || null,
+      conversation_id: convId,
       sender_handle: senderHandle,
       sender_nexa_id: senderNexaId,
       recipient_handle: recipientHandle,
@@ -967,6 +1211,12 @@ const Database = {
       type: msg.type || 'text',
       audio_path: msg.audio_path || null,
       audio_duration: msg.audio_duration || 0,
+      attachment_id: msg.attachment_id || null,
+      attachment_url: msg.attachment_url || null,
+      attachment_type: msg.attachment_type || null,
+      attachment_name: msg.attachment_name || null,
+      attachment_size: msg.attachment_size || null,
+      location_data: msg.location_data || null,
       status: 'pending',
       delivered_at: null,
       timestamp: Number(msg.timestamp) || Date.now(),
@@ -974,6 +1224,12 @@ const Database = {
     };
 
     dbState.messages.push(record);
+
+    if (conv && dbState.conversations && dbState.conversations[convId]) {
+      dbState.conversations[convId].updated_at = record.timestamp;
+      dbState.conversations[convId].last_message = record;
+    }
+
     this.cleanupMessages();
     saveToDiskSync();
     syncToCloud().catch(() => {});
@@ -1088,7 +1344,84 @@ const Database = {
   },
 
   /**
-   * Call Session Engine (Voice & Video Call Signaling)
+   * Attachments & Object Storage Engine
+   */
+  saveAttachment(attachmentData) {
+    loadFromDisk();
+    if (!dbState.attachments) dbState.attachments = {};
+    const attId = attachmentData.id || `att_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+    const record = {
+      id: attId,
+      media_type: attachmentData.media_type || 'application/octet-stream',
+      size_bytes: Number(attachmentData.size_bytes) || 0,
+      checksum: attachmentData.checksum || null,
+      name: attachmentData.name || 'attachment',
+      uploader: attachmentData.uploader || 'anonymous',
+      data_base64: attachmentData.data_base64 || null,
+      created_at: Date.now()
+    };
+    dbState.attachments[attId] = record;
+    saveToDiskSync();
+    syncToCloud().catch(() => {});
+    return {
+      id: record.id,
+      media_type: record.media_type,
+      size_bytes: record.size_bytes,
+      checksum: record.checksum,
+      name: record.name,
+      download_url: `/v1/attachments/${record.id}`
+    };
+  },
+
+  getAttachment(attId) {
+    loadFromDisk();
+    if (!dbState.attachments) return null;
+    return dbState.attachments[attId] || null;
+  },
+
+  /**
+   * Device Push Tokens Management (FCM / APNs / Desktop)
+   */
+  registerPushToken(userIdent, deviceId, pushToken, platform = 'android') {
+    loadFromDisk();
+    if (!dbState.device_push_tokens) dbState.device_push_tokens = {};
+    const cUser = this.resolveCanonicalUserId(userIdent);
+    if (!cUser || !pushToken) return false;
+
+    if (!dbState.device_push_tokens[cUser]) {
+      dbState.device_push_tokens[cUser] = {};
+    }
+    dbState.device_push_tokens[cUser][deviceId || 'default'] = {
+      push_token: pushToken,
+      platform: platform || 'android',
+      updated_at: Date.now()
+    };
+    saveToDiskSync();
+    syncToCloud().catch(() => {});
+    return true;
+  },
+
+  unregisterPushToken(userIdent, deviceId) {
+    loadFromDisk();
+    if (!dbState.device_push_tokens) return false;
+    const cUser = this.resolveCanonicalUserId(userIdent);
+    if (!cUser || !dbState.device_push_tokens[cUser]) return false;
+    delete dbState.device_push_tokens[cUser][deviceId || 'default'];
+    saveToDiskSync();
+    syncToCloud().catch(() => {});
+    return true;
+  },
+
+  getPushTokensForUser(userIdent) {
+    loadFromDisk();
+    if (!dbState.device_push_tokens) return [];
+    const cUser = this.resolveCanonicalUserId(userIdent);
+    if (!cUser || !dbState.device_push_tokens[cUser]) return [];
+    return Object.values(dbState.device_push_tokens[cUser]);
+  },
+
+  /**
+   * Call Session Engine (WebRTC Signaling with SDP offer/answer & ICE candidates)
    */
   createCallSession(data) {
     loadFromDisk();
@@ -1103,6 +1436,9 @@ const Database = {
       recipient_nexa_id: data.recipient_nexa_id || '',
       call_type: data.call_type || 'voice', // 'video' | 'voice'
       status: 'ringing', // 'ringing', 'connected', 'declined', 'ended'
+      sdp_offer: data.sdp_offer || null,
+      sdp_answer: null,
+      candidates: [],
       created_at: Date.now(),
       updated_at: Date.now()
     };
@@ -1128,14 +1464,40 @@ const Database = {
     return null;
   },
 
-  answerCallSession(callId, accepted) {
+  answerCallSession(callId, accepted, sdpAnswer = null) {
     loadFromDisk();
     if (!dbState.calls || !dbState.calls[callId]) return null;
     const session = dbState.calls[callId];
     session.status = accepted ? 'connected' : 'declined';
+    if (accepted && sdpAnswer) {
+      session.sdp_answer = sdpAnswer;
+    }
     session.updated_at = Date.now();
     saveToDiskSync();
     return session;
+  },
+
+  addCallCandidate(callId, candidate, senderIdent) {
+    loadFromDisk();
+    if (!dbState.calls || !dbState.calls[callId]) return false;
+    if (!dbState.calls[callId].candidates) {
+      dbState.calls[callId].candidates = [];
+    }
+    dbState.calls[callId].candidates.push({
+      candidate,
+      sender: senderIdent,
+      timestamp: Date.now()
+    });
+    saveToDiskSync();
+    return true;
+  },
+
+  getCallCandidates(callId, sinceIndex = 0) {
+    loadFromDisk();
+    if (!dbState.calls || !dbState.calls[callId] || !Array.isArray(dbState.calls[callId].candidates)) {
+      return [];
+    }
+    return dbState.calls[callId].candidates.slice(Number(sinceIndex) || 0);
   },
 
   endCallSession(callId) {
