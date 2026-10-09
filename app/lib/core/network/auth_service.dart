@@ -49,7 +49,7 @@ class AuthService {
     checkHealthAsync();
   }
 
-  /// Returns ordered candidates: custom first, web origin (if browser), then resolved, then defaults
+  /// Returns ordered candidates: custom first, web origin (if browser), production Vercel cloud, then local fallbacks
   List<String> getAllCandidateUrls() {
     final list = <String>[];
     if (_customServerUrl != null && _customServerUrl!.isNotEmpty) {
@@ -58,10 +58,14 @@ class AuthService {
     if (kIsWeb) {
       try {
         final origin = Uri.base.origin;
-        if (origin.isNotEmpty && !origin.startsWith('file:') && !list.contains(origin)) {
+        if (origin.isNotEmpty && !origin.startsWith('file:') && origin.startsWith('http') && !list.contains(origin)) {
           list.add(origin);
         }
       } catch (_) {}
+    }
+    const productionUrl = 'https://glimmer-messaging-app-web.vercel.app';
+    if (!list.contains(productionUrl)) {
+      list.add(productionUrl);
     }
     if (_resolvedBaseUrl != null && !list.contains(_resolvedBaseUrl)) {
       list.add(_resolvedBaseUrl!);
@@ -137,39 +141,48 @@ class AuthService {
     });
   }
 
-  /// Resolves the first active and reachable backend URL using fast concurrent probing
+  /// Resolves the active backend URL, prioritizing the single official production cloud gateway
   Future<String> getBaseUrl({bool forceRecheck = false}) async {
     if (!forceRecheck && _resolvedBaseUrl != null) return _resolvedBaseUrl!;
 
-    final candidateList = getAllCandidateUrls();
-
-    // Fast probing across candidate list
-    final completer = Completer<String>();
-    int pending = candidateList.length;
-
-    for (final candidate in candidateList) {
-      testServerHealth(candidate).then((isHealthy) {
-        if (isHealthy && !completer.isCompleted) {
-          _resolvedBaseUrl = candidate;
-          completer.complete(candidate);
-        } else {
-          pending--;
-          if (pending == 0 && !completer.isCompleted) {
-            completer.complete(candidateList.first);
-          }
-        }
-      }).catchError((_) {
-        pending--;
-        if (pending == 0 && !completer.isCompleted) {
-          completer.complete(candidateList.first);
-        }
-      });
+    // 1. Explicit custom server override from settings
+    if (_customServerUrl != null && _customServerUrl!.isNotEmpty) {
+      if (await testServerHealth(_customServerUrl!)) {
+        _resolvedBaseUrl = _customServerUrl;
+        return _resolvedBaseUrl!;
+      }
     }
 
-    _resolvedBaseUrl = await completer.future.timeout(
-      const Duration(seconds: 5),
-      onTimeout: () => candidateList.first,
-    );
+    // 2. Web browser origin if running on Web
+    if (kIsWeb) {
+      try {
+        final origin = Uri.base.origin;
+        if (origin.isNotEmpty && !origin.startsWith('file:') && origin.startsWith('http')) {
+          if (await testServerHealth(origin)) {
+            _resolvedBaseUrl = origin;
+            return _resolvedBaseUrl!;
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 3. Official Single Cloud Production Gateway (Vercel)
+    const productionUrl = 'https://glimmer-messaging-app-web.vercel.app';
+    if (await testServerHealth(productionUrl)) {
+      _resolvedBaseUrl = productionUrl;
+      return _resolvedBaseUrl!;
+    }
+
+    // 4. Local / LAN network fallbacks if offline from public internet
+    for (final candidate in _defaultCandidateUrls) {
+      if (candidate == productionUrl) continue;
+      if (await testServerHealth(candidate)) {
+        _resolvedBaseUrl = candidate;
+        return _resolvedBaseUrl!;
+      }
+    }
+
+    _resolvedBaseUrl = productionUrl;
     return _resolvedBaseUrl!;
   }
 
@@ -350,14 +363,44 @@ class AuthService {
     final candidates = getAllCandidateUrls();
     for (final base in candidates) {
       try {
-        final uri = Uri.parse('$base/v1/auth/users');
-        final response = await http.get(uri).timeout(const Duration(seconds: 6));
+        // Try /v1/auth/users first
+        var uri = Uri.parse('$base/v1/auth/users');
+        var response = await http.get(uri).timeout(const Duration(seconds: 6));
+        if (response.statusCode != 200) {
+          // Fallback to /v1/directory/users
+          uri = Uri.parse('$base/v1/directory/users');
+          response = await http.get(uri).timeout(const Duration(seconds: 6));
+        }
         if (response.statusCode == 200) {
           _resolvedBaseUrl = base;
           isConnectedNotifier.value = true;
           final data = jsonDecode(response.body) as Map<String, dynamic>;
           final list = (data['users'] as List?)?.map((u) => u as Map<String, dynamic>).toList();
-          return list ?? [];
+          if (list != null && list.isNotEmpty) return list;
+        }
+      } catch (_) {
+        continue;
+      }
+    }
+    return [];
+  }
+
+  /// Searches the online database for registered users matching handle, NEXA ID, name, or phone
+  Future<List<Map<String, dynamic>>> searchUsersOnline(String rawQuery) async {
+    final clean = rawQuery.trim().replaceFirst(RegExp(r'^@+'), '');
+    if (clean.isEmpty) return [];
+
+    final candidates = getAllCandidateUrls();
+    for (final base in candidates) {
+      try {
+        final uri = Uri.parse('$base/v1/users/lookup?q=${Uri.encodeComponent(clean)}');
+        final response = await http.get(uri).timeout(const Duration(seconds: 5));
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body) as Map<String, dynamic>;
+          if (data['users'] is List) {
+            final list = List<Map<String, dynamic>>.from(data['users'] as List);
+            return list;
+          }
         }
       } catch (_) {
         continue;

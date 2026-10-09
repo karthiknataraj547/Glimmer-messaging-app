@@ -350,6 +350,34 @@ class MainActivity : FlutterActivity() {
                         result.success(false)
                     }
                 }
+                "saveSession" -> {
+                    try {
+                        val sessionJson = call.argument<String>("session") ?: ""
+                        val prefs = getSharedPreferences("nexa_user_session", android.content.Context.MODE_PRIVATE)
+                        prefs.edit().putString("session_data", sessionJson).apply()
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("ERROR", "Failed to save session: ${e.message}", null)
+                    }
+                }
+                "loadSession" -> {
+                    try {
+                        val prefs = getSharedPreferences("nexa_user_session", android.content.Context.MODE_PRIVATE)
+                        val sessionJson = prefs.getString("session_data", null)
+                        result.success(sessionJson)
+                    } catch (e: Exception) {
+                        result.success(null)
+                    }
+                }
+                "clearSession" -> {
+                    try {
+                        val prefs = getSharedPreferences("nexa_user_session", android.content.Context.MODE_PRIVATE)
+                        prefs.edit().remove("session_data").apply()
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.success(false)
+                    }
+                }
                 else -> result.notImplemented()
             }
         }

@@ -657,15 +657,17 @@ const Database = {
 
     return dbState.messages.filter(m => {
       const sH = (m.sender_handle || '').toLowerCase();
+      const sHClean = sH.replace(/^@+/, '');
       const sId = (m.sender_nexa_id || '').toLowerCase();
       const rH = (m.recipient_handle || '').toLowerCase();
+      const rHClean = rH.replace(/^@+/, '');
       const rId = (m.recipient_nexa_id || '').toLowerCase();
 
-      const senderIs1 = aliases1.has(sH) || aliases1.has(sId);
-      const recipientIs2 = aliases2.has(rH) || aliases2.has(rId);
+      const senderIs1 = aliases1.has(sH) || aliases1.has(sHClean) || (sId && aliases1.has(sId));
+      const recipientIs2 = aliases2.has(rH) || aliases2.has(rHClean) || (rId && aliases2.has(rId));
 
-      const senderIs2 = aliases2.has(sH) || aliases2.has(sId);
-      const recipientIs1 = aliases1.has(rH) || aliases1.has(rId);
+      const senderIs2 = aliases2.has(sH) || aliases2.has(sHClean) || (sId && aliases2.has(sId));
+      const recipientIs1 = aliases1.has(rH) || aliases1.has(rHClean) || (rId && aliases1.has(rId));
 
       return (senderIs1 && recipientIs2) || (senderIs2 && recipientIs1);
     }).sort((a, b) => a.timestamp - b.timestamp);
@@ -688,8 +690,9 @@ const Database = {
 
     return dbState.messages.filter(m => {
       const rH = (m.recipient_handle || '').toLowerCase();
+      const rHClean = rH.replace(/^@+/, '');
       const rId = (m.recipient_nexa_id || '').toLowerCase();
-      return aliases.has(rH) || aliases.has(rId);
+      return aliases.has(rH) || aliases.has(rHClean) || (rId && aliases.has(rId));
     }).sort((a, b) => a.timestamp - b.timestamp);
   },
 
@@ -792,10 +795,10 @@ const Database = {
   getAppVersion() {
     loadFromDisk();
     return dbState.app_version || {
-      latest_version: '1.2.2',
-      build_number: 6,
+      latest_version: '1.2.3',
+      build_number: 7,
       release_date: '2026-10-09',
-      release_notes: 'Unified Obsidian Dark UI, high-contrast crystal-clear typography, eliminated text rendering clashes, and sleek chat bubbles.',
+      release_notes: 'Persistent web admin session tokens, local client chat history storage, accelerated real-time message delivery, and registered account verification.',
       download_url: 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk',
       web_url: 'https://glimmer-messaging-app-web.vercel.app/',
       mandatory: false,
@@ -806,10 +809,10 @@ const Database = {
   setAppVersion(info) {
     loadFromDisk();
     dbState.app_version = {
-      latest_version: info.latest_version || '1.2.2',
-      build_number: Number(info.build_number) || 6,
+      latest_version: info.latest_version || '1.2.3',
+      build_number: Number(info.build_number) || 7,
       release_date: info.release_date || new Date().toISOString().split('T')[0],
-      release_notes: info.release_notes || 'Performance, UI redesign, and video calling updates.',
+      release_notes: info.release_notes || 'Persistent web admin session tokens, local client chat history storage, accelerated real-time message delivery, and registered account verification.',
       download_url: info.download_url || 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk',
       web_url: info.web_url || 'https://glimmer-messaging-app-web.vercel.app/',
       mandatory: Boolean(info.mandatory),

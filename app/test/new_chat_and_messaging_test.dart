@@ -77,15 +77,16 @@ void main() {
     expect(find.text('Start Conversation'), findsOneWidget);
     expect(find.byType(TextField), findsWidgets);
 
-    // Enter a new custom ID into the input field
-    final inputFinder = find.widgetWithText(TextField, 'Enter NEXA ID (NX-...), @handle, or search...');
-    expect(inputFinder, findsOneWidget);
-    await tester.enterText(inputFinder, 'NX-TEST-9999');
+    // Enter an unregistered ID into the modal input field
+    final modalInputFinder = find.byWidgetPredicate(
+      (widget) => widget is TextField && widget.decoration?.hintText?.contains('Search registered NEXA ID') == true,
+    );
+    expect(modalInputFinder, findsOneWidget);
+    await tester.enterText(modalInputFinder, 'NX-UNREGISTERED-9999');
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 500));
 
-    // Verify instant "Start Encrypted Chat with ID:" card appears
-    expect(find.text('Start Encrypted Chat with ID:'), findsOneWidget);
-    expect(find.text('Chat Now'), findsOneWidget);
+    // Verify "No account found" validation appears for unregistered ID
+    expect(find.text('No account found'), findsWidgets);
   });
 }

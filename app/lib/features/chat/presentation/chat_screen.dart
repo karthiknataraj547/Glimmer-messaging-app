@@ -59,6 +59,10 @@ class _ChatScreenState extends State<ChatScreen> {
   // Message list (Starts empty with zero mock accounts or fake messages)
   final List<Map<String, dynamic>> _messages = [];
 
+  String get _threadKey => widget.nexaId.trim().isNotEmpty
+      ? widget.nexaId
+      : widget.contactName;
+
   @override
   void initState() {
     super.initState();
@@ -69,11 +73,14 @@ class _ChatScreenState extends State<ChatScreen> {
       }
     });
 
+    // 0. Instant offline/cached chat history restore for zero flicker
+    _loadLocalThread();
+
     // 1. Initial thread load from server
     _loadThread();
 
-    // 2. Periodic sync to catch live incoming messages from peer
-    _pollingTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+    // 2. High-speed periodic sync (1000ms) to ensure zero delay in live message delivery
+    _pollingTimer = Timer.periodic(const Duration(milliseconds: 1000), (_) {
       if (mounted) _syncIncomingMessages();
     });
   }
@@ -87,6 +94,21 @@ class _ChatScreenState extends State<ChatScreen> {
     _amplitudeTimer?.cancel();
     _playbackTimer?.cancel();
     super.dispose();
+  }
+
+  Future<void> _loadLocalThread() async {
+    List<Map<String, dynamic>> cached = await ChatService.instance.loadLocalMessages(_threadKey);
+    if (cached.isEmpty && widget.contactName.isNotEmpty) {
+      cached = await ChatService.instance.loadLocalMessages(widget.contactName);
+    }
+    if (!mounted || cached.isEmpty) return;
+
+    if (_messages.isEmpty) {
+      setState(() {
+        _messages.addAll(cached);
+      });
+      _scrollToBottom();
+    }
   }
 
   Future<void> _loadThread() async {
@@ -124,6 +146,10 @@ class _ChatScreenState extends State<ChatScreen> {
       }
     });
     _scrollToBottom();
+    ChatService.instance.saveLocalMessages(_threadKey, _messages);
+    if (widget.contactName.isNotEmpty) {
+      ChatService.instance.saveLocalMessages(widget.contactName, _messages);
+    }
   }
 
   Future<void> _syncIncomingMessages() async {
@@ -183,6 +209,10 @@ class _ChatScreenState extends State<ChatScreen> {
     if (addedAny && mounted) {
       setState(() {});
       _scrollToBottom();
+      ChatService.instance.saveLocalMessages(_threadKey, _messages);
+      if (widget.contactName.isNotEmpty) {
+        ChatService.instance.saveLocalMessages(widget.contactName, _messages);
+      }
     }
   }
 
@@ -222,12 +252,26 @@ class _ChatScreenState extends State<ChatScreen> {
 
     _scrollToBottom();
 
+    // Persist immediately to local storage
+    ChatService.instance.saveLocalMessages(_threadKey, _messages);
+    if (widget.contactName.isNotEmpty) {
+      ChatService.instance.saveLocalMessages(widget.contactName, _messages);
+    }
+
     // Transmit to server relay so recipient receives the message in real time
     ChatService.instance.sendMessage(
       recipientHandle: widget.contactName,
       recipientNexaId: widget.nexaId,
       text: text,
     );
+
+    // Accelerated delivery confirmation polls
+    Future.delayed(const Duration(milliseconds: 250), () {
+      if (mounted) _syncIncomingMessages();
+    });
+    Future.delayed(const Duration(milliseconds: 700), () {
+      if (mounted) _syncIncomingMessages();
+    });
   }
 
   String _formatDuration(int seconds) {
@@ -512,6 +556,17 @@ class _ChatScreenState extends State<ChatScreen> {
     );
 
     _scrollToBottom();
+
+    // Persist to local storage
+    ChatService.instance.saveLocalMessages(_threadKey, _messages);
+    if (widget.contactName.isNotEmpty) {
+      ChatService.instance.saveLocalMessages(widget.contactName, _messages);
+    }
+
+    // Accelerated delivery confirmation
+    Future.delayed(const Duration(milliseconds: 250), () {
+      if (mounted) _syncIncomingMessages();
+    });
   }
 
   void _openVoiceRecorderModal() async {
@@ -2294,6 +2349,10 @@ class _ChatScreenState extends State<ChatScreen> {
                 onTap: () {
                   Navigator.pop(ctx);
                   setState(() => _messages.remove(msg));
+                  ChatService.instance.saveLocalMessages(_threadKey, _messages);
+                  if (widget.contactName.isNotEmpty) {
+                    ChatService.instance.saveLocalMessages(widget.contactName, _messages);
+                  }
                 },
               ),
             ],
@@ -2408,6 +2467,10 @@ class _ChatScreenState extends State<ChatScreen> {
                 _showDisappearingMessagesModal();
               } else if (val == 'clear') {
                 setState(() => _messages.clear());
+                ChatService.instance.saveLocalMessages(_threadKey, _messages);
+                if (widget.contactName.isNotEmpty) {
+                  ChatService.instance.saveLocalMessages(widget.contactName, _messages);
+                }
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Chat messages cleared locally')),
                 );

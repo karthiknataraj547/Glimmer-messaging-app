@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'session_storage.dart';
 
 /// Central singleton holding the local user profile, avatar, and authentication state.
 class UserSession extends ChangeNotifier {
@@ -16,6 +17,24 @@ class UserSession extends ChangeNotifier {
   int _avatarIndex = 0; // 0 to 5 preset avatars
   String? _customAvatarPath;
   bool _isLoggedIn = false;
+
+  /// Restores persistent user session on cold app launch
+  Future<void> init() async {
+    try {
+      final saved = await SessionStorage.loadSession();
+      if (saved != null && (saved['handle'] as String?)?.isNotEmpty == true) {
+        _name = (saved['name'] as String?) ?? '';
+        _handle = (saved['handle'] as String?) ?? '';
+        _nexaId = (saved['nexaId'] as String?) ?? '';
+        _bio = (saved['bio'] as String?) ?? '';
+        _status = _bio.isNotEmpty ? _bio : 'Encrypted';
+        _phone = (saved['phone'] as String?) ?? '';
+        _avatarIndex = (saved['avatarIndex'] as num?)?.toInt() ?? 0;
+        _isLoggedIn = true;
+        notifyListeners();
+      }
+    } catch (_) {}
+  }
 
   // Preset avatar definitions
   static const List<Map<String, dynamic>> avatarPresets = [
@@ -65,6 +84,17 @@ class UserSession extends ChangeNotifier {
     }
     if (customAvatarPath != null) _customAvatarPath = customAvatarPath;
     notifyListeners();
+
+    if (_isLoggedIn) {
+      SessionStorage.saveSession({
+        'name': _name,
+        'handle': _handle,
+        'bio': _bio,
+        'phone': _phone,
+        'nexaId': _nexaId,
+        'avatarIndex': _avatarIndex,
+      });
+    }
   }
 
   // Authentication toggles
@@ -87,6 +117,16 @@ class UserSession extends ChangeNotifier {
     if (avatarIndex != null) _avatarIndex = avatarIndex;
     _isLoggedIn = true;
     notifyListeners();
+
+    // Persist across app restarts
+    SessionStorage.saveSession({
+      'name': _name,
+      'handle': _handle,
+      'bio': _bio,
+      'phone': _phone,
+      'nexaId': _nexaId,
+      'avatarIndex': _avatarIndex,
+    });
   }
 
   void logout() {
@@ -100,5 +140,8 @@ class UserSession extends ChangeNotifier {
     _avatarIndex = 0;
     _isLoggedIn = false;
     notifyListeners();
+
+    // Purge saved session on explicit logout
+    SessionStorage.clearSession();
   }
 }

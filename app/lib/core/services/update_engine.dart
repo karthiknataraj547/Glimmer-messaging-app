@@ -71,8 +71,8 @@ class UpdateEngine {
   static final UpdateEngine instance = UpdateEngine._internal();
   UpdateEngine._internal();
 
-  static const String currentVersion = '1.2.2';
-  static const int currentBuildNumber = 6;
+  static const String currentVersion = '1.2.3';
+  static const int currentBuildNumber = 7;
   static const String defaultDownloadUrl = 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk';
   static const MethodChannel _channel = MethodChannel('com.nexa.media_picker');
 

@@ -22,10 +22,10 @@ let dbState = {
   activity_logs: [],
   messages: [],
   app_version: {
-    latest_version: '1.2.2',
-    build_number: 6,
+    latest_version: '1.2.3',
+    build_number: 7,
     release_date: '2026-10-09',
-    release_notes: 'Unified Obsidian Dark UI, high-contrast crystal-clear typography, eliminated text rendering clashes, and sleek chat bubbles.',
+    release_notes: 'Persistent web admin session tokens, local client chat history storage, accelerated real-time message delivery, and registered account verification.',
     download_url: 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk',
     web_url: 'https://glimmer-messaging-app-web.vercel.app/',
     mandatory: false,
@@ -101,6 +101,37 @@ const Database = {
       devices_count: Object.keys(dbState.user_devices).length,
       pending_envelopes: Object.values(dbState.mailbox_queue).reduce((sum, q) => sum + (q ? q.length : 0), 0),
       last_saved_at: dbState.meta.last_saved_at
+    };
+  },
+
+  getSystemMetrics(activeWsCount = 0) {
+    loadFromDisk();
+    const mem = process.memoryUsage ? process.memoryUsage() : { heapUsed: 0, heapTotal: 0, rss: 0 };
+    let dbSize = 0;
+    try {
+      if (fs.existsSync(DB_FILE)) dbSize = fs.statSync(DB_FILE).size;
+    } catch (_) {}
+
+    return {
+      uptime_seconds: Math.floor(process.uptime ? process.uptime() : 0),
+      node_version: process.version,
+      platform: process.platform,
+      active_connections: activeWsCount,
+      total_users: Object.keys(dbState.users).length,
+      active_users: Object.values(dbState.users).filter(u => u.status !== 'suspended').length,
+      suspended_users: Object.values(dbState.users).filter(u => u.status === 'suspended').length,
+      total_devices: Object.keys(dbState.user_devices).length,
+      registered_devices: Object.keys(dbState.user_devices).length,
+      queued_envelopes: Object.values(dbState.mailbox_queue).reduce((sum, q) => sum + (q ? q.length : 0), 0),
+      db_file_bytes: dbSize,
+      db_last_saved: dbState.meta.last_saved_at,
+      memory: {
+        heap_used_mb: (mem.heapUsed / 1024 / 1024).toFixed(2),
+        heap_total_mb: (mem.heapTotal / 1024 / 1024).toFixed(2),
+        rss_mb: (mem.rss / 1024 / 1024).toFixed(2)
+      },
+      security_mode: 'zero_knowledge_e2ee',
+      crypto_protocol: 'X3DH_DoubleRatchet_AES256GCM'
     };
   },
 
@@ -328,15 +359,17 @@ const Database = {
 
     return dbState.messages.filter(m => {
       const sH = (m.sender_handle || '').toLowerCase();
+      const sHClean = sH.replace(/^@+/, '');
       const sId = (m.sender_nexa_id || '').toLowerCase();
       const rH = (m.recipient_handle || '').toLowerCase();
+      const rHClean = rH.replace(/^@+/, '');
       const rId = (m.recipient_nexa_id || '').toLowerCase();
 
-      const senderIs1 = aliases1.has(sH) || aliases1.has(sId);
-      const recipientIs2 = aliases2.has(rH) || aliases2.has(rId);
+      const senderIs1 = aliases1.has(sH) || aliases1.has(sHClean) || (sId && aliases1.has(sId));
+      const recipientIs2 = aliases2.has(rH) || aliases2.has(rHClean) || (rId && aliases2.has(rId));
 
-      const senderIs2 = aliases2.has(sH) || aliases2.has(sId);
-      const recipientIs1 = aliases1.has(rH) || aliases1.has(rId);
+      const senderIs2 = aliases2.has(sH) || aliases2.has(sHClean) || (sId && aliases2.has(sId));
+      const recipientIs1 = aliases1.has(rH) || aliases1.has(rHClean) || (rId && aliases1.has(rId));
 
       return (senderIs1 && recipientIs2) || (senderIs2 && recipientIs1);
     }).sort((a, b) => a.timestamp - b.timestamp);
@@ -353,8 +386,9 @@ const Database = {
 
     return dbState.messages.filter(m => {
       const rH = (m.recipient_handle || '').toLowerCase();
+      const rHClean = rH.replace(/^@+/, '');
       const rId = (m.recipient_nexa_id || '').toLowerCase();
-      return aliases.has(rH) || aliases.has(rId);
+      return aliases.has(rH) || aliases.has(rHClean) || (rId && aliases.has(rId));
     }).sort((a, b) => a.timestamp - b.timestamp);
   },
 
@@ -475,10 +509,10 @@ const Database = {
   getAppVersion() {
     loadFromDisk();
     return dbState.app_version || {
-      latest_version: '1.2.2',
-      build_number: 6,
+      latest_version: '1.2.3',
+      build_number: 7,
       release_date: '2026-10-09',
-      release_notes: 'Unified Obsidian Dark UI, high-contrast crystal-clear typography, eliminated text rendering clashes, and sleek chat bubbles.',
+      release_notes: 'Persistent web admin session tokens, local client chat history storage, accelerated real-time message delivery, and registered account verification.',
       download_url: 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk',
       web_url: 'https://glimmer-messaging-app-web.vercel.app/',
       mandatory: false,
@@ -489,8 +523,8 @@ const Database = {
   setAppVersion(info) {
     loadFromDisk();
     dbState.app_version = {
-      latest_version: info.latest_version || '1.2.2',
-      build_number: Number(info.build_number) || 6,
+      latest_version: info.latest_version || '1.2.3',
+      build_number: Number(info.build_number) || 7,
       release_date: info.release_date || new Date().toISOString().split('T')[0],
       release_notes: info.release_notes || 'Performance and security updates.',
       download_url: info.download_url || 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk',

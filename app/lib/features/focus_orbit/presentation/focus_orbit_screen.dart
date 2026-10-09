@@ -49,9 +49,12 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
     super.initState();
     _session.addListener(_onSessionChanged);
 
-    // 1. Initial message sync & periodic background polling
+    // 0. Load cached recent chats for instant offline render
+    _loadCachedChats();
+
+    // 1. Initial message sync & high-speed periodic background polling (1500ms for fast delivery)
     _syncInbox();
-    _inboxSyncTimer = Timer.periodic(const Duration(seconds: 3), (_) => _syncInbox());
+    _inboxSyncTimer = Timer.periodic(const Duration(milliseconds: 1500), (_) => _syncInbox());
 
     // 2. Start global real-time call invitation listener
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -73,6 +76,16 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
 
   void _onSessionChanged() {
     if (mounted) setState(() {});
+  }
+
+  /// Instant cached recent chats restore
+  Future<void> _loadCachedChats() async {
+    final cached = await ChatService.instance.loadRecentChats();
+    if (cached.isNotEmpty && mounted && _chats.isEmpty) {
+      setState(() {
+        _chats.addAll(cached);
+      });
+    }
   }
 
   /// Synchronize incoming chat messages from server relay
@@ -121,6 +134,7 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
 
       if (changed && mounted) {
         setState(() {});
+        ChatService.instance.saveRecentChats(_chats);
       }
     } catch (_) {}
   }
@@ -155,8 +169,22 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
     return '${dt.month}/${dt.day}';
   }
 
-  void _openChat(String contactName, String nexaId) {
-    Navigator.push(
+  void _openChat(String contactName, String nexaId) async {
+    final idx = _chats.indexWhere((c) {
+      final n = (c['name'] as String).toLowerCase();
+      final id = (c['nexaId'] as String).toLowerCase();
+      return n == contactName.toLowerCase() ||
+          n == '@${contactName.replaceAll('@', '').toLowerCase()}' ||
+          id == nexaId.toLowerCase();
+    });
+    if (idx >= 0 && mounted) {
+      setState(() {
+        _chats[idx]['unread'] = 0;
+      });
+      ChatService.instance.saveRecentChats(_chats);
+    }
+
+    await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => ChatScreen(
@@ -165,6 +193,10 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
         ),
       ),
     );
+
+    if (mounted) {
+      _syncInbox();
+    }
   }
 
   void _startCall({required String contactName, required String nexaId, required bool isVideo}) {
@@ -1256,11 +1288,43 @@ class _NewChatSheetState extends State<_NewChatSheet> {
   String _searchQuery = '';
   int _activeFilter = 0; // 0 = All, 1 = Contacts, 2 = On NEXA, 3 = Directory
   bool _isSyncing = false;
+  List<Map<String, dynamic>> _onlineResults = [];
+  bool _isSearchingOnline = false;
+  Timer? _searchDebounce;
 
   @override
   void dispose() {
     _searchController.dispose();
+    _searchDebounce?.cancel();
     super.dispose();
+  }
+
+  void _onSearchChanged(String val) {
+    setState(() => _searchQuery = val);
+    _searchDebounce?.cancel();
+    final clean = val.trim();
+    if (clean.length < 2) {
+      setState(() {
+        _onlineResults = [];
+        _isSearchingOnline = false;
+      });
+      return;
+    }
+
+    setState(() => _isSearchingOnline = true);
+    _searchDebounce = Timer(const Duration(milliseconds: 300), () async {
+      try {
+        final res = await ContactsService.instance.searchNexaDirectory(clean);
+        if (mounted && _searchQuery.trim() == clean) {
+          setState(() {
+            _onlineResults = res;
+            _isSearchingOnline = false;
+          });
+        }
+      } catch (_) {
+        if (mounted) setState(() => _isSearchingOnline = false);
+      }
+    });
   }
 
   @override
@@ -1280,8 +1344,22 @@ class _NewChatSheetState extends State<_NewChatSheet> {
     // 2. Filtered On-NEXA Contacts
     final onNexaContacts = filteredDevice.where((c) => c['isOnNexa'] == true).toList();
 
-    // 3. Filtered Directory Peers
-    final filteredDirectory = widget.directoryUsers.where((u) {
+    // 3. Filtered Directory Peers (combining local directory and online search results)
+    final allDirectoryPeers = <Map<String, dynamic>>[...widget.directoryUsers];
+    for (final onlineUser in _onlineResults) {
+      final onNid = (onlineUser['nexaId'] ?? onlineUser['nexa_id'] ?? '').toString().toUpperCase();
+      final onUn = (onlineUser['username'] ?? '').toString().toLowerCase();
+      final exists = allDirectoryPeers.any((p) {
+        final pNid = (p['nexa_id'] ?? p['nexaId'] ?? '').toString().toUpperCase();
+        final pUn = (p['username'] ?? '').toString().toLowerCase();
+        return (onNid.isNotEmpty && pNid == onNid) || (onUn.isNotEmpty && pUn == onUn);
+      });
+      if (!exists) {
+        allDirectoryPeers.add(onlineUser);
+      }
+    }
+
+    final filteredDirectory = allDirectoryPeers.where((u) {
       if (query.isEmpty) return true;
       final un = (u['username'] ?? '').toString().toLowerCase();
       final fn = (u['full_name'] ?? u['fullName'] ?? '').toString().toLowerCase();
@@ -1410,10 +1488,10 @@ class _NewChatSheetState extends State<_NewChatSheet> {
             padding: const EdgeInsets.fromLTRB(18, 6, 18, 10),
             child: TextField(
               controller: _searchController,
-              onChanged: (val) => setState(() => _searchQuery = val),
+              onChanged: _onSearchChanged,
               style: const TextStyle(color: Colors.white, fontSize: 14),
               decoration: InputDecoration(
-                hintText: 'Enter NEXA ID (NX-...), @handle, or search...',
+                hintText: 'Search registered NEXA ID (NX-...), @handle...',
                 hintStyle: const TextStyle(color: Color(0xFF64748B), fontSize: 13),
                 prefixIcon: const Icon(Icons.search_rounded, color: Color(0xFF00E5FF), size: 20),
                 suffixIcon: _searchQuery.isNotEmpty
@@ -1421,7 +1499,7 @@ class _NewChatSheetState extends State<_NewChatSheet> {
                         icon: const Icon(Icons.clear, color: Colors.white60, size: 18),
                         onPressed: () {
                           _searchController.clear();
-                          setState(() => _searchQuery = '');
+                          _onSearchChanged('');
                         },
                       )
                     : null,
@@ -1444,9 +1522,9 @@ class _NewChatSheetState extends State<_NewChatSheet> {
             ),
           ),
 
-          // Direct Custom ID Action Tile (Shown whenever user has typed text)
+          // Search Status & Verification Banner (Only registered accounts allowed)
           if (_searchQuery.trim().isNotEmpty)
-            _buildDirectCustomIdCard(_searchQuery.trim()),
+            _buildVerifiedSearchStatusCard(_searchQuery.trim(), filteredDirectory, onNexaContacts),
 
           // Filter Selector Tabs
           Padding(
@@ -1518,11 +1596,27 @@ class _NewChatSheetState extends State<_NewChatSheet> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.person_search_outlined, color: Color(0xFF64748B), size: 40),
+                        Icon(
+                          _searchQuery.isNotEmpty ? Icons.person_off_rounded : Icons.person_search_outlined,
+                          color: _searchQuery.isNotEmpty ? const Color(0xFFEF4444) : const Color(0xFF64748B),
+                          size: 40,
+                        ),
                         const SizedBox(height: 12),
-                        const Text('No peers or contacts found', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
+                        Text(
+                          _searchQuery.isNotEmpty ? 'No account found' : 'No peers or contacts found',
+                          style: TextStyle(
+                            color: _searchQuery.isNotEmpty ? const Color(0xFFFCA5A5) : Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                         const SizedBox(height: 4),
-                        const Text('Type any NEXA ID or @username above to start instantly.', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12)),
+                        Text(
+                          _searchQuery.isNotEmpty
+                              ? 'No registered NEXA account matches "$_searchQuery".'
+                              : 'Sync device contacts or search registered users above.',
+                          style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                        ),
                       ],
                     ),
                   )
@@ -1545,64 +1639,184 @@ class _NewChatSheetState extends State<_NewChatSheet> {
     );
   }
 
-  Widget _buildDirectCustomIdCard(String rawInput) {
+  Widget _buildVerifiedSearchStatusCard(
+    String rawInput,
+    List<Map<String, dynamic>> filteredDirectory,
+    List<Map<String, dynamic>> onNexaContacts,
+  ) {
     final cleanInput = rawInput.trim();
-    final targetHandle = cleanInput.startsWith('@') ? cleanInput : '@$cleanInput';
-    final targetNexaId = cleanInput.toUpperCase().startsWith('NX-')
-        ? cleanInput.toUpperCase()
-        : 'NX-${cleanInput.replaceAll('@', '').toUpperCase()}';
+    final cleanLower = cleanInput.toLowerCase().replaceAll('@', '');
 
+    // Check for exact or best matching registered user
+    Map<String, dynamic>? match;
+    for (final u in filteredDirectory) {
+      final un = (u['username'] ?? '').toString().toLowerCase().replaceAll('@', '');
+      final nid = (u['nexa_id'] ?? u['nexaId'] ?? '').toString().toLowerCase();
+      if (un == cleanLower || nid == cleanLower || nid == cleanInput.toLowerCase()) {
+        match = u;
+        break;
+      }
+    }
+
+    if (match == null) {
+      for (final c in onNexaContacts) {
+        final un = (c['handle'] ?? '').toString().toLowerCase().replaceAll('@', '');
+        final nid = (c['nexaId'] ?? '').toString().toLowerCase();
+        final ph = (c['phone'] ?? '').toString().replaceAll(RegExp(r'[^0-9]'), '');
+        if (un == cleanLower || nid == cleanLower || (ph.isNotEmpty && ph == cleanInput.replaceAll(RegExp(r'[^0-9]'), ''))) {
+          match = c;
+          break;
+        }
+      }
+    }
+
+    // 1. If a registered user is found -> Show verified account card with "Chat Now"
+    if (match != null) {
+      final matchedHandle = (match['handle'] ?? '@${match['username']}').toString();
+      final matchedNexaId = (match['nexa_id'] ?? match['nexaId'] ?? 'NX-REGISTERED').toString();
+      final matchedName = (match['full_name'] ?? match['fullName'] ?? match['name'] ?? match['username'] ?? 'User').toString();
+
+      return Container(
+        margin: const EdgeInsets.fromLTRB(18, 0, 18, 10),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: const Color(0xFF0C1929),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.6)),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF10B981).withValues(alpha: 0.1),
+              blurRadius: 10,
+              spreadRadius: 1,
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: const BoxDecoration(
+                color: Color(0xFF10B981),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.verified_user_rounded, color: Colors.white, size: 18),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          matchedName,
+                          style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF10B981).withValues(alpha: 0.2),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: const Text('REGISTERED', style: TextStyle(color: Color(0xFF10B981), fontSize: 8, fontWeight: FontWeight.bold)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '$matchedHandle • $matchedNexaId',
+                    style: const TextStyle(color: Color(0xFF00E5FF), fontSize: 11, fontWeight: FontWeight.w600),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF00E5FF),
+                foregroundColor: Colors.black,
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              onPressed: () => widget.onSelectPeer(matchedHandle, matchedNexaId),
+              child: const Text('Chat Now', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // 2. If currently probing online directory
+    if (_isSearchingOnline) {
+      return Container(
+        margin: const EdgeInsets.fromLTRB(18, 0, 18, 10),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: const Color(0xFF111827),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0x26FFFFFF)),
+        ),
+        child: Row(
+          children: [
+            const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF00E5FF))),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Searching server directory for "$cleanInput"...',
+                style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // 3. NO ACCOUNT FOUND -> Clear warning, absolutely NO messaging allowed
     return Container(
       margin: const EdgeInsets.fromLTRB(18, 0, 18, 10),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFF0C1929),
+        color: const Color(0xFF1A1311),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFF00E5FF).withValues(alpha: 0.5)),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF00E5FF).withValues(alpha: 0.1),
-            blurRadius: 10,
-            spreadRadius: 1,
-          ),
-        ],
+        border: Border.all(color: const Color(0xFFEF4444).withValues(alpha: 0.4)),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Container(
-            padding: const EdgeInsets.all(10),
-            decoration: const BoxDecoration(
-              color: Color(0xFF00E5FF),
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: const Color(0xFFEF4444).withValues(alpha: 0.15),
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.send_rounded, color: Colors.black, size: 18),
+            child: const Icon(Icons.person_off_rounded, color: Color(0xFFEF4444), size: 18),
           ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
                 const Text(
-                  'Start Encrypted Chat with ID:',
-                  style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11, fontWeight: FontWeight.w600),
+                  'No account found',
+                  style: TextStyle(color: Color(0xFFFCA5A5), fontSize: 13, fontWeight: FontWeight.bold),
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: 1),
                 Text(
-                  cleanInput.toUpperCase().startsWith('NX-') ? cleanInput.toUpperCase() : targetHandle,
-                  style: const TextStyle(color: Color(0xFF00E5FF), fontSize: 14, fontWeight: FontWeight.bold),
+                  'No registered account matches "$cleanInput". You can only text registered accounts.',
+                  style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF00E5FF),
-              foregroundColor: Colors.black,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-            onPressed: () => widget.onSelectPeer(targetHandle, targetNexaId),
-            child: const Text('Chat Now', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
           ),
         ],
       ),
@@ -1665,7 +1879,7 @@ class _NewChatSheetState extends State<_NewChatSheet> {
 
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(vertical: 4),
-      onTap: () => widget.onSelectPeer(targetHandle, targetNexaId),
+      onTap: isOnNexa ? () => widget.onSelectPeer(targetHandle, targetNexaId) : null,
       leading: CircleAvatar(
         radius: 20,
         backgroundColor: isOnNexa ? const Color(0xFF10B981).withValues(alpha: 0.2) : const Color(0xFF1E293B),
@@ -1702,21 +1916,31 @@ class _NewChatSheetState extends State<_NewChatSheet> {
         isOnNexa ? '$phone • $targetHandle' : (phone.isNotEmpty ? phone : 'Mobile Contact'),
         style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
       ),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          IconButton(
-            icon: const Icon(Icons.chat_bubble_rounded, color: Color(0xFF00E5FF), size: 20),
-            tooltip: 'Start Chat',
-            onPressed: () => widget.onSelectPeer(targetHandle, targetNexaId),
-          ),
-          IconButton(
-            icon: const Icon(Icons.phone_rounded, color: Color(0xFF10B981), size: 20),
-            tooltip: 'Voice Call',
-            onPressed: () => widget.onStartCall(name, targetNexaId, false),
-          ),
-        ],
-      ),
+      trailing: isOnNexa
+          ? Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.chat_bubble_rounded, color: Color(0xFF00E5FF), size: 20),
+                  tooltip: 'Start Chat',
+                  onPressed: () => widget.onSelectPeer(targetHandle, targetNexaId),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.phone_rounded, color: Color(0xFF10B981), size: 20),
+                  tooltip: 'Voice Call',
+                  onPressed: () => widget.onStartCall(name, targetNexaId, false),
+                ),
+              ],
+            )
+          : Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1E293B),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0x1AFFFFFF)),
+              ),
+              child: const Text('Not on NEXA', style: TextStyle(color: Color(0xFF64748B), fontSize: 10, fontWeight: FontWeight.w600)),
+            ),
     );
   }
 

@@ -4,8 +4,9 @@ import 'core/theme/nexa_theme.dart';
 import 'features/auth/presentation/auth_flow_screen.dart';
 import 'features/focus_orbit/presentation/focus_orbit_screen.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await UserSession.instance.init();
   runApp(const NexaApp());
 }
 

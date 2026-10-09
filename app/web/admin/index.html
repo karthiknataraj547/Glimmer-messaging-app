@@ -876,8 +876,9 @@
   <div id="toast" class="toast">Action completed successfully</div>
 
   <script>
-    let adminToken = sessionStorage.getItem('nexa_admin_token') || '';
+    let adminToken = localStorage.getItem('nexa_admin_token') || sessionStorage.getItem('nexa_admin_token') || '';
     let apiBaseUrl = localStorage.getItem('nexa_admin_api_base') || '';
+    let consecutiveAuthErrors = 0;
     // Purge any stale Cloudflare tunnel URLs from local storage
     if (apiBaseUrl && apiBaseUrl.includes('trycloudflare.com')) {
       apiBaseUrl = '';
@@ -1032,7 +1033,9 @@
 
         if (res.ok && data.success) {
           adminToken = data.token;
+          localStorage.setItem('nexa_admin_token', adminToken);
           sessionStorage.setItem('nexa_admin_token', adminToken);
+          consecutiveAuthErrors = 0;
           document.getElementById('authOverlay').style.display = 'none';
           showToast('Welcome, Administrator!');
           startDashboard();
@@ -1047,6 +1050,7 @@
     }
 
     function handleAdminLogout() {
+      localStorage.removeItem('nexa_admin_token');
       sessionStorage.removeItem('nexa_admin_token');
       adminToken = '';
       clearInterval(refreshInterval);
@@ -1072,9 +1076,13 @@
         ]);
 
         if (overviewRes.status === 401 || overviewRes.status === 403) {
-          handleAdminLogout();
+          consecutiveAuthErrors++;
+          if (consecutiveAuthErrors >= 3) {
+            handleAdminLogout();
+          }
           return;
         }
+        consecutiveAuthErrors = 0;
 
         const overview = await safeJson(overviewRes);
         const users = await safeJson(usersRes);

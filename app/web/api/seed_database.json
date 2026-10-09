@@ -819,13 +819,13 @@
     }
   ],
   "app_version": {
-    "latest_version": "1.2.2",
-    "build_number": 6,
+    "latest_version": "1.2.3",
+    "build_number": 7,
     "release_date": "2026-10-09",
-    "release_notes": "Unified Obsidian Dark UI, high-contrast crystal-clear typography, eliminated text rendering clashes, and sleek chat bubbles.",
+    "release_notes": "Persistent web admin session tokens, local client chat history storage, accelerated real-time message delivery, and registered account verification.",
     "download_url": "https://glimmer-messaging-app-web.vercel.app/nexa-release.apk",
     "web_url": "https://glimmer-messaging-app-web.vercel.app/",
     "mandatory": false,
-    "published_at": 1791450000000
+    "published_at": 1791550000000
   }
 }
