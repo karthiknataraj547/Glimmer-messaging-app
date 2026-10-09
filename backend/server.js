@@ -564,7 +564,8 @@ app.post('/v1/messages/send', (req, res) => {
  */
 app.get('/v1/messages/thread/:user1/:user2', (req, res) => {
   const { user1, user2 } = req.params;
-  const messages = Database.getThread(user1, user2);
+  const { peer_id, my_id } = req.query || {};
+  const messages = Database.getMessageThread(user1, user2, { peer_id, my_id });
   res.json({
     success: true,
     count: messages.length,
@@ -577,7 +578,8 @@ app.get('/v1/messages/thread/:user1/:user2', (req, res) => {
  */
 app.get('/v1/messages/inbox/:user', (req, res) => {
   const { user } = req.params;
-  const messages = Database.getInbox(user);
+  const { nexa_id } = req.query || {};
+  const messages = Database.getInbox(user, nexa_id);
   res.json({
     success: true,
     count: messages.length,

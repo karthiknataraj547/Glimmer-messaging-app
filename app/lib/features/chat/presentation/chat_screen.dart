@@ -90,16 +90,18 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _loadThread() async {
-    final history = await ChatService.instance.fetchThread(widget.contactName);
+    final history = await ChatService.instance.fetchThread(widget.contactName, peerNexaId: widget.nexaId);
     if (!mounted || history.isEmpty) return;
 
     final myHandle = UserSession.instance.handle.replaceAll('@', '').toLowerCase();
+    final myNexaId = UserSession.instance.nexaId.toLowerCase();
 
     setState(() {
       _messages.clear();
       for (final m in history) {
         final senderHandle = (m['sender_handle'] ?? '').toString().toLowerCase();
-        final isMe = senderHandle == myHandle;
+        final senderNexaId = (m['sender_nexa_id'] ?? '').toString().toLowerCase();
+        final isMe = senderHandle == myHandle || (myNexaId.isNotEmpty && (senderHandle == myNexaId || senderNexaId == myNexaId));
         final ts = (m['timestamp'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch;
         final dt = DateTime.fromMillisecondsSinceEpoch(ts);
         final timeStr = '${dt.hour > 12 ? dt.hour - 12 : (dt.hour == 0 ? 12 : dt.hour)}:${dt.minute.toString().padLeft(2, '0')} ${dt.hour >= 12 ? 'PM' : 'AM'}';
@@ -125,10 +127,11 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _syncIncomingMessages() async {
-    final history = await ChatService.instance.fetchThread(widget.contactName);
+    final history = await ChatService.instance.fetchThread(widget.contactName, peerNexaId: widget.nexaId);
     if (!mounted || history.isEmpty) return;
 
     final myHandle = UserSession.instance.handle.replaceAll('@', '').toLowerCase();
+    final myNexaId = UserSession.instance.nexaId.toLowerCase();
     final existingIds = _messages.map((m) => m['id']).toSet();
     bool addedAny = false;
 
@@ -136,7 +139,23 @@ class _ChatScreenState extends State<ChatScreen> {
       final msgId = m['id'] ?? '';
       if (msgId.isNotEmpty && !existingIds.contains(msgId)) {
         final senderHandle = (m['sender_handle'] ?? '').toString().toLowerCase();
-        final isMe = senderHandle == myHandle;
+        final senderNexaId = (m['sender_nexa_id'] ?? '').toString().toLowerCase();
+        final isMe = senderHandle == myHandle || (myNexaId.isNotEmpty && (senderHandle == myNexaId || senderNexaId == myNexaId));
+        final msgText = (m['text'] ?? '').toString();
+
+        // Check if there is an unconfirmed local outgoing message with the same content
+        if (isMe) {
+          final localIdx = _messages.indexWhere((loc) =>
+              loc['isMe'] == true &&
+              (loc['id'] as String).startsWith('m_') &&
+              loc['text'] == msgText);
+          if (localIdx >= 0) {
+            _messages[localIdx]['id'] = msgId;
+            existingIds.add(msgId);
+            continue;
+          }
+        }
+
         final ts = (m['timestamp'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch;
         final dt = DateTime.fromMillisecondsSinceEpoch(ts);
         final timeStr = '${dt.hour > 12 ? dt.hour - 12 : (dt.hour == 0 ? 12 : dt.hour)}:${dt.minute.toString().padLeft(2, '0')} ${dt.hour >= 12 ? 'PM' : 'AM'}';
@@ -144,7 +163,7 @@ class _ChatScreenState extends State<ChatScreen> {
         _messages.add({
           'id': msgId,
           'isMe': isMe,
-          'text': (m['text'] ?? '').toString(),
+          'text': msgText,
           'time': timeStr,
           'isAudio': m['type'] == 'voice',
           'attachmentType': m['type'] == 'voice' ? 'voice' : null,
@@ -156,6 +175,7 @@ class _ChatScreenState extends State<ChatScreen> {
           'actionDismissed': false,
           'reactions': <String>[],
         });
+        existingIds.add(msgId);
         addedAny = true;
       }
     }

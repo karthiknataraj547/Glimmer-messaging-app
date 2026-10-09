@@ -186,6 +186,110 @@ const Database = {
   },
 
   /**
+   * Look up a user by NEXA ID
+   */
+  async findUserByNexaId(rawNexaId) {
+    if (!rawNexaId) return null;
+    loadFromDisk();
+    const clean = rawNexaId.trim().toUpperCase();
+
+    // Check PostgreSQL first if connected
+    if (isPgConnected && pgPool) {
+      try {
+        const res = await pgPool.query('SELECT * FROM users WHERE UPPER(nexa_id) = $1', [clean]);
+        if (res.rows.length > 0) {
+          const row = res.rows[0];
+          return {
+            username: row.username,
+            password_hash: row.password_hash,
+            full_name: row.full_name,
+            about: row.about,
+            phone: row.phone,
+            nexa_id: row.nexa_id,
+            created_at: Number(row.created_at)
+          };
+        }
+      } catch (err) {
+        console.warn('[NEXA DB] PostgreSQL query fallback for nexa_id:', err.message);
+      }
+    }
+
+    // Check persistent database store
+    for (const u of Object.values(dbState.users || {})) {
+      if (u.nexa_id && u.nexa_id.toUpperCase() === clean) return u;
+    }
+    return null;
+  },
+
+  /**
+   * Universal User Resolver: resolves username, @handle, NEXA ID, phone number, or full name
+   * to canonical user record.
+   */
+  resolveUser(identifier) {
+    if (!identifier || typeof identifier !== 'string') return null;
+    loadFromDisk();
+    const raw = identifier.trim();
+    if (!raw) return null;
+
+    const clean = raw.replace(/^@+/, '').toLowerCase();
+    const cleanUpper = raw.toUpperCase();
+    const cleanDigits = raw.replace(/\D/g, '');
+
+    // 1. Direct username
+    if (dbState.users && dbState.users[clean]) return dbState.users[clean];
+
+    // 2. Scan in-memory users
+    for (const u of Object.values(dbState.users || {})) {
+      if (!u) continue;
+      const uUsername = (u.username || '').toLowerCase();
+      const uNexaId = (u.nexa_id || '').toUpperCase();
+      const uFullName = (u.full_name || '').toLowerCase();
+      const uPhoneDigits = (u.phone || '').replace(/\D/g, '');
+
+      if (uUsername === clean) return u;
+      if (uNexaId === cleanUpper || uNexaId.toLowerCase() === clean) return u;
+      if (cleanDigits.length >= 7 && uPhoneDigits.length >= 7) {
+        if (cleanDigits === uPhoneDigits || cleanDigits.endsWith(uPhoneDigits) || uPhoneDigits.endsWith(cleanDigits)) {
+          return u;
+        }
+      }
+      if (uFullName && uFullName === clean) return u;
+    }
+    return null;
+  },
+
+  /**
+   * Collect all identity aliases for a given user identifier or peer string.
+   */
+  getUserAliases(identifier, extraId = null) {
+    const aliases = new Set();
+    if (!identifier && !extraId) return aliases;
+
+    const addIdent = (val) => {
+      if (!val || typeof val !== 'string') return;
+      const v = val.trim();
+      if (!v) return;
+      aliases.add(v.toLowerCase());
+      aliases.add(v.replace(/^@+/, '').toLowerCase());
+      const digits = v.replace(/\D/g, '');
+      if (digits.length >= 7) aliases.add(digits);
+    };
+
+    addIdent(identifier);
+    if (extraId) addIdent(extraId);
+
+    const user = this.resolveUser(identifier) || (extraId ? this.resolveUser(extraId) : null);
+    if (user) {
+      addIdent(user.username);
+      addIdent(user.nexa_id);
+      if (user.full_name) addIdent(user.full_name);
+      if (user.phone) addIdent(user.phone);
+    }
+
+    return aliases;
+  },
+
+  /**
    * Check if a username is already taken
    */
   async userExists(rawUsername) {
@@ -495,18 +599,33 @@ const Database = {
   },
 
   /**
-   * Store a message in persistent database
+   * Store a message in persistent database with identity canonicalization
    */
   saveMessage(msg) {
     loadFromDisk();
     if (!dbState.messages) dbState.messages = [];
 
+    const rawSender = (msg.sender_handle || '').trim();
+    const rawSenderId = (msg.sender_nexa_id || '').trim();
+    const rawRecipient = (msg.recipient_handle || '').trim();
+    const rawRecipientId = (msg.recipient_nexa_id || '').trim();
+
+    // 1. Resolve Sender
+    const senderUser = this.resolveUser(rawSender) || this.resolveUser(rawSenderId);
+    const senderHandle = senderUser ? senderUser.username.toLowerCase() : rawSender.replace(/^@+/, '').toLowerCase();
+    const senderNexaId = senderUser ? senderUser.nexa_id : (rawSenderId || (senderHandle ? `NX-${senderHandle.toUpperCase()}` : 'NX-PEER'));
+
+    // 2. Resolve Recipient
+    const recipientUser = this.resolveUser(rawRecipient) || this.resolveUser(rawRecipientId);
+    const recipientHandle = recipientUser ? recipientUser.username.toLowerCase() : rawRecipient.replace(/^@+/, '').toLowerCase();
+    const recipientNexaId = recipientUser ? recipientUser.nexa_id : (rawRecipientId || (recipientHandle.toUpperCase().startsWith('NX-') ? recipientHandle.toUpperCase() : `NX-${recipientHandle.toUpperCase()}`));
+
     const record = {
       id: msg.id || `msg_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
-      sender_handle: (msg.sender_handle || '').trim().replace(/^@+/, '').toLowerCase(),
-      sender_nexa_id: msg.sender_nexa_id || '',
-      recipient_handle: (msg.recipient_handle || '').trim().replace(/^@+/, '').toLowerCase(),
-      recipient_nexa_id: msg.recipient_nexa_id || '',
+      sender_handle: senderHandle,
+      sender_nexa_id: senderNexaId,
+      recipient_handle: recipientHandle,
+      recipient_nexa_id: recipientNexaId,
       text: msg.text || '',
       type: msg.type || 'text',
       audio_path: msg.audio_path || null,
@@ -527,34 +646,50 @@ const Database = {
   },
 
   /**
-   * Retrieve message thread between two peers
+   * Retrieve message thread between two peers with universal identity aliases
    */
-  getThread(peerA, peerB) {
+  getMessageThread(user1, user2, options = {}) {
     loadFromDisk();
     if (!dbState.messages) return [];
 
-    const cleanA = (peerA || '').trim().replace(/^@+/, '').toLowerCase();
-    const cleanB = (peerB || '').trim().replace(/^@+/, '').toLowerCase();
+    const aliases1 = this.getUserAliases(user1, options.my_id);
+    const aliases2 = this.getUserAliases(user2, options.peer_id);
 
     return dbState.messages.filter(m => {
-      const isFromAToB = (m.sender_handle === cleanA || m.sender_nexa_id.toLowerCase() === cleanA) &&
-                         (m.recipient_handle === cleanB || m.recipient_nexa_id.toLowerCase() === cleanB);
-      const isFromBToA = (m.sender_handle === cleanB || m.sender_nexa_id.toLowerCase() === cleanB) &&
-                         (m.recipient_handle === cleanA || m.recipient_nexa_id.toLowerCase() === cleanA);
-      return isFromAToB || isFromBToA;
+      const sH = (m.sender_handle || '').toLowerCase();
+      const sId = (m.sender_nexa_id || '').toLowerCase();
+      const rH = (m.recipient_handle || '').toLowerCase();
+      const rId = (m.recipient_nexa_id || '').toLowerCase();
+
+      const senderIs1 = aliases1.has(sH) || aliases1.has(sId);
+      const recipientIs2 = aliases2.has(rH) || aliases2.has(rId);
+
+      const senderIs2 = aliases2.has(sH) || aliases2.has(sId);
+      const recipientIs1 = aliases1.has(rH) || aliases1.has(rId);
+
+      return (senderIs1 && recipientIs2) || (senderIs2 && recipientIs1);
     }).sort((a, b) => a.timestamp - b.timestamp);
   },
 
   /**
-   * Retrieve incoming messages inbox for a user
+   * Alias getThread for backward compatibility
    */
-  getInbox(recipient) {
+  getThread(peerA, peerB, options = {}) {
+    return this.getMessageThread(peerA, peerB, options);
+  },
+
+  /**
+   * Retrieve incoming messages inbox for a user across all aliases
+   */
+  getInbox(recipient, extraId = null) {
     loadFromDisk();
     if (!dbState.messages) return [];
-    const clean = (recipient || '').trim().replace(/^@+/, '').toLowerCase();
+    const aliases = this.getUserAliases(recipient, extraId);
 
     return dbState.messages.filter(m => {
-      return m.recipient_handle === clean || m.recipient_nexa_id.toLowerCase() === clean;
+      const rH = (m.recipient_handle || '').toLowerCase();
+      const rId = (m.recipient_nexa_id || '').toLowerCase();
+      return aliases.has(rH) || aliases.has(rId);
     }).sort((a, b) => a.timestamp - b.timestamp);
   },
 
@@ -657,10 +792,10 @@ const Database = {
   getAppVersion() {
     loadFromDisk();
     return dbState.app_version || {
-      latest_version: '1.2.0',
-      build_number: 4,
+      latest_version: '1.2.1',
+      build_number: 5,
       release_date: '2026-10-09',
-      release_notes: 'Redesigned Modern Minimalist UI, Dual Camera Vision Video Calls & Voice Calling, and Native Device Contacts Sync.',
+      release_notes: 'New Chat mobile contacts & saved identities selector, custom NEXA ID & handle messaging, bidirectional real-time delivery fixes.',
       download_url: 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk',
       web_url: 'https://glimmer-messaging-app-web.vercel.app/',
       mandatory: false,
@@ -671,8 +806,8 @@ const Database = {
   setAppVersion(info) {
     loadFromDisk();
     dbState.app_version = {
-      latest_version: info.latest_version || '1.2.0',
-      build_number: Number(info.build_number) || 4,
+      latest_version: info.latest_version || '1.2.1',
+      build_number: Number(info.build_number) || 5,
       release_date: info.release_date || new Date().toISOString().split('T')[0],
       release_notes: info.release_notes || 'Performance, UI redesign, and video calling updates.',
       download_url: info.download_url || 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk',

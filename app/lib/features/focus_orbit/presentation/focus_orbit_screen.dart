@@ -710,9 +710,12 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
           final name = (item['name'] ?? 'Contact').toString();
           final phone = (item['phone'] ?? '').toString();
           final isOnNexa = item['isOnNexa'] == true;
+          final targetHandle = isOnNexa ? (item['handle'] ?? name) : name;
+          final targetNexaId = item['nexaId'] ?? (phone.isNotEmpty ? phone : 'NX-${name.toUpperCase()}');
 
           return ListTile(
             contentPadding: const EdgeInsets.symmetric(vertical: 4),
+            onTap: () => _openChat(targetHandle, targetNexaId),
             leading: CircleAvatar(
               radius: 18,
               backgroundColor: isOnNexa ? const Color(0xFF10B981).withValues(alpha: 0.2) : const Color(0xFF1E293B),
@@ -722,17 +725,40 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
               ),
             ),
             title: Text(name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13)),
-            subtitle: Text(phone, style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
-            trailing: isOnNexa
-                ? Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            subtitle: Text(
+              isOnNexa ? '$phone • $targetHandle' : phone,
+              style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+            ),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (isOnNexa) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                    margin: const EdgeInsets.only(right: 4),
                     decoration: BoxDecoration(
                       color: const Color(0xFF10B981).withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                    child: const Text('ON NEXA', style: TextStyle(color: Color(0xFF10B981), fontSize: 10, fontWeight: FontWeight.bold)),
-                  )
-                : OutlinedButton(
+                    child: const Text('ON NEXA', style: TextStyle(color: Color(0xFF10B981), fontSize: 9, fontWeight: FontWeight.bold)),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.chat_bubble_outline, color: Color(0xFF00E5FF), size: 18),
+                    tooltip: 'Start Chat',
+                    onPressed: () => _openChat(targetHandle, targetNexaId),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.phone_outlined, color: Color(0xFF10B981), size: 18),
+                    tooltip: 'Voice Call',
+                    onPressed: () => _startCall(contactName: name, nexaId: targetNexaId, isVideo: false),
+                  ),
+                ] else ...[
+                  IconButton(
+                    icon: const Icon(Icons.chat_bubble_outline, color: Color(0xFF00E5FF), size: 18),
+                    tooltip: 'Start Chat',
+                    onPressed: () => _openChat(targetHandle, targetNexaId),
+                  ),
+                  OutlinedButton(
                     style: OutlinedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                       minimumSize: Size.zero,
@@ -747,6 +773,9 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                     },
                     child: const Text('Invite', style: TextStyle(fontSize: 11)),
                   ),
+                ],
+              ],
+            ),
           );
         },
       );
@@ -960,7 +989,7 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                       ),
                     ],
                   ),
-                  Text('v1.2.0 (Build 4)', style: TextStyle(color: Color(0xFF00E5FF), fontSize: 11, fontWeight: FontWeight.bold)),
+                  Text('v${UpdateEngine.currentVersion} (Build ${UpdateEngine.currentBuildNumber})', style: TextStyle(color: Color(0xFF00E5FF), fontSize: 11, fontWeight: FontWeight.bold)),
                 ],
               ),
               const SizedBox(height: 8),
@@ -1094,76 +1123,29 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
   // =====================================================================
   // 7. NEW CHAT & NEXA ID SERVICING MODAL
   // =====================================================================
+  // =====================================================================
+  // 7. NEW CHAT & IDENTITY DISCOVERY MODAL
+  // =====================================================================
   void _showNewChatDialog() {
-    final textCtrl = TextEditingController();
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: const Color(0xFF0F172A),
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      backgroundColor: Colors.transparent,
       builder: (ctx) {
-        return Padding(
-          padding: EdgeInsets.only(
-            left: 20,
-            right: 20,
-            top: 20,
-            bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    'Start Encrypted Conversation',
-                    style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close, color: Colors.white54, size: 20),
-                    onPressed: () => Navigator.pop(ctx),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Enter the peer\'s unique NEXA ID (e.g. NX-C53E-AEE9) or @username to begin end-to-end encrypted messaging.',
-                style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: textCtrl,
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  hintText: 'e.g. @alice or NX-C53E-AEE9',
-                  hintStyle: const TextStyle(color: Color(0xFF64748B)),
-                  filled: true,
-                  fillColor: const Color(0xFF1E293B),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                ),
-              ),
-              const SizedBox(height: 16),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF0284C7),
-                  foregroundColor: Colors.white,
-                  minimumSize: const Size(double.infinity, 44),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-                onPressed: () {
-                  final input = textCtrl.text.trim();
-                  if (input.isEmpty) return;
-                  Navigator.pop(ctx);
-                  final name = input.startsWith('@') ? input : '@$input';
-                  final nexaId = input.startsWith('NX-') ? input : 'NX-${input.replaceAll('@', '').toUpperCase()}';
-                  _openChat(name, nexaId);
-                },
-                child: const Text('Open Chat Channel', style: TextStyle(fontWeight: FontWeight.bold)),
-              ),
-            ],
-          ),
+        return _NewChatSheet(
+          deviceContacts: _deviceContacts,
+          directoryUsers: _directoryUsers,
+          onSelectPeer: (contactName, nexaId) {
+            Navigator.pop(ctx);
+            _openChat(contactName, nexaId);
+          },
+          onStartCall: (contactName, nexaId, isVideo) {
+            Navigator.pop(ctx);
+            _startCall(contactName: contactName, nexaId: nexaId, isVideo: isVideo);
+          },
+          onRequestSyncContacts: () async {
+            await _loadContacts();
+          },
         );
       },
     );
@@ -1242,6 +1224,556 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
             const SizedBox(height: 12),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// =====================================================================
+// 8. RICH NEW CHAT & IDENTITY SELECTOR SHEET
+// =====================================================================
+class _NewChatSheet extends StatefulWidget {
+  final List<Map<String, dynamic>> deviceContacts;
+  final List<Map<String, dynamic>> directoryUsers;
+  final Function(String contactName, String nexaId) onSelectPeer;
+  final Function(String contactName, String nexaId, bool isVideo) onStartCall;
+  final Future<void> Function() onRequestSyncContacts;
+
+  const _NewChatSheet({
+    required this.deviceContacts,
+    required this.directoryUsers,
+    required this.onSelectPeer,
+    required this.onStartCall,
+    required this.onRequestSyncContacts,
+  });
+
+  @override
+  State<_NewChatSheet> createState() => _NewChatSheetState();
+}
+
+class _NewChatSheetState extends State<_NewChatSheet> {
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+  int _activeFilter = 0; // 0 = All, 1 = Contacts, 2 = On NEXA, 3 = Directory
+  bool _isSyncing = false;
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final query = _searchQuery.trim().toLowerCase();
+
+    // 1. Filtered Device Contacts
+    final filteredDevice = widget.deviceContacts.where((c) {
+      if (query.isEmpty) return true;
+      final name = (c['name'] ?? '').toString().toLowerCase();
+      final phone = (c['phone'] ?? '').toString().toLowerCase();
+      final handle = (c['handle'] ?? '').toString().toLowerCase();
+      final nexaId = (c['nexaId'] ?? '').toString().toLowerCase();
+      return name.contains(query) || phone.contains(query) || handle.contains(query) || nexaId.contains(query);
+    }).toList();
+
+    // 2. Filtered On-NEXA Contacts
+    final onNexaContacts = filteredDevice.where((c) => c['isOnNexa'] == true).toList();
+
+    // 3. Filtered Directory Peers
+    final filteredDirectory = widget.directoryUsers.where((u) {
+      if (query.isEmpty) return true;
+      final un = (u['username'] ?? '').toString().toLowerCase();
+      final fn = (u['full_name'] ?? u['fullName'] ?? '').toString().toLowerCase();
+      final nid = (u['nexa_id'] ?? u['nexaId'] ?? '').toString().toLowerCase();
+      final ph = (u['phone'] ?? '').toString().toLowerCase();
+      return un.contains(query) || fn.contains(query) || nid.contains(query) || ph.contains(query);
+    }).toList();
+
+    // Construct unified list based on active filter
+    final List<Map<String, dynamic>> displayedItems = [];
+    if (_activeFilter == 0) {
+      // ALL: Device Contacts first, then Directory Peers not already in contacts
+      final seenPhones = <String>{};
+      final seenNexaIds = <String>{};
+
+      for (final c in filteredDevice) {
+        final ph = (c['phone'] ?? '').toString();
+        final nid = (c['nexaId'] ?? '').toString().toUpperCase();
+        if (ph.isNotEmpty) seenPhones.add(ph.replaceAll(RegExp(r'[^0-9]'), ''));
+        if (nid.isNotEmpty) seenNexaIds.add(nid);
+        displayedItems.add({
+          'type': 'device',
+          'data': c,
+        });
+      }
+
+      for (final u in filteredDirectory) {
+        final nid = (u['nexa_id'] ?? u['nexaId'] ?? '').toString().toUpperCase();
+        final ph = (u['phone'] ?? '').toString().replaceAll(RegExp(r'[^0-9]'), '');
+        if ((nid.isNotEmpty && seenNexaIds.contains(nid)) || (ph.isNotEmpty && seenPhones.contains(ph))) {
+          continue; // Already displayed as correlated contact
+        }
+        displayedItems.add({
+          'type': 'directory',
+          'data': u,
+        });
+      }
+    } else if (_activeFilter == 1) {
+      // Device Contacts only
+      for (final c in filteredDevice) {
+        displayedItems.add({'type': 'device', 'data': c});
+      }
+    } else if (_activeFilter == 2) {
+      // On NEXA only
+      for (final c in onNexaContacts) {
+        displayedItems.add({'type': 'device', 'data': c});
+      }
+      for (final u in filteredDirectory) {
+        displayedItems.add({'type': 'directory', 'data': u});
+      }
+    } else {
+      // Directory only
+      for (final u in filteredDirectory) {
+        displayedItems.add({'type': 'directory', 'data': u});
+      }
+    }
+
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.88,
+      decoration: const BoxDecoration(
+        color: Color(0xFF090D16),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        border: Border(top: BorderSide(color: Color(0x3300E5FF), width: 1.2)),
+      ),
+      child: Column(
+        children: [
+          // Drag handle
+          Container(
+            margin: const EdgeInsets.only(top: 12, bottom: 8),
+            width: 44,
+            height: 4,
+            decoration: BoxDecoration(
+              color: Colors.white24,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+
+          // Header
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF00E5FF).withValues(alpha: 0.15),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.add_comment_rounded, color: Color(0xFF00E5FF), size: 20),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: const [
+                            Text(
+                              'Start Conversation',
+                              style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            Text(
+                              'Select mobile contact, identity, or enter new ID',
+                              style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close_rounded, color: Colors.white70),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
+          ),
+
+          // Search / Custom ID Input Bar
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 6, 18, 10),
+            child: TextField(
+              controller: _searchController,
+              onChanged: (val) => setState(() => _searchQuery = val),
+              style: const TextStyle(color: Colors.white, fontSize: 14),
+              decoration: InputDecoration(
+                hintText: 'Enter NEXA ID (NX-...), @handle, or search...',
+                hintStyle: const TextStyle(color: Color(0xFF64748B), fontSize: 13),
+                prefixIcon: const Icon(Icons.search_rounded, color: Color(0xFF00E5FF), size: 20),
+                suffixIcon: _searchQuery.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear, color: Colors.white60, size: 18),
+                        onPressed: () {
+                          _searchController.clear();
+                          setState(() => _searchQuery = '');
+                        },
+                      )
+                    : null,
+                filled: true,
+                fillColor: const Color(0xFF111827),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: const BorderSide(color: Color(0x26FFFFFF)),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: const BorderSide(color: Color(0x26FFFFFF)),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: const BorderSide(color: Color(0xFF00E5FF), width: 1.5),
+                ),
+              ),
+            ),
+          ),
+
+          // Direct Custom ID Action Tile (Shown whenever user has typed text)
+          if (_searchQuery.trim().isNotEmpty)
+            _buildDirectCustomIdCard(_searchQuery.trim()),
+
+          // Filter Selector Tabs
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 4),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  _buildFilterChip(0, 'All', widget.deviceContacts.length + widget.directoryUsers.length),
+                  const SizedBox(width: 8),
+                  _buildFilterChip(1, '📱 Contacts', widget.deviceContacts.length),
+                  const SizedBox(width: 8),
+                  _buildFilterChip(2, '⚡ On NEXA', widget.deviceContacts.where((c) => c['isOnNexa'] == true).length + widget.directoryUsers.length),
+                  const SizedBox(width: 8),
+                  _buildFilterChip(3, '🌐 Directory', widget.directoryUsers.length),
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 6),
+
+          // Permission Helper Banner (If no device contacts loaded)
+          if (widget.deviceContacts.isEmpty && (_activeFilter == 0 || _activeFilter == 1))
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1E293B).withValues(alpha: 0.6),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0x26FFFFFF)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.perm_contact_calendar_outlined, color: Color(0xFF00E5FF), size: 22),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      kIsWeb
+                          ? 'Native address book is available on mobile.'
+                          : 'Load address book to find phone contacts on NEXA.',
+                      style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+                    ),
+                  ),
+                  TextButton.icon(
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      backgroundColor: const Color(0xFF0284C7).withValues(alpha: 0.2),
+                      foregroundColor: const Color(0xFF00E5FF),
+                    ),
+                    icon: _isSyncing
+                        ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF00E5FF)))
+                        : const Icon(Icons.sync, size: 14),
+                    label: Text(_isSyncing ? 'Syncing...' : 'Sync Contacts', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                    onPressed: _isSyncing ? null : () async {
+                      setState(() => _isSyncing = true);
+                      await widget.onRequestSyncContacts();
+                      if (mounted) setState(() => _isSyncing = false);
+                    },
+                  ),
+                ],
+              ),
+            ),
+
+          // Contacts & Identities List
+          Expanded(
+            child: displayedItems.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.person_search_outlined, color: Color(0xFF64748B), size: 40),
+                        const SizedBox(height: 12),
+                        const Text('No peers or contacts found', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 4),
+                        const Text('Type any NEXA ID or @username above to start instantly.', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12)),
+                      ],
+                    ),
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
+                    itemCount: displayedItems.length,
+                    separatorBuilder: (_, _) => const Divider(height: 1, color: Color(0x0FFFFFFF)),
+                    itemBuilder: (ctx, idx) {
+                      final item = displayedItems[idx];
+                      if (item['type'] == 'device') {
+                        return _buildDeviceContactTile(item['data'] as Map<String, dynamic>);
+                      } else {
+                        return _buildDirectoryUserTile(item['data'] as Map<String, dynamic>);
+                      }
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDirectCustomIdCard(String rawInput) {
+    final cleanInput = rawInput.trim();
+    final targetHandle = cleanInput.startsWith('@') ? cleanInput : '@$cleanInput';
+    final targetNexaId = cleanInput.toUpperCase().startsWith('NX-')
+        ? cleanInput.toUpperCase()
+        : 'NX-${cleanInput.replaceAll('@', '').toUpperCase()}';
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(18, 0, 18, 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0C1929),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFF00E5FF).withValues(alpha: 0.5)),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF00E5FF).withValues(alpha: 0.1),
+            blurRadius: 10,
+            spreadRadius: 1,
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: const BoxDecoration(
+              color: Color(0xFF00E5FF),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.send_rounded, color: Colors.black, size: 18),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Start Encrypted Chat with ID:',
+                  style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  cleanInput.toUpperCase().startsWith('NX-') ? cleanInput.toUpperCase() : targetHandle,
+                  style: const TextStyle(color: Color(0xFF00E5FF), fontSize: 14, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF00E5FF),
+              foregroundColor: Colors.black,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: () => widget.onSelectPeer(targetHandle, targetNexaId),
+            child: const Text('Chat Now', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFilterChip(int index, String label, int count) {
+    final isSelected = _activeFilter == index;
+    return GestureDetector(
+      onTap: () => setState(() => _activeFilter = index),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: isSelected ? const Color(0xFF00E5FF).withValues(alpha: 0.15) : const Color(0xFF111827),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isSelected ? const Color(0xFF00E5FF) : const Color(0x1AFFFFFF),
+            width: isSelected ? 1.4 : 1,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                color: isSelected ? const Color(0xFF00E5FF) : Colors.white70,
+                fontSize: 12,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+            const SizedBox(width: 5),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+              decoration: BoxDecoration(
+                color: isSelected ? const Color(0xFF00E5FF) : const Color(0xFF1E293B),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                '$count',
+                style: TextStyle(
+                  color: isSelected ? Colors.black : const Color(0xFF94A3B8),
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDeviceContactTile(Map<String, dynamic> c) {
+    final name = (c['name'] ?? 'Contact').toString();
+    final phone = (c['phone'] ?? '').toString();
+    final isOnNexa = c['isOnNexa'] == true;
+    final targetHandle = isOnNexa ? (c['handle'] ?? name).toString() : name;
+    final targetNexaId = (c['nexaId'] ?? (phone.isNotEmpty ? phone : 'NX-${name.toUpperCase()}')).toString();
+
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(vertical: 4),
+      onTap: () => widget.onSelectPeer(targetHandle, targetNexaId),
+      leading: CircleAvatar(
+        radius: 20,
+        backgroundColor: isOnNexa ? const Color(0xFF10B981).withValues(alpha: 0.2) : const Color(0xFF1E293B),
+        child: Text(
+          name.isNotEmpty ? name.substring(0, 1).toUpperCase() : '?',
+          style: TextStyle(
+            color: isOnNexa ? const Color(0xFF10B981) : Colors.white70,
+            fontWeight: FontWeight.bold,
+            fontSize: 15,
+          ),
+        ),
+      ),
+      title: Row(
+        children: [
+          Expanded(
+            child: Text(
+              name,
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (isOnNexa)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+              decoration: BoxDecoration(
+                color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Text('ON NEXA', style: TextStyle(color: Color(0xFF10B981), fontSize: 9, fontWeight: FontWeight.bold)),
+            ),
+        ],
+      ),
+      subtitle: Text(
+        isOnNexa ? '$phone • $targetHandle' : (phone.isNotEmpty ? phone : 'Mobile Contact'),
+        style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+      ),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            icon: const Icon(Icons.chat_bubble_rounded, color: Color(0xFF00E5FF), size: 20),
+            tooltip: 'Start Chat',
+            onPressed: () => widget.onSelectPeer(targetHandle, targetNexaId),
+          ),
+          IconButton(
+            icon: const Icon(Icons.phone_rounded, color: Color(0xFF10B981), size: 20),
+            tooltip: 'Voice Call',
+            onPressed: () => widget.onStartCall(name, targetNexaId, false),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDirectoryUserTile(Map<String, dynamic> u) {
+    final un = (u['username'] ?? '').toString();
+    final fn = (u['full_name'] ?? u['fullName'] ?? un).toString();
+    final nid = (u['nexa_id'] ?? u['nexaId'] ?? 'NX-PEER').toString();
+    final targetHandle = '@$un';
+
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(vertical: 4),
+      onTap: () => widget.onSelectPeer(targetHandle, nid),
+      leading: CircleAvatar(
+        radius: 20,
+        backgroundColor: const Color(0xFF00E5FF).withValues(alpha: 0.15),
+        child: Text(
+          fn.isNotEmpty ? fn.substring(0, 1).toUpperCase() : '?',
+          style: const TextStyle(color: Color(0xFF00E5FF), fontWeight: FontWeight.bold, fontSize: 15),
+        ),
+      ),
+      title: Row(
+        children: [
+          Expanded(
+            child: Text(
+              fn,
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+            decoration: BoxDecoration(
+              color: const Color(0xFF00E5FF).withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Text('VERIFIED PEER', style: TextStyle(color: Color(0xFF00E5FF), fontSize: 9, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+      subtitle: Text(
+        '$targetHandle • $nid',
+        style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+      ),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            icon: const Icon(Icons.chat_bubble_rounded, color: Color(0xFF00E5FF), size: 20),
+            tooltip: 'Start Chat',
+            onPressed: () => widget.onSelectPeer(targetHandle, nid),
+          ),
+          IconButton(
+            icon: const Icon(Icons.phone_rounded, color: Color(0xFF10B981), size: 20),
+            tooltip: 'Voice Call',
+            onPressed: () => widget.onStartCall(fn, nid, false),
+          ),
+        ],
       ),
     );
   }

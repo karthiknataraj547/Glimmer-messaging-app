@@ -22,10 +22,10 @@ let dbState = {
   activity_logs: [],
   messages: [],
   app_version: {
-    latest_version: '1.0.1',
-    build_number: 2,
-    release_date: '2026-10-08',
-    release_notes: 'Native device contacts synchronization, peer ID servicing option, real-time message delivery enhancements, and security upgrades.',
+    latest_version: '1.2.1',
+    build_number: 5,
+    release_date: '2026-10-09',
+    release_notes: 'New Chat mobile contacts & saved identities selector, custom NEXA ID & handle messaging, bidirectional real-time delivery fixes.',
     download_url: 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk',
     web_url: 'https://glimmer-messaging-app-web.vercel.app/',
     mandatory: false,
@@ -119,6 +119,65 @@ const Database = {
       if (u.nexa_id && u.nexa_id.toUpperCase() === clean) return u;
     }
     return null;
+  },
+
+  resolveUser(identifier) {
+    if (!identifier || typeof identifier !== 'string') return null;
+    loadFromDisk();
+    const raw = identifier.trim();
+    if (!raw) return null;
+
+    const clean = raw.replace(/^@+/, '').toLowerCase();
+    const cleanUpper = raw.toUpperCase();
+    const cleanDigits = raw.replace(/\D/g, '');
+
+    if (dbState.users && dbState.users[clean]) return dbState.users[clean];
+
+    for (const u of Object.values(dbState.users || {})) {
+      if (!u) continue;
+      const uUsername = (u.username || '').toLowerCase();
+      const uNexaId = (u.nexa_id || '').toUpperCase();
+      const uFullName = (u.full_name || '').toLowerCase();
+      const uPhoneDigits = (u.phone || '').replace(/\D/g, '');
+
+      if (uUsername === clean) return u;
+      if (uNexaId === cleanUpper || uNexaId.toLowerCase() === clean) return u;
+      if (cleanDigits.length >= 7 && uPhoneDigits.length >= 7) {
+        if (cleanDigits === uPhoneDigits || cleanDigits.endsWith(uPhoneDigits) || uPhoneDigits.endsWith(cleanDigits)) {
+          return u;
+        }
+      }
+      if (uFullName && uFullName === clean) return u;
+    }
+    return null;
+  },
+
+  getUserAliases(identifier, extraId = null) {
+    const aliases = new Set();
+    if (!identifier && !extraId) return aliases;
+
+    const addIdent = (val) => {
+      if (!val || typeof val !== 'string') return;
+      const v = val.trim();
+      if (!v) return;
+      aliases.add(v.toLowerCase());
+      aliases.add(v.replace(/^@+/, '').toLowerCase());
+      const digits = v.replace(/\D/g, '');
+      if (digits.length >= 7) aliases.add(digits);
+    };
+
+    addIdent(identifier);
+    if (extraId) addIdent(extraId);
+
+    const user = this.resolveUser(identifier) || (extraId ? this.resolveUser(extraId) : null);
+    if (user) {
+      addIdent(user.username);
+      addIdent(user.nexa_id);
+      if (user.full_name) addIdent(user.full_name);
+      if (user.phone) addIdent(user.phone);
+    }
+
+    return aliases;
   },
 
   createUser(userData) {
@@ -226,40 +285,76 @@ const Database = {
   saveMessage(msg) {
     loadFromDisk();
     if (!dbState.messages) dbState.messages = [];
+
+    const rawSender = (msg.sender_handle || '').trim();
+    const rawSenderId = (msg.sender_nexa_id || '').trim();
+    const rawRecipient = (msg.recipient_handle || '').trim();
+    const rawRecipientId = (msg.recipient_nexa_id || '').trim();
+
+    // 1. Resolve Sender
+    const senderUser = this.resolveUser(rawSender) || this.resolveUser(rawSenderId);
+    const senderHandle = senderUser ? senderUser.username.toLowerCase() : rawSender.replace(/^@+/, '').toLowerCase();
+    const senderNexaId = senderUser ? senderUser.nexa_id : (rawSenderId || (senderHandle ? `NX-${senderHandle.toUpperCase()}` : 'NX-PEER'));
+
+    // 2. Resolve Recipient
+    const recipientUser = this.resolveUser(rawRecipient) || this.resolveUser(rawRecipientId);
+    const recipientHandle = recipientUser ? recipientUser.username.toLowerCase() : rawRecipient.replace(/^@+/, '').toLowerCase();
+    const recipientNexaId = recipientUser ? recipientUser.nexa_id : (rawRecipientId || (recipientHandle.toUpperCase().startsWith('NX-') ? recipientHandle.toUpperCase() : `NX-${recipientHandle.toUpperCase()}`));
+
     const item = {
-      id: `MSG-${Date.now()}-${Math.floor(Math.random() * 8999 + 1000)}`,
+      id: msg.id || `MSG-${Date.now()}-${Math.floor(Math.random() * 8999 + 1000)}`,
       ...msg,
-      timestamp: msg.timestamp || Date.now()
+      sender_handle: senderHandle,
+      sender_nexa_id: senderNexaId,
+      recipient_handle: recipientHandle,
+      recipient_nexa_id: recipientNexaId,
+      timestamp: Number(msg.timestamp) || Date.now(),
+      created_at: Date.now()
     };
     dbState.messages.push(item);
+    if (dbState.messages.length > 5000) {
+      dbState.messages = dbState.messages.slice(-5000);
+    }
     saveToDiskSync();
     return item;
   },
 
-  getMessageThread(user1, user2) {
+  getMessageThread(user1, user2, options = {}) {
     loadFromDisk();
     if (!dbState.messages) return [];
-    const u1 = (user1 || '').trim().replace(/^@+/, '').toLowerCase();
-    const u2 = (user2 || '').trim().replace(/^@+/, '').toLowerCase();
+
+    const aliases1 = this.getUserAliases(user1, options.my_id);
+    const aliases2 = this.getUserAliases(user2, options.peer_id);
 
     return dbState.messages.filter(m => {
-      const sender = (m.sender_handle || '').toLowerCase();
-      const recip = (m.recipient_handle || '').toLowerCase();
+      const sH = (m.sender_handle || '').toLowerCase();
       const sId = (m.sender_nexa_id || '').toLowerCase();
+      const rH = (m.recipient_handle || '').toLowerCase();
       const rId = (m.recipient_nexa_id || '').toLowerCase();
 
-      const isFrom1To2 = (sender === u1 || sId === u1) && (recip === u2 || rId === u2);
-      const isFrom2To1 = (sender === u2 || sId === u2) && (recip === u1 || rId === u1);
-      return isFrom1To2 || isFrom2To1;
+      const senderIs1 = aliases1.has(sH) || aliases1.has(sId);
+      const recipientIs2 = aliases2.has(rH) || aliases2.has(rId);
+
+      const senderIs2 = aliases2.has(sH) || aliases2.has(sId);
+      const recipientIs1 = aliases1.has(rH) || aliases1.has(rId);
+
+      return (senderIs1 && recipientIs2) || (senderIs2 && recipientIs1);
     }).sort((a, b) => a.timestamp - b.timestamp);
   },
 
-  getInbox(recipient) {
+  getThread(user1, user2, options = {}) {
+    return this.getMessageThread(user1, user2, options);
+  },
+
+  getInbox(recipient, extraId = null) {
     loadFromDisk();
     if (!dbState.messages) return [];
-    const clean = (recipient || '').trim().replace(/^@+/, '').toLowerCase();
+    const aliases = this.getUserAliases(recipient, extraId);
+
     return dbState.messages.filter(m => {
-      return (m.recipient_handle || '').toLowerCase() === clean || (m.recipient_nexa_id || '').toLowerCase() === clean;
+      const rH = (m.recipient_handle || '').toLowerCase();
+      const rId = (m.recipient_nexa_id || '').toLowerCase();
+      return aliases.has(rH) || aliases.has(rId);
     }).sort((a, b) => a.timestamp - b.timestamp);
   },
 
@@ -380,10 +475,10 @@ const Database = {
   getAppVersion() {
     loadFromDisk();
     return dbState.app_version || {
-      latest_version: '1.2.0',
-      build_number: 4,
+      latest_version: '1.2.1',
+      build_number: 5,
       release_date: '2026-10-09',
-      release_notes: 'Redesigned Modern Minimalist UI, Dual Camera Vision Video Calls & Voice Calling, and Native Device Contacts Sync.',
+      release_notes: 'New Chat mobile contacts & saved identities selector, custom NEXA ID & handle messaging, bidirectional real-time delivery fixes.',
       download_url: 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk',
       web_url: 'https://glimmer-messaging-app-web.vercel.app/',
       mandatory: false,
@@ -394,8 +489,8 @@ const Database = {
   setAppVersion(info) {
     loadFromDisk();
     dbState.app_version = {
-      latest_version: info.latest_version || '1.2.0',
-      build_number: Number(info.build_number) || 4,
+      latest_version: info.latest_version || '1.2.1',
+      build_number: Number(info.build_number) || 5,
       release_date: info.release_date || new Date().toISOString().split('T')[0],
       release_notes: info.release_notes || 'Performance and security updates.',
       download_url: info.download_url || 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk',

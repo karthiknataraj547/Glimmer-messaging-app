@@ -243,17 +243,17 @@ app.get('/v1/directory/resolve/:identifier', async (req, res) => {
 // --------------------------------------------------------------------------
 app.post('/v1/messages/send', (req, res) => {
   const { sender_handle, sender_nexa_id, recipient_handle, recipient_nexa_id, text, type, audio_path, audio_duration, timestamp } = req.body || {};
-  if (!sender_handle || (!recipient_handle && !recipient_nexa_id) || !text) {
+  if (!sender_handle || (!recipient_handle && !recipient_nexa_id) || (!text && !audio_path)) {
     return res.status(400).json({ error: 'Missing required message parameters' });
   }
 
   const newMsg = Database.saveMessage({
     sender_handle,
-    sender_nexa_id: sender_nexa_id || 'NX-UNKNOWN',
+    sender_nexa_id: sender_nexa_id || '',
     recipient_handle: recipient_handle || '',
     recipient_nexa_id: recipient_nexa_id || '',
-    text,
-    type: type || 'text',
+    text: text || '',
+    type: type || (audio_path ? 'voice' : 'text'),
     audio_path: audio_path || null,
     audio_duration: audio_duration || 0,
     timestamp: timestamp || Date.now()
@@ -267,7 +267,8 @@ app.post('/v1/messages/send', (req, res) => {
 
 app.get('/v1/messages/thread/:user1/:user2', (req, res) => {
   const { user1, user2 } = req.params;
-  const messages = Database.getMessageThread(user1, user2);
+  const { peer_id, my_id } = req.query || {};
+  const messages = Database.getMessageThread(user1, user2, { peer_id, my_id });
   return res.json({
     success: true,
     count: messages.length,
@@ -277,7 +278,8 @@ app.get('/v1/messages/thread/:user1/:user2', (req, res) => {
 
 app.get('/v1/messages/inbox/:user', (req, res) => {
   const { user } = req.params;
-  const messages = Database.getInbox(user);
+  const { nexa_id } = req.query || {};
+  const messages = Database.getInbox(user, nexa_id);
   return res.json({
     success: true,
     count: messages.length,

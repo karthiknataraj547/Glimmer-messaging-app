@@ -819,10 +819,10 @@
     }
   ],
   "app_version": {
-    "latest_version": "1.2.0",
-    "build_number": 4,
+    "latest_version": "1.2.1",
+    "build_number": 5,
     "release_date": "2026-10-09",
-    "release_notes": "Redesigned Modern Minimalist UI, Dual Camera Vision Video Calls & Voice Calling, and Native Device Contacts Sync.",
+    "release_notes": "New Chat mobile contacts & saved identities selector, custom NEXA ID & handle messaging, bidirectional real-time delivery fixes.",
     "download_url": "https://glimmer-messaging-app-web.vercel.app/nexa-release.apk",
     "web_url": "https://glimmer-messaging-app-web.vercel.app/",
     "mandatory": false,

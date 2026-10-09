@@ -43,13 +43,21 @@ class ChatService {
   }
 
   /// Fetch conversation thread between the logged-in user and a peer
-  Future<List<Map<String, dynamic>>> fetchThread(String peerHandleOrNexaId) async {
+  Future<List<Map<String, dynamic>>> fetchThread(String peerHandleOrNexaId, {String? peerNexaId}) async {
     final myHandle = UserSession.instance.handle.replaceAll('@', '');
+    final myNexaId = UserSession.instance.nexaId;
     final cleanPeer = peerHandleOrNexaId.replaceAll('@', '');
 
     try {
       final baseUrl = await AuthService.instance.getBaseUrl();
-      final uri = Uri.parse('$baseUrl/v1/messages/thread/$myHandle/$cleanPeer');
+      var uriStr = '$baseUrl/v1/messages/thread/$myHandle/$cleanPeer';
+      final params = <String, String>{};
+      if (myNexaId.isNotEmpty) params['my_id'] = myNexaId;
+      if (peerNexaId != null && peerNexaId.isNotEmpty) params['peer_id'] = peerNexaId;
+      if (params.isNotEmpty) {
+        uriStr += '?${params.entries.map((e) => '${e.key}=${Uri.encodeComponent(e.value)}').join('&')}';
+      }
+      final uri = Uri.parse(uriStr);
       final res = await AuthService.instance.getJson(uri);
       if (res != null && res['messages'] is List) {
         return List<Map<String, dynamic>>.from(res['messages'] as List);
@@ -63,9 +71,17 @@ class ChatService {
   /// Fetch incoming inbox messages for current user
   Future<List<Map<String, dynamic>>> fetchInbox() async {
     final myHandle = UserSession.instance.handle.replaceAll('@', '');
+    final myNexaId = UserSession.instance.nexaId;
+    final ident = myHandle.isNotEmpty ? myHandle : myNexaId;
+    if (ident.isEmpty) return [];
+
     try {
       final baseUrl = await AuthService.instance.getBaseUrl();
-      final uri = Uri.parse('$baseUrl/v1/messages/inbox/$myHandle');
+      var uriStr = '$baseUrl/v1/messages/inbox/$ident';
+      if (myNexaId.isNotEmpty) {
+        uriStr += '?nexa_id=${Uri.encodeComponent(myNexaId)}';
+      }
+      final uri = Uri.parse(uriStr);
       final res = await AuthService.instance.getJson(uri);
       if (res != null && res['messages'] is List) {
         return List<Map<String, dynamic>>.from(res['messages'] as List);
