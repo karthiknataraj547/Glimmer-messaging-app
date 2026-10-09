@@ -364,7 +364,10 @@ router.post('/v1/admin/purge-queue', adminAuthMiddleware, (req, res) => {
 // --------------------------------------------------------------------------
 // 9. Application Releases & Update Engine
 // --------------------------------------------------------------------------
-router.get(['/v1/app/version', '/v1/app/check-update'], (req, res) => {
+router.get(['/v1/app/version', '/v1/app/check-update'], async (req, res) => {
+  if (Database.syncFromCloud) {
+    try { await Database.syncFromCloud(); } catch (_) {}
+  }
   const versionInfo = Database.getAppVersion();
   res.json({
     success: true,
@@ -372,7 +375,7 @@ router.get(['/v1/app/version', '/v1/app/check-update'], (req, res) => {
   });
 });
 
-router.post('/v1/admin/app/push-update', adminAuthMiddleware, (req, res) => {
+router.post('/v1/admin/app/push-update', adminAuthMiddleware, async (req, res) => {
   const { latest_version, build_number, release_date, release_notes, download_url, web_url, mandatory } = req.body;
   if (!latest_version || !build_number) {
     return res.status(400).json({ error: 'latest_version and build_number are required.' });
@@ -387,6 +390,10 @@ router.post('/v1/admin/app/push-update', adminAuthMiddleware, (req, res) => {
     web_url,
     mandatory
   });
+
+  if (Database.syncToCloud) {
+    await Database.syncToCloud();
+  }
 
   Database.logActivity({
     type: 'admin',

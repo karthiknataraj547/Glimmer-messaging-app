@@ -33,10 +33,10 @@ let dbState = {
   user_locations: {},
   calls: {},
   app_version: {
-    latest_version: '1.2.5',
-    build_number: 9,
+    latest_version: '1.2.6',
+    build_number: 10,
     release_date: '2026-10-09',
-    release_notes: 'Real device GPS location sharing, strictly chronological local chat storage, ephemeral store-and-forward server retention, and military-grade audited admin monitor.',
+    release_notes: 'Instant peer message reception after NEXA ID search, cloud message sync across serverless instances, and alphanumeric ID query resilience.',
     download_url: 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk',
     web_url: 'https://glimmer-messaging-app-web.vercel.app/',
     mandatory: false,
@@ -1160,10 +1160,10 @@ const Database = {
   getAppVersion() {
     loadFromDisk();
     return dbState.app_version || {
-      latest_version: '1.2.3',
-      build_number: 7,
+      latest_version: '1.2.6',
+      build_number: 10,
       release_date: '2026-10-09',
-      release_notes: 'Persistent web admin session tokens, local client chat history storage, accelerated real-time message delivery, and registered account verification.',
+      release_notes: 'Instant peer message reception after NEXA ID search, cloud message sync across serverless instances, and alphanumeric ID query resilience.',
       download_url: 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk',
       web_url: 'https://glimmer-messaging-app-web.vercel.app/',
       mandatory: false,
@@ -1174,16 +1174,17 @@ const Database = {
   setAppVersion(info) {
     loadFromDisk();
     dbState.app_version = {
-      latest_version: info.latest_version || '1.2.3',
-      build_number: Number(info.build_number) || 7,
+      latest_version: info.latest_version || '1.2.6',
+      build_number: Number(info.build_number) || 10,
       release_date: info.release_date || new Date().toISOString().split('T')[0],
-      release_notes: info.release_notes || 'Persistent web admin session tokens, local client chat history storage, accelerated real-time message delivery, and registered account verification.',
+      release_notes: info.release_notes || 'Instant peer message reception after NEXA ID search, cloud message sync across serverless instances, and alphanumeric ID query resilience.',
       download_url: info.download_url || 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk',
       web_url: info.web_url || 'https://glimmer-messaging-app-web.vercel.app/',
       mandatory: Boolean(info.mandatory),
       published_at: Date.now()
     };
     saveToDiskSync();
+    syncToCloud().catch(() => {});
     this.logActivity({
       type: 'admin',
       action: 'push_app_update',

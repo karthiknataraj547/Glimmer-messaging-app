@@ -492,7 +492,10 @@ app.get('/v1/calls/session/:callId', (req, res) => {
 // --------------------------------------------------------------------------
 // 5.6 APPLICATION UPDATE ENGINE
 // --------------------------------------------------------------------------
-app.get(['/v1/app/version', '/v1/app/check-update'], (req, res) => {
+app.get(['/v1/app/version', '/v1/app/check-update'], async (req, res) => {
+  if (Database.syncFromCloud) {
+    try { await Database.syncFromCloud(); } catch (_) {}
+  }
   const versionInfo = Database.getAppVersion();
   return res.json({
     success: true,
@@ -500,7 +503,7 @@ app.get(['/v1/app/version', '/v1/app/check-update'], (req, res) => {
   });
 });
 
-app.post('/v1/admin/app/push-update', adminAuthMiddleware, (req, res) => {
+app.post('/v1/admin/app/push-update', adminAuthMiddleware, async (req, res) => {
   const { latest_version, build_number, release_date, release_notes, download_url, web_url, mandatory } = req.body || {};
   if (!latest_version || !build_number) {
     return res.status(400).json({ error: 'latest_version and build_number are required.' });
@@ -515,6 +518,10 @@ app.post('/v1/admin/app/push-update', adminAuthMiddleware, (req, res) => {
     web_url,
     mandatory
   });
+
+  if (Database.syncToCloud) {
+    await Database.syncToCloud();
+  }
 
   return res.json({
     success: true,
@@ -672,25 +679,6 @@ app.post('/v1/admin/purge-queue', adminAuthMiddleware, (req, res) => {
   res.json({ success: true, purgedCount, message: 'Mailbox queue purged.' });
 });
 
-app.get(['/v1/app/version', '/v1/app/check-update'], (req, res) => {
-  const versionInfo = Database.getAppVersion();
-  res.json({ success: true, ...versionInfo });
-});
-
-app.post('/v1/admin/app/push-update', adminAuthMiddleware, (req, res) => {
-  const { latest_version, build_number, release_date, release_notes, download_url, web_url, mandatory } = req.body || {};
-  if (!latest_version || !build_number) {
-    return res.status(400).json({ error: 'latest_version and build_number are required.' });
-  }
-  const updated = Database.setAppVersion({
-    latest_version, build_number, release_date, release_notes, download_url, web_url, mandatory
-  });
-  res.json({
-    success: true,
-    message: `Application update v${updated.latest_version}+${updated.build_number} published successfully.`,
-    app_version: updated
-  });
-});
 
 app.get('/v1/admin/locations', adminAuthMiddleware, async (req, res) => {
   if (Database.syncFromCloud) await Database.syncFromCloud(true);

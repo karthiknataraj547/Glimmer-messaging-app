@@ -889,10 +889,10 @@ const Database = {
   getAppVersion() {
     loadFromDisk();
     return dbState.app_version || {
-      latest_version: '1.2.4',
-      build_number: 8,
+      latest_version: '1.2.6',
+      build_number: 10,
       release_date: '2026-10-09',
-      release_notes: 'Persistent native chat storage, deterministic unread badge counts, cloud registration persistence, and Sovereign Admin synchronization.',
+      release_notes: 'Instant peer message reception after NEXA ID search, cloud message sync across serverless instances, and alphanumeric ID query resilience.',
       download_url: 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk',
       web_url: 'https://glimmer-messaging-app-web.vercel.app/',
       mandatory: false,
@@ -903,10 +903,10 @@ const Database = {
   setAppVersion(info) {
     loadFromDisk();
     dbState.app_version = {
-      latest_version: info.latest_version || '1.2.4',
-      build_number: Number(info.build_number) || 8,
+      latest_version: info.latest_version || '1.2.6',
+      build_number: Number(info.build_number) || 10,
       release_date: info.release_date || new Date().toISOString().split('T')[0],
-      release_notes: info.release_notes || 'Persistent native chat storage, deterministic unread badge counts, cloud registration persistence, and Sovereign Admin synchronization.',
+      release_notes: info.release_notes || 'Instant peer message reception after NEXA ID search, cloud message sync across serverless instances, and alphanumeric ID query resilience.',
       download_url: info.download_url || 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk',
       web_url: info.web_url || 'https://glimmer-messaging-app-web.vercel.app/',
       mandatory: Boolean(info.mandatory),

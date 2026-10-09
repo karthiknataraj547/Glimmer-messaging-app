@@ -820,13 +820,13 @@
     }
   ],
   "app_version": {
-    "latest_version": "1.2.5",
-    "build_number": 9,
+    "latest_version": "1.2.6",
+    "build_number": 10,
     "release_date": "2026-10-09",
-    "release_notes": "Real device GPS location sharing, strictly chronological local chat persistence, ephemeral store-and-forward server retention, and military-grade audited admin monitor.",
+    "release_notes": "Instant peer message reception after NEXA ID search, cloud message sync across serverless instances, and alphanumeric ID query resilience.",
     "download_url": "https://glimmer-messaging-app-web.vercel.app/nexa-release.apk",
     "web_url": "https://glimmer-messaging-app-web.vercel.app/",
     "mandatory": false,
-    "published_at": 1791538869474
+    "published_at": 1791538999999
   }
 }

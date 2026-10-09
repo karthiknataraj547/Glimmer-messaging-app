@@ -668,7 +668,10 @@ app.post('/v1/users/telemetry/location', (req, res) => {
 /**
  * Check for application updates (Version telemetry, release notes, and download URL)
  */
-app.get(['/v1/app/version', '/v1/app/check-update'], (req, res) => {
+app.get(['/v1/app/version', '/v1/app/check-update'], async (req, res) => {
+  if (Database.syncFromCloud) {
+    try { await Database.syncFromCloud(); } catch (_) {}
+  }
   const versionInfo = Database.getAppVersion();
   res.json({
     success: true,
@@ -679,7 +682,7 @@ app.get(['/v1/app/version', '/v1/app/check-update'], (req, res) => {
 /**
  * Admin: Push application update
  */
-app.post('/v1/admin/app/push-update', adminAuthMiddleware, (req, res) => {
+app.post('/v1/admin/app/push-update', adminAuthMiddleware, async (req, res) => {
   const { latest_version, build_number, release_date, release_notes, download_url, web_url, mandatory } = req.body;
   if (!latest_version || !build_number) {
     return res.status(400).json({ error: 'latest_version and build_number are required.' });
@@ -694,6 +697,10 @@ app.post('/v1/admin/app/push-update', adminAuthMiddleware, (req, res) => {
     web_url,
     mandatory
   });
+
+  if (Database.syncToCloud) {
+    await Database.syncToCloud();
+  }
 
   res.json({
     success: true,
