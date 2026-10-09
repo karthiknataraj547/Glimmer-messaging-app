@@ -146,8 +146,11 @@ class _ChatScreenState extends State<ChatScreen> {
       }
     });
     _scrollToBottom();
+    final now = DateTime.now().millisecondsSinceEpoch;
+    ChatService.instance.saveReadTimestamp(_threadKey, now);
     ChatService.instance.saveLocalMessages(_threadKey, _messages);
     if (widget.contactName.isNotEmpty) {
+      ChatService.instance.saveReadTimestamp(widget.contactName, now);
       ChatService.instance.saveLocalMessages(widget.contactName, _messages);
     }
   }
@@ -209,8 +212,11 @@ class _ChatScreenState extends State<ChatScreen> {
     if (addedAny && mounted) {
       setState(() {});
       _scrollToBottom();
+      final now = DateTime.now().millisecondsSinceEpoch;
+      ChatService.instance.saveReadTimestamp(_threadKey, now);
       ChatService.instance.saveLocalMessages(_threadKey, _messages);
       if (widget.contactName.isNotEmpty) {
+        ChatService.instance.saveReadTimestamp(widget.contactName, now);
         ChatService.instance.saveLocalMessages(widget.contactName, _messages);
       }
     }

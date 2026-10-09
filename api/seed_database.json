@@ -819,13 +819,13 @@
     }
   ],
   "app_version": {
-    "latest_version": "1.2.3",
-    "build_number": 7,
+    "latest_version": "1.2.4",
+    "build_number": 8,
     "release_date": "2026-10-09",
-    "release_notes": "Persistent web admin session tokens, local client chat history storage, accelerated real-time message delivery, and registered account verification.",
+    "release_notes": "Persistent native chat storage, deterministic unread badge counts, cloud registration persistence, and Sovereign Admin synchronization.",
     "download_url": "https://glimmer-messaging-app-web.vercel.app/nexa-release.apk",
     "web_url": "https://glimmer-messaging-app-web.vercel.app/",
     "mandatory": false,
-    "published_at": 1791550000000
+    "published_at": 1791538869474
   }
 }

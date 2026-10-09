@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import '../network/auth_service.dart';
 import '../session/user_session.dart';
 
@@ -9,9 +10,12 @@ class ChatService {
   static final ChatService instance = ChatService._internal();
   ChatService._internal();
 
+  static const MethodChannel _channel = MethodChannel('com.nexa.media_picker');
+
   // In-memory message cache for instant 0ms UI render
   final Map<String, List<Map<String, dynamic>>> _memoryThreadCache = {};
   List<Map<String, dynamic>>? _cachedRecentChats;
+  final Map<String, int> _memoryReadState = {};
 
   /// Returns canonical peer key for safe indexing
   static String getCanonicalKey(String peerIdOrHandle) {
@@ -48,6 +52,18 @@ class ChatService {
       return List<Map<String, dynamic>>.from(_memoryThreadCache[key]!);
     }
 
+    // 1. Native Android Persistent SharedPreferences
+    try {
+      final dynamic raw = await _channel.invokeMethod('loadChatThread', {'key': key});
+      if (raw is String && raw.trim().isNotEmpty) {
+        final decoded = jsonDecode(raw) as List;
+        final list = decoded.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+        _memoryThreadCache[key] = list;
+        return list;
+      }
+    } catch (_) {}
+
+    // 2. File-system fallback
     try {
       final file = _getThreadFile(key);
       if (file != null && await file.exists()) {
@@ -60,7 +76,7 @@ class ChatService {
         }
       }
     } catch (e) {
-      debugPrint('[ChatService] loadLocalMessages error: $e');
+      debugPrint('[ChatService] loadLocalMessages fallback error: $e');
     }
     return [];
   }
@@ -72,14 +88,21 @@ class ChatService {
 
     final copy = messages.map((m) => Map<String, dynamic>.from(m)).toList();
     _memoryThreadCache[key] = copy;
+    final jsonStr = jsonEncode(copy);
 
+    // 1. Native Android Persistent SharedPreferences
+    try {
+      await _channel.invokeMethod('saveChatThread', {'key': key, 'data': jsonStr});
+    } catch (_) {}
+
+    // 2. File-system fallback
     try {
       final file = _getThreadFile(key);
       if (file != null) {
-        await file.writeAsString(jsonEncode(copy), flush: true);
+        await file.writeAsString(jsonStr, flush: true);
       }
     } catch (e) {
-      debugPrint('[ChatService] saveLocalMessages error: $e');
+      debugPrint('[ChatService] saveLocalMessages fallback error: $e');
     }
   }
 
@@ -89,6 +112,18 @@ class ChatService {
       return List<Map<String, dynamic>>.from(_cachedRecentChats!);
     }
 
+    // 1. Native Android Persistent SharedPreferences
+    try {
+      final dynamic raw = await _channel.invokeMethod('loadRecentChats');
+      if (raw is String && raw.trim().isNotEmpty) {
+        final decoded = jsonDecode(raw) as List;
+        final list = decoded.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+        _cachedRecentChats = list;
+        return list;
+      }
+    } catch (_) {}
+
+    // 2. File-system fallback
     try {
       final file = _getRecentChatsFile();
       if (file != null && await file.exists()) {
@@ -101,7 +136,7 @@ class ChatService {
         }
       }
     } catch (e) {
-      debugPrint('[ChatService] loadRecentChats error: $e');
+      debugPrint('[ChatService] loadRecentChats fallback error: $e');
     }
     return [];
   }
@@ -110,15 +145,51 @@ class ChatService {
   Future<void> saveRecentChats(List<Map<String, dynamic>> chats) async {
     final copy = chats.map((c) => Map<String, dynamic>.from(c)).toList();
     _cachedRecentChats = copy;
+    final jsonStr = jsonEncode(copy);
 
+    // 1. Native Android Persistent SharedPreferences
+    try {
+      await _channel.invokeMethod('saveRecentChats', {'data': jsonStr});
+    } catch (_) {}
+
+    // 2. File-system fallback
     try {
       final file = _getRecentChatsFile();
       if (file != null) {
-        await file.writeAsString(jsonEncode(copy), flush: true);
+        await file.writeAsString(jsonStr, flush: true);
       }
     } catch (e) {
-      debugPrint('[ChatService] saveRecentChats error: $e');
+      debugPrint('[ChatService] saveRecentChats fallback error: $e');
     }
+  }
+
+  /// Records the latest read timestamp for a peer thread
+  Future<void> saveReadTimestamp(String peerIdOrHandle, int timestamp) async {
+    final key = getCanonicalKey(peerIdOrHandle);
+    if (key.isEmpty) return;
+    _memoryReadState[key] = timestamp;
+    try {
+      await _channel.invokeMethod('saveReadState', {
+        'peerKey': key,
+        'lastReadTimestamp': timestamp,
+      });
+    } catch (_) {}
+  }
+
+  /// Retrieves the latest read timestamp for a peer thread
+  Future<int> getReadTimestamp(String peerIdOrHandle) async {
+    final key = getCanonicalKey(peerIdOrHandle);
+    if (key.isEmpty) return 0;
+    if (_memoryReadState.containsKey(key)) return _memoryReadState[key]!;
+    try {
+      final dynamic res = await _channel.invokeMethod('loadReadState', {'peerKey': key});
+      if (res is num) {
+        final val = res.toInt();
+        _memoryReadState[key] = val;
+        return val;
+      }
+    } catch (_) {}
+    return 0;
   }
 
   /// Send message to a peer by Handle or NEXA ID

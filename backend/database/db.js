@@ -28,12 +28,28 @@ let dbState = {
   prekey_bundles: {},  // `${userId}:${deviceId}` -> BundleRecord
   mailbox_queue: {},   // deviceId -> [Envelope]
   activity_logs: [],   // [AuditLogEntry]
+  messages: [],
+  calls: {},
+  app_version: {
+    latest_version: '1.2.4',
+    build_number: 8,
+    release_date: '2026-10-09',
+    release_notes: 'Persistent native chat storage, deterministic unread badge counts, cloud registration persistence, and Sovereign Admin synchronization.',
+    download_url: 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk',
+    web_url: 'https://glimmer-messaging-app-web.vercel.app/',
+    mandatory: false,
+    published_at: Date.now()
+  },
   meta: {
     initialized_at: Date.now(),
     last_saved_at: Date.now(),
     version: '1.0.0'
   }
 };
+
+const CLOUD_BIN_URL = 'https://extendsclass.com/api/json-storage/bin/eafefcc';
+let lastCloudSyncTime = 0;
+const CLOUD_SYNC_TTL = 3000;
 
 let pgPool = null;
 let isPgConnected = false;
@@ -96,6 +112,81 @@ function saveToDiskSync() {
   }
 }
 
+async function syncFromCloud(force = false) {
+  const now = Date.now();
+  if (!force && (now - lastCloudSyncTime < CLOUD_SYNC_TTL)) {
+    return;
+  }
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000);
+    const res = await fetch(CLOUD_BIN_URL, { signal: controller.signal });
+    clearTimeout(timeout);
+    if (res.ok) {
+      const remote = await res.json();
+      if (remote && typeof remote === 'object') {
+        let changed = false;
+        if (remote.users && typeof remote.users === 'object') {
+          for (const [k, v] of Object.entries(remote.users)) {
+            if (!dbState.users[k]) {
+              dbState.users[k] = v;
+              changed = true;
+            } else if (v.created_at && (!dbState.users[k].created_at || v.created_at >= dbState.users[k].created_at)) {
+              dbState.users[k] = v;
+            }
+          }
+        }
+        if (remote.app_version && remote.app_version.build_number) {
+          if (!dbState.app_version || remote.app_version.build_number > (dbState.app_version.build_number || 0)) {
+            dbState.app_version = remote.app_version;
+            changed = true;
+          }
+        }
+        if (Array.isArray(remote.activity_logs) && remote.activity_logs.length > 0) {
+          const existingIds = new Set((dbState.activity_logs || []).map(l => l.id || `${l.timestamp}_${l.action}`));
+          for (const log of remote.activity_logs) {
+            const id = log.id || `${log.timestamp}_${log.action}`;
+            if (!existingIds.has(id)) {
+              dbState.activity_logs.push(log);
+            }
+          }
+        }
+        lastCloudSyncTime = Date.now();
+        if (changed) {
+          saveToDiskSync();
+        }
+      }
+    }
+  } catch (_) {}
+}
+
+async function syncToCloud() {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    const body = JSON.stringify({
+      users: dbState.users,
+      user_devices: dbState.user_devices,
+      prekey_bundles: dbState.prekey_bundles,
+      mailbox_queue: dbState.mailbox_queue,
+      activity_logs: (dbState.activity_logs || []).slice(0, 100),
+      meta: dbState.meta,
+      messages: (dbState.messages || []).slice(-100),
+      app_version: dbState.app_version
+    });
+    const res = await fetch(CLOUD_BIN_URL, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+      signal: controller.signal
+    });
+    clearTimeout(timeout);
+    if (res.ok) {
+      lastCloudSyncTime = Date.now();
+    }
+  } catch (_) {}
+}
+
 // Initialize PostgreSQL if DATABASE_URL is set
 if (process.env.DATABASE_URL && Pool) {
   try {
@@ -150,6 +241,14 @@ const Database = {
     };
   },
 
+  syncFromCloud(force = false) {
+    return syncFromCloud(force);
+  },
+
+  syncToCloud() {
+    return syncToCloud();
+  },
+
   /**
    * Look up a user by clean username
    */
@@ -182,6 +281,9 @@ const Database = {
     if (!dbState.users[username]) {
       loadFromDisk();
     }
+    if (dbState.users[username]) return dbState.users[username];
+
+    await syncFromCloud(true);
     return dbState.users[username] || null;
   },
 
@@ -215,6 +317,11 @@ const Database = {
     }
 
     // Check persistent database store
+    for (const u of Object.values(dbState.users || {})) {
+      if (u.nexa_id && u.nexa_id.toUpperCase() === clean) return u;
+    }
+
+    await syncFromCloud(true);
     for (const u of Object.values(dbState.users || {})) {
       if (u.nexa_id && u.nexa_id.toUpperCase() === clean) return u;
     }
@@ -278,7 +385,8 @@ const Database = {
     addIdent(identifier);
     if (extraId) addIdent(extraId);
 
-    const user = this.resolveUser(identifier) || (extraId ? this.resolveUser(extraId) : null);
+    const clean = identifier ? identifier.trim().replace(/^@+/, '').toLowerCase() : '';
+    const user = (clean && dbState.users && dbState.users[clean]) ? dbState.users[clean] : null;
     if (user) {
       addIdent(user.username);
       addIdent(user.nexa_id);
@@ -315,6 +423,7 @@ const Database = {
     // Save to persistent file store
     dbState.users[username] = sanitized;
     saveToDiskSync();
+    await syncToCloud();
 
     // Mirror to PostgreSQL if active
     if (isPgConnected && pgPool) {
@@ -443,20 +552,27 @@ const Database = {
   getUsersDetailed() {
     loadFromDisk();
     return Object.values(dbState.users).map(u => {
-      const devices = dbState.user_devices[u.username] ? Object.keys(dbState.user_devices[u.username]).length : 0;
+      const devices = dbState.user_devices[u.username] 
+        ? Object.keys(dbState.user_devices[u.username]).length 
+        : (u.nexa_id && dbState.user_devices[u.nexa_id] ? Object.keys(dbState.user_devices[u.nexa_id]).length : 0);
       const latestLog = (dbState.activity_logs || []).find(l => l.target === u.username || l.actor === u.username);
       return {
         username: u.username,
-        handle: `@${u.username}`,
-        fullName: u.full_name || u.username,
+        handle: u.handle || `@${u.username}`,
+        fullName: u.full_name || u.fullName || u.username,
+        full_name: u.full_name || u.fullName || u.username,
         about: u.about || '',
         phone: u.phone || '',
         nexaId: u.nexa_id,
+        nexa_id: u.nexa_id,
         role: u.role || (u.username === 'admin' ? 'admin' : 'user'),
         status: u.status || 'active', // 'active' | 'suspended' | 'flagged'
-        createdAt: u.created_at,
+        createdAt: u.created_at || u.createdAt || Date.now(),
+        created_at: u.created_at || u.createdAt || Date.now(),
         devicesCount: devices,
-        lastActive: latestLog ? latestLog.timestamp : u.created_at
+        devices_count: devices,
+        lastActive: latestLog ? latestLog.timestamp : (u.created_at || Date.now()),
+        last_seen: latestLog ? latestLog.timestamp : (u.created_at || Date.now())
       };
     });
   },
@@ -470,6 +586,7 @@ const Database = {
     if (!dbState.users[username]) return null;
     dbState.users[username].status = status;
     saveToDiskSync();
+    syncToCloud().catch(() => {});
     this.logActivity({
       type: 'admin',
       action: 'update_status',
@@ -488,6 +605,7 @@ const Database = {
     const newHash = crypto.createHash('sha256').update(newPin).digest('hex');
     dbState.users[username].password_hash = newHash;
     saveToDiskSync();
+    syncToCloud().catch(() => {});
     this.logActivity({
       type: 'admin',
       action: 'reset_pin',
@@ -502,12 +620,17 @@ const Database = {
     const username = rawUsername.trim().replace(/^@+/, '').toLowerCase();
     loadFromDisk();
     if (!dbState.users[username]) return false;
+    const nexaId = dbState.users[username].nexa_id;
     delete dbState.users[username];
     if (dbState.user_devices[username]) delete dbState.user_devices[username];
+    if (nexaId && dbState.user_devices[nexaId]) delete dbState.user_devices[nexaId];
     for (const key of Object.keys(dbState.prekey_bundles)) {
-      if (key.startsWith(`${username}:`)) delete dbState.prekey_bundles[key];
+      if (key.startsWith(`${username}:`) || (nexaId && key.startsWith(`${nexaId}:`))) {
+        delete dbState.prekey_bundles[key];
+      }
     }
     saveToDiskSync();
+    syncToCloud().catch(() => {});
     this.logActivity({
       type: 'admin',
       action: 'delete_user',

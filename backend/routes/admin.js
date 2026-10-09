@@ -196,7 +196,8 @@ router.post('/v1/admin/login', async (req, res) => {
 // --------------------------------------------------------------------------
 // 2. Admin System Telemetry & Metrics
 // --------------------------------------------------------------------------
-router.get('/v1/admin/overview', adminAuthMiddleware, (req, res) => {
+router.get('/v1/admin/overview', adminAuthMiddleware, async (req, res) => {
+  if (Database.syncFromCloud) await Database.syncFromCloud(true);
   const metrics = Database.getSystemMetrics(0);
   res.json({
     success: true,
@@ -210,7 +211,8 @@ router.get('/v1/admin/overview', adminAuthMiddleware, (req, res) => {
 // --------------------------------------------------------------------------
 // 3. User Database Inspection
 // --------------------------------------------------------------------------
-router.get('/v1/admin/users', adminAuthMiddleware, (req, res) => {
+router.get('/v1/admin/users', adminAuthMiddleware, async (req, res) => {
+  if (Database.syncFromCloud) await Database.syncFromCloud(true);
   const users = Database.getUsersDetailed();
   res.json({
     success: true,

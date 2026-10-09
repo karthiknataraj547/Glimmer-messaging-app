@@ -22,10 +22,10 @@ let dbState = {
   activity_logs: [],
   messages: [],
   app_version: {
-    latest_version: '1.2.3',
-    build_number: 7,
+    latest_version: '1.2.4',
+    build_number: 8,
     release_date: '2026-10-09',
-    release_notes: 'Persistent web admin session tokens, local client chat history storage, accelerated real-time message delivery, and registered account verification.',
+    release_notes: 'Persistent native chat storage, deterministic unread badge counts, cloud registration persistence, and Sovereign Admin synchronization.',
     download_url: 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk',
     web_url: 'https://glimmer-messaging-app-web.vercel.app/',
     mandatory: false,
@@ -37,6 +37,10 @@ let dbState = {
     version: '1.0.0'
   }
 };
+
+const CLOUD_BIN_URL = 'https://extendsclass.com/api/json-storage/bin/eafefcc';
+let lastCloudSyncTime = 0;
+const CLOUD_SYNC_TTL = 3000;
 
 function ensureDir() {
   try {
@@ -87,15 +91,99 @@ function saveToDiskSync() {
   }
 }
 
+async function syncFromCloud(force = false) {
+  const now = Date.now();
+  if (!force && (now - lastCloudSyncTime < CLOUD_SYNC_TTL)) {
+    return;
+  }
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000);
+    const res = await fetch(CLOUD_BIN_URL, { signal: controller.signal });
+    clearTimeout(timeout);
+    if (res.ok) {
+      const remote = await res.json();
+      if (remote && typeof remote === 'object') {
+        let changed = false;
+        if (remote.users && typeof remote.users === 'object') {
+          for (const [k, v] of Object.entries(remote.users)) {
+            if (!dbState.users[k]) {
+              dbState.users[k] = v;
+              changed = true;
+            } else if (v.created_at && (!dbState.users[k].created_at || v.created_at >= dbState.users[k].created_at)) {
+              dbState.users[k] = v;
+            }
+          }
+        }
+        if (remote.app_version && remote.app_version.build_number) {
+          if (!dbState.app_version || remote.app_version.build_number > (dbState.app_version.build_number || 0)) {
+            dbState.app_version = remote.app_version;
+            changed = true;
+          }
+        }
+        if (Array.isArray(remote.activity_logs) && remote.activity_logs.length > 0) {
+          const existingIds = new Set((dbState.activity_logs || []).map(l => l.id || `${l.timestamp}_${l.action}`));
+          for (const log of remote.activity_logs) {
+            const id = log.id || `${log.timestamp}_${log.action}`;
+            if (!existingIds.has(id)) {
+              dbState.activity_logs.push(log);
+            }
+          }
+        }
+        lastCloudSyncTime = Date.now();
+        if (changed) {
+          saveToDiskSync();
+        }
+      }
+    }
+  } catch (_) {}
+}
+
+async function syncToCloud() {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    const body = JSON.stringify({
+      users: dbState.users,
+      user_devices: dbState.user_devices,
+      prekey_bundles: dbState.prekey_bundles,
+      mailbox_queue: dbState.mailbox_queue,
+      activity_logs: (dbState.activity_logs || []).slice(0, 100),
+      meta: dbState.meta,
+      messages: (dbState.messages || []).slice(-100),
+      app_version: dbState.app_version
+    });
+    const res = await fetch(CLOUD_BIN_URL, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+      signal: controller.signal
+    });
+    clearTimeout(timeout);
+    if (res.ok) {
+      lastCloudSyncTime = Date.now();
+    }
+  } catch (_) {}
+}
+
 // Initial boot load
 loadFromDisk();
+syncFromCloud().catch(() => {});
 
 const Database = {
+  syncFromCloud(force = false) {
+    return syncFromCloud(force);
+  },
+
+  syncToCloud() {
+    return syncToCloud();
+  },
+
   getStatus() {
     loadFromDisk();
     return {
       connected: true,
-      storage_type: 'serverless_tmp_database',
+      storage_type: 'serverless_cloud_sync_database',
       database_file: DB_FILE,
       users_count: Object.keys(dbState.users).length,
       devices_count: Object.keys(dbState.user_devices).length,
@@ -117,12 +205,15 @@ const Database = {
       node_version: process.version,
       platform: process.platform,
       active_connections: activeWsCount,
+      active_realtime_sockets: activeWsCount,
       total_users: Object.keys(dbState.users).length,
+      total_registered_users: Object.keys(dbState.users).length,
       active_users: Object.values(dbState.users).filter(u => u.status !== 'suspended').length,
       suspended_users: Object.values(dbState.users).filter(u => u.status === 'suspended').length,
       total_devices: Object.keys(dbState.user_devices).length,
       registered_devices: Object.keys(dbState.user_devices).length,
       queued_envelopes: Object.values(dbState.mailbox_queue).reduce((sum, q) => sum + (q ? q.length : 0), 0),
+      mailbox_envelopes: Object.values(dbState.mailbox_queue).reduce((sum, q) => sum + (q ? q.length : 0), 0),
       db_file_bytes: dbSize,
       db_last_saved: dbState.meta.last_saved_at,
       memory: {
@@ -130,22 +221,32 @@ const Database = {
         heap_total_mb: (mem.heapTotal / 1024 / 1024).toFixed(2),
         rss_mb: (mem.rss / 1024 / 1024).toFixed(2)
       },
+      heap_used_mb: Math.round(mem.heapUsed / 1024 / 1024 * 10) / 10,
+      rss_mb: Math.round(mem.rss / 1024 / 1024 * 10) / 10,
       security_mode: 'zero_knowledge_e2ee',
-      crypto_protocol: 'X3DH_DoubleRatchet_AES256GCM'
+      crypto_protocol: 'X3DH_DoubleRatchet_AES256GCM',
+      database_type: 'serverless_cloud_sync_database',
+      is_database_connected: true
     };
   },
 
-  findUser(username) {
+  async findUser(username) {
     loadFromDisk();
     if (!username) return null;
     const clean = username.trim().toLowerCase();
+    if (dbState.users[clean]) return dbState.users[clean];
+    await syncFromCloud(true);
     return dbState.users[clean] || null;
   },
 
-  findUserByNexaId(nexaId) {
+  async findUserByNexaId(nexaId) {
     loadFromDisk();
     if (!nexaId) return null;
     const clean = nexaId.trim().toUpperCase();
+    for (const u of Object.values(dbState.users)) {
+      if (u.nexa_id && u.nexa_id.toUpperCase() === clean) return u;
+    }
+    await syncFromCloud(true);
     for (const u of Object.values(dbState.users)) {
       if (u.nexa_id && u.nexa_id.toUpperCase() === clean) return u;
     }
@@ -200,7 +301,8 @@ const Database = {
     addIdent(identifier);
     if (extraId) addIdent(extraId);
 
-    const user = this.resolveUser(identifier) || (extraId ? this.resolveUser(extraId) : null);
+    const clean = identifier ? identifier.trim().replace(/^@+/, '').toLowerCase() : '';
+    const user = (clean && dbState.users && dbState.users[clean]) ? dbState.users[clean] : null;
     if (user) {
       addIdent(user.username);
       addIdent(user.nexa_id);
@@ -211,8 +313,9 @@ const Database = {
     return aliases;
   },
 
-  createUser(userData) {
+  async createUser(userData) {
     loadFromDisk();
+    await syncFromCloud();
     const clean = (userData.username || '').trim().toLowerCase();
     dbState.users[clean] = {
       username: clean,
@@ -228,6 +331,14 @@ const Database = {
       last_seen: Date.now()
     };
     saveToDiskSync();
+    await syncToCloud();
+    this.logActivity({
+      type: 'auth',
+      action: 'user_register',
+      target: clean,
+      actor: clean,
+      details: `New account ${dbState.users[clean].nexa_id} registered and persisted`
+    });
     return dbState.users[clean];
   },
 
@@ -238,18 +349,29 @@ const Database = {
 
   getUsersDetailed() {
     loadFromDisk();
-    return Object.values(dbState.users).map(u => ({
-      username: u.username,
-      handle: u.handle || `@${u.username}`,
-      nexa_id: u.nexa_id,
-      full_name: u.full_name,
-      about: u.about,
-      role: u.role || 'user',
-      status: u.status || 'active',
-      created_at: u.created_at || Date.now(),
-      last_seen: u.last_seen || Date.now(),
-      devices: dbState.user_devices[u.nexa_id] ? Object.keys(dbState.user_devices[u.nexa_id]).length : 0
-    }));
+    return Object.values(dbState.users).map(u => {
+      const devices = dbState.user_devices[u.nexa_id] 
+        ? Object.keys(dbState.user_devices[u.nexa_id]).length 
+        : (dbState.user_devices[u.username] ? Object.keys(dbState.user_devices[u.username]).length : 0);
+      return {
+        username: u.username,
+        handle: u.handle || `@${u.username}`,
+        nexa_id: u.nexa_id,
+        nexaId: u.nexa_id,
+        full_name: u.full_name || u.fullName || u.username,
+        fullName: u.full_name || u.fullName || u.username,
+        about: u.about || '',
+        phone: u.phone || '',
+        role: u.role || 'user',
+        status: u.status || 'active',
+        created_at: u.created_at || Date.now(),
+        createdAt: u.created_at || Date.now(),
+        last_seen: u.last_seen || u.created_at || Date.now(),
+        lastActive: u.last_seen || u.created_at || Date.now(),
+        devices_count: devices,
+        devicesCount: devices
+      };
+    });
   },
 
   updateUserStatus(username, status) {
@@ -258,6 +380,7 @@ const Database = {
     if (dbState.users[clean]) {
       dbState.users[clean].status = status;
       saveToDiskSync();
+      syncToCloud().catch(() => {});
       return true;
     }
     return false;
@@ -269,6 +392,26 @@ const Database = {
     if (dbState.users[clean]) {
       dbState.users[clean].password_hash = crypto.createHash('sha256').update(String(newPin)).digest('hex');
       saveToDiskSync();
+      syncToCloud().catch(() => {});
+      return true;
+    }
+    return false;
+  },
+
+  deleteUser(username) {
+    loadFromDisk();
+    const clean = (username || '').trim().toLowerCase();
+    if (dbState.users[clean]) {
+      const nexaId = dbState.users[clean].nexa_id;
+      delete dbState.users[clean];
+      if (nexaId && dbState.user_devices[nexaId]) {
+        delete dbState.user_devices[nexaId];
+      }
+      if (dbState.user_devices[clean]) {
+        delete dbState.user_devices[clean];
+      }
+      saveToDiskSync();
+      syncToCloud().catch(() => {});
       return true;
     }
     return false;
@@ -509,10 +652,10 @@ const Database = {
   getAppVersion() {
     loadFromDisk();
     return dbState.app_version || {
-      latest_version: '1.2.3',
-      build_number: 7,
+      latest_version: '1.2.4',
+      build_number: 8,
       release_date: '2026-10-09',
-      release_notes: 'Persistent web admin session tokens, local client chat history storage, accelerated real-time message delivery, and registered account verification.',
+      release_notes: 'Persistent native chat storage, deterministic unread badge counts, cloud registration persistence, and Sovereign Admin synchronization.',
       download_url: 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk',
       web_url: 'https://glimmer-messaging-app-web.vercel.app/',
       mandatory: false,
@@ -523,16 +666,17 @@ const Database = {
   setAppVersion(info) {
     loadFromDisk();
     dbState.app_version = {
-      latest_version: info.latest_version || '1.2.3',
-      build_number: Number(info.build_number) || 7,
+      latest_version: info.latest_version || '1.2.4',
+      build_number: Number(info.build_number) || 8,
       release_date: info.release_date || new Date().toISOString().split('T')[0],
-      release_notes: info.release_notes || 'Performance and security updates.',
+      release_notes: info.release_notes || 'Persistent native chat storage, deterministic unread badge counts, cloud registration persistence, and Sovereign Admin synchronization.',
       download_url: info.download_url || 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk',
       web_url: info.web_url || 'https://glimmer-messaging-app-web.vercel.app/',
       mandatory: Boolean(info.mandatory),
       published_at: Date.now()
     };
     saveToDiskSync();
+    syncToCloud().catch(() => {});
     return dbState.app_version;
   },
 
@@ -540,22 +684,8 @@ const Database = {
     loadFromDisk();
     dbState.mailbox_queue = {};
     saveToDiskSync();
+    syncToCloud().catch(() => {});
     return 0;
-  },
-
-  getSystemMetrics(uptime = 0) {
-    loadFromDisk();
-    const mem = process.memoryUsage();
-    return {
-      total_registered_users: Object.keys(dbState.users).length,
-      active_realtime_sockets: 0,
-      mailbox_envelopes: 0,
-      heap_used_mb: Math.round(mem.heapUsed / 1024 / 1024 * 10) / 10,
-      rss_mb: Math.round(mem.rss / 1024 / 1024 * 10) / 10,
-      uptime_seconds: Math.floor(process.uptime()),
-      database_type: 'serverless_tmp_database',
-      is_database_connected: true
-    };
   }
 };
 

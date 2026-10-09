@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:nexa_app/core/network/auth_service.dart';
 import 'package:nexa_app/features/admin/services/admin_service.dart';
 
 void main() {
@@ -7,6 +8,11 @@ void main() {
 
     setUp(() {
       admin.logout();
+      AuthService.instance.setCustomServerUrl('http://127.0.0.1:8080');
+    });
+
+    tearDown(() {
+      AuthService.instance.setCustomServerUrl(null);
     });
 
     test('Initial state is not authenticated', () {

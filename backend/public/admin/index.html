@@ -1124,11 +1124,12 @@
 
     function filterUserTable() {
       const q = document.getElementById('userSearchInput').value.toLowerCase().trim();
-      const filtered = cachedUsers.filter(u => 
-        u.username.toLowerCase().includes(q) ||
-        u.fullName.toLowerCase().includes(q) ||
-        u.nexaId.toLowerCase().includes(q)
-      );
+      const filtered = cachedUsers.filter(u => {
+        const uName = (u.username || '').toLowerCase();
+        const fName = (u.fullName || u.full_name || '').toLowerCase();
+        const nId = (u.nexaId || u.nexa_id || '').toLowerCase();
+        return uName.includes(q) || fName.includes(q) || nId.includes(q);
+      });
 
       const tbody = document.getElementById('userTableBody');
       if (filtered.length === 0) {
@@ -1139,7 +1140,11 @@
       tbody.innerHTML = filtered.map(u => {
         const isSuspended = u.status === 'suspended';
         const isAdmin = u.role === 'admin';
-        const dateStr = new Date(u.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        const fn = u.fullName || u.full_name || u.username;
+        const nid = u.nexaId || u.nexa_id || 'NX-N/A';
+        const dCount = (u.devicesCount !== undefined) ? u.devicesCount : (u.devices_count || 0);
+        const cAt = u.createdAt || u.created_at || Date.now();
+        const dateStr = new Date(cAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
         return `
           <tr>
@@ -1147,16 +1152,16 @@
               <div class="user-pill">
                 <div class="avatar-circle">${u.username.substring(0,2).toUpperCase()}</div>
                 <div>
-                  <div style="font-weight: 700;">${u.handle}</div>
+                  <div style="font-weight: 700;">${u.handle || '@' + u.username}</div>
                   <div style="font-size: 11px; color: var(--text-dim);">${u.phone || 'No phone'}</div>
                 </div>
               </div>
             </td>
-            <td><strong>${escapeHtml(u.fullName)}</strong></td>
-            <td><code style="font-family:'JetBrains Mono'; color:var(--accent-cyan); font-size:12px;">${u.nexaId}</code></td>
-            <td><span class="badge ${isAdmin ? 'badge-admin' : 'badge-user'}">${u.role}</span></td>
-            <td><span class="badge ${isSuspended ? 'badge-suspended' : 'badge-active'}">${u.status}</span></td>
-            <td><span style="font-weight:700;">${u.devicesCount}</span> device(s)</td>
+            <td><strong>${escapeHtml(fn)}</strong></td>
+            <td><code style="font-family:'JetBrains Mono'; color:var(--accent-cyan); font-size:12px;">${nid}</code></td>
+            <td><span class="badge ${isAdmin ? 'badge-admin' : 'badge-user'}">${u.role || 'user'}</span></td>
+            <td><span class="badge ${isSuspended ? 'badge-suspended' : 'badge-active'}">${u.status || 'active'}</span></td>
+            <td><span style="font-weight:700;">${dCount}</span> device(s)</td>
             <td style="color:var(--text-dim); font-size:12px;">${dateStr}</td>
             <td style="text-align: right;">
               <div class="action-btn-group" style="justify-content: flex-end;">

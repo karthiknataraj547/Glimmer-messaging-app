@@ -3,6 +3,14 @@ import 'package:nexa_app/core/network/auth_service.dart';
 
 void main() {
   group('AuthService Online Database Authentication Tests', () {
+    setUp(() {
+      AuthService.instance.setCustomServerUrl('http://127.0.0.1:8080');
+    });
+
+    tearDown(() {
+      AuthService.instance.setCustomServerUrl(null);
+    });
+
     test('checkUsernameOnline rejects invalid or short usernames locally', () async {
       final resShort = await AuthService.instance.checkUsernameOnline('ab');
       expect(resShort['available'], false);

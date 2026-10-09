@@ -378,6 +378,67 @@ class MainActivity : FlutterActivity() {
                         result.success(false)
                     }
                 }
+                "saveChatThread" -> {
+                    try {
+                        val key = call.argument<String>("key") ?: ""
+                        val data = call.argument<String>("data") ?: "[]"
+                        val prefs = getSharedPreferences("nexa_local_threads", android.content.Context.MODE_PRIVATE)
+                        prefs.edit().putString("thread_$key", data).apply()
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("ERROR", "Failed to save chat thread: ${e.message}", null)
+                    }
+                }
+                "loadChatThread" -> {
+                    try {
+                        val key = call.argument<String>("key") ?: ""
+                        val prefs = getSharedPreferences("nexa_local_threads", android.content.Context.MODE_PRIVATE)
+                        val data = prefs.getString("thread_$key", null)
+                        result.success(data)
+                    } catch (e: Exception) {
+                        result.success(null)
+                    }
+                }
+                "saveRecentChats" -> {
+                    try {
+                        val data = call.argument<String>("data") ?: "[]"
+                        val prefs = getSharedPreferences("nexa_local_threads", android.content.Context.MODE_PRIVATE)
+                        prefs.edit().putString("recent_chats_list", data).apply()
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("ERROR", "Failed to save recent chats: ${e.message}", null)
+                    }
+                }
+                "loadRecentChats" -> {
+                    try {
+                        val prefs = getSharedPreferences("nexa_local_threads", android.content.Context.MODE_PRIVATE)
+                        val data = prefs.getString("recent_chats_list", null)
+                        result.success(data)
+                    } catch (e: Exception) {
+                        result.success(null)
+                    }
+                }
+                "saveReadState" -> {
+                    try {
+                        val peerKey = call.argument<String>("peerKey") ?: ""
+                        val ts = (call.argument<Number>("lastReadTimestamp"))?.toLong() ?: 0L
+                        val prefs = getSharedPreferences("nexa_chat_read_states", android.content.Context.MODE_PRIVATE)
+                        prefs.edit().putLong("read_$peerKey", ts).apply()
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.success(false)
+                    }
+                }
+                "loadReadState" -> {
+                    try {
+                        val peerKey = call.argument<String>("peerKey") ?: ""
+                        val prefs = getSharedPreferences("nexa_chat_read_states", android.content.Context.MODE_PRIVATE)
+                        val ts = prefs.getLong("read_$peerKey", 0L)
+                        result.success(ts)
+                    } catch (e: Exception) {
+                        result.success(0L)
+                    }
+                }
                 else -> result.notImplemented()
             }
         }

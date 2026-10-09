@@ -95,13 +95,47 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
       final messages = await ChatService.instance.fetchInbox();
       if (messages.isEmpty) return;
 
-      bool changed = false;
+      final myHandle = UserSession.instance.handle.replaceAll('@', '').toLowerCase();
+      final myNexaId = UserSession.instance.nexaId.toLowerCase();
+
+      // Group incoming messages by sender
+      final Map<String, List<Map<String, dynamic>>> bySender = {};
       for (final msg in messages) {
-        final senderHandle = (msg['sender_handle'] as String?) ?? 'Peer';
-        final senderNexaId = (msg['sender_nexa_id'] as String?) ?? 'NX-${senderHandle.toUpperCase()}';
-        final text = (msg['text'] as String?) ?? 'Encrypted Memo';
-        final ts = (msg['timestamp'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch;
+        final senderHandle = ((msg['sender_handle'] as String?) ?? '').replaceAll('@', '').toLowerCase();
+        final senderNexaId = ((msg['sender_nexa_id'] as String?) ?? '').toLowerCase();
+        // Ignore messages sent by me
+        if (senderHandle == myHandle || (myNexaId.isNotEmpty && (senderHandle == myNexaId || senderNexaId == myNexaId))) {
+          continue;
+        }
+        final peerKey = senderNexaId.isNotEmpty ? senderNexaId : senderHandle;
+        if (peerKey.isEmpty) continue;
+        bySender.putIfAbsent(peerKey, () => []).add(msg);
+      }
+
+      bool changed = false;
+      for (final entry in bySender.entries) {
+        final peerMessages = entry.value;
+        if (peerMessages.isEmpty) continue;
+        // Sort ascending by timestamp
+        peerMessages.sort((a, b) => ((a['timestamp'] as num?)?.toInt() ?? 0).compareTo((b['timestamp'] as num?)?.toInt() ?? 0));
+        final lastMsg = peerMessages.last;
+
+        final senderHandle = (lastMsg['sender_handle'] as String?) ?? 'Peer';
+        final senderNexaId = (lastMsg['sender_nexa_id'] as String?) ?? 'NX-${senderHandle.toUpperCase()}';
+        final text = (lastMsg['text'] as String?) ?? 'Encrypted Memo';
+        final ts = (lastMsg['timestamp'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch;
         final timeStr = _formatTimestamp(ts);
+
+        final canonicalKey = ChatService.getCanonicalKey(senderNexaId.isNotEmpty ? senderNexaId : senderHandle);
+        final readTs1 = await ChatService.instance.getReadTimestamp(canonicalKey);
+        final readTs2 = await ChatService.instance.getReadTimestamp(ChatService.getCanonicalKey(senderHandle));
+        final lastReadTs = readTs1 > readTs2 ? readTs1 : readTs2;
+
+        // Calculate unread count strictly: count messages timestamped AFTER lastReadTs
+        final unreadCount = peerMessages.where((m) {
+          final mTs = (m['timestamp'] as num?)?.toInt() ?? 0;
+          return mTs > lastReadTs;
+        }).length;
 
         final idx = _chats.indexWhere((c) {
           final n = (c['name'] as String).toLowerCase();
@@ -112,12 +146,16 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
         });
 
         if (idx >= 0) {
-          if (_chats[idx]['message'] != text) {
+          final currentMsg = _chats[idx]['message'];
+          final currentUnread = _chats[idx]['unread'];
+          if (currentMsg != text || currentUnread != unreadCount) {
             _chats[idx]['message'] = text;
             _chats[idx]['time'] = timeStr;
-            _chats[idx]['unread'] = ((_chats[idx]['unread'] as int?) ?? 0) + 1;
-            final item = _chats.removeAt(idx);
-            _chats.insert(0, item);
+            _chats[idx]['unread'] = unreadCount;
+            if (currentMsg != text) {
+              final item = _chats.removeAt(idx);
+              _chats.insert(0, item);
+            }
             changed = true;
           }
         } else {
@@ -126,7 +164,7 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
             'nexaId': senderNexaId,
             'message': text,
             'time': timeStr,
-            'unread': 1,
+            'unread': unreadCount,
           });
           changed = true;
         }
@@ -170,6 +208,13 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
   }
 
   void _openChat(String contactName, String nexaId) async {
+    final canonicalKey = ChatService.getCanonicalKey(nexaId.isNotEmpty ? nexaId : contactName);
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await ChatService.instance.saveReadTimestamp(canonicalKey, now);
+    if (contactName.isNotEmpty) {
+      await ChatService.instance.saveReadTimestamp(ChatService.getCanonicalKey(contactName), now);
+    }
+
     final idx = _chats.indexWhere((c) {
       final n = (c['name'] as String).toLowerCase();
       final id = (c['nexaId'] as String).toLowerCase();
@@ -184,6 +229,7 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
       ChatService.instance.saveRecentChats(_chats);
     }
 
+    if (!mounted) return;
     await Navigator.push(
       context,
       MaterialPageRoute(

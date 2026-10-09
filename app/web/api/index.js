@@ -250,22 +250,8 @@ app.post('/v1/auth/login-user', async (req, res) => {
   });
 });
 
-app.get('/v1/auth/users', (req, res) => {
-  const users = Database.getAllUsers();
-  return res.json({
-    count: users.length,
-    users: users.map(u => ({
-      username: u.username,
-      handle: u.handle || `@${u.username}`,
-      nexa_id: u.nexa_id,
-      full_name: u.full_name,
-      about: u.about,
-      phone: u.phone || null
-    }))
-  });
-});
-
-app.get('/v1/directory/users', (req, res) => {
+app.get(['/v1/auth/users', '/v1/directory/users'], async (req, res) => {
+  if (Database.syncFromCloud) await Database.syncFromCloud();
   const users = Database.getAllUsers();
   return res.json({
     count: users.length,
@@ -360,18 +346,10 @@ app.post('/v1/auth/contacts/sync', async (req, res) => {
   });
 });
 
-app.get('/v1/users/lookup', (req, res) => {
-  const query = req.query.q || req.query.query || '';
+app.get(['/v1/users/lookup', '/v1/users/lookup/:query'], async (req, res) => {
+  const query = req.params.query || req.query.q || req.query.query || '';
+  if (Database.syncFromCloud) await Database.syncFromCloud();
   const results = Database.searchUsers(query);
-  return res.json({
-    success: true,
-    count: results.length,
-    users: results
-  });
-});
-
-app.get('/v1/users/lookup/:query', (req, res) => {
-  const results = Database.searchUsers(req.params.query);
   return res.json({
     success: true,
     count: results.length,
@@ -549,7 +527,8 @@ app.post('/v1/admin/login', async (req, res) => {
   });
 });
 
-app.get('/v1/admin/overview', adminAuthMiddleware, (req, res) => {
+app.get('/v1/admin/overview', adminAuthMiddleware, async (req, res) => {
+  if (Database.syncFromCloud) await Database.syncFromCloud(true);
   const metrics = Database.getSystemMetrics(0);
   res.json({
     success: true,
@@ -560,7 +539,8 @@ app.get('/v1/admin/overview', adminAuthMiddleware, (req, res) => {
   });
 });
 
-app.get('/v1/admin/users', adminAuthMiddleware, (req, res) => {
+app.get('/v1/admin/users', adminAuthMiddleware, async (req, res) => {
+  if (Database.syncFromCloud) await Database.syncFromCloud(true);
   const users = Database.getUsersDetailed();
   res.json({
     success: true,
