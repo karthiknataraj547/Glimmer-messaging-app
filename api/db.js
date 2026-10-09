@@ -22,10 +22,10 @@ let dbState = {
   activity_logs: [],
   messages: [],
   app_version: {
-    latest_version: '1.2.1',
-    build_number: 5,
+    latest_version: '1.2.2',
+    build_number: 6,
     release_date: '2026-10-09',
-    release_notes: 'New Chat mobile contacts & saved identities selector, custom NEXA ID & handle messaging, bidirectional real-time delivery fixes.',
+    release_notes: 'Unified Obsidian Dark UI, high-contrast crystal-clear typography, eliminated text rendering clashes, and sleek chat bubbles.',
     download_url: 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk',
     web_url: 'https://glimmer-messaging-app-web.vercel.app/',
     mandatory: false,
@@ -475,10 +475,10 @@ const Database = {
   getAppVersion() {
     loadFromDisk();
     return dbState.app_version || {
-      latest_version: '1.2.1',
-      build_number: 5,
+      latest_version: '1.2.2',
+      build_number: 6,
       release_date: '2026-10-09',
-      release_notes: 'New Chat mobile contacts & saved identities selector, custom NEXA ID & handle messaging, bidirectional real-time delivery fixes.',
+      release_notes: 'Unified Obsidian Dark UI, high-contrast crystal-clear typography, eliminated text rendering clashes, and sleek chat bubbles.',
       download_url: 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk',
       web_url: 'https://glimmer-messaging-app-web.vercel.app/',
       mandatory: false,
@@ -489,8 +489,8 @@ const Database = {
   setAppVersion(info) {
     loadFromDisk();
     dbState.app_version = {
-      latest_version: info.latest_version || '1.2.1',
-      build_number: Number(info.build_number) || 5,
+      latest_version: info.latest_version || '1.2.2',
+      build_number: Number(info.build_number) || 6,
       release_date: info.release_date || new Date().toISOString().split('T')[0],
       release_notes: info.release_notes || 'Performance and security updates.',
       download_url: info.download_url || 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk',

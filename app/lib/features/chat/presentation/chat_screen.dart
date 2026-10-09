@@ -2306,11 +2306,12 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: NexaColors.canvasLight,
+      backgroundColor: const Color(0xFF090D16),
       appBar: AppBar(
         titleSpacing: 0,
-        backgroundColor: NexaColors.surfaceLight,
-        elevation: 0.5,
+        backgroundColor: const Color(0xFF090D16),
+        elevation: 0,
+        shape: const Border(bottom: BorderSide(color: Color(0x1AFFFFFF))),
         title: InkWell(
           onTap: () => _showPeerDetailsModal(context),
           borderRadius: BorderRadius.circular(12),
@@ -2319,10 +2320,10 @@ class _ChatScreenState extends State<ChatScreen> {
             child: Row(
               children: [
                 CircleAvatar(
-                  backgroundColor: NexaColors.primary.withValues(alpha: 0.15),
+                  backgroundColor: const Color(0xFF00E5FF).withValues(alpha: 0.15),
                   child: Text(
-                    widget.contactName.substring(0, 1),
-                    style: const TextStyle(color: NexaColors.primary, fontWeight: FontWeight.bold),
+                    widget.contactName.substring(0, 1).toUpperCase(),
+                    style: const TextStyle(color: Color(0xFF00E5FF), fontWeight: FontWeight.bold),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -2339,7 +2340,7 @@ class _ChatScreenState extends State<ChatScreen> {
                               style: const TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.w700,
-                                color: NexaColors.textPrimary,
+                                color: Colors.white,
                               ),
                             ),
                           ),
@@ -2355,7 +2356,7 @@ class _ChatScreenState extends State<ChatScreen> {
                           const SizedBox(width: 4),
                           Text(
                             widget.nexaId,
-                            style: const TextStyle(fontSize: 11, color: NexaColors.textMuted),
+                            style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
                           ),
                         ],
                       ),
@@ -2470,9 +2471,9 @@ class _ChatScreenState extends State<ChatScreen> {
             margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             decoration: BoxDecoration(
-              color: const Color(0xFFF0FDF4),
+              color: const Color(0xFF064E3B).withValues(alpha: 0.35),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFFDCFCE7)),
+              border: Border.all(color: const Color(0xFF059669).withValues(alpha: 0.4)),
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -2483,7 +2484,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   _disappearingTimer == 'Off'
                       ? 'PointyCastle Double Ratchet 256-bit active. Zero-Knowledge.'
                       : 'Messages disappear after $_disappearingTimer. Double Ratchet active.',
-                  style: const TextStyle(color: Color(0xFF166534), fontSize: 11, fontWeight: FontWeight.w500),
+                  style: const TextStyle(color: Color(0xFF6EE7B7), fontSize: 11, fontWeight: FontWeight.w500),
                 ),
               ],
             ),
@@ -2560,7 +2561,7 @@ class _ChatScreenState extends State<ChatScreen> {
               constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
-                color: isMe ? const Color(0xFFE0F2FE) : NexaColors.surfaceLight,
+                color: isMe ? const Color(0xFF0284C7) : const Color(0xFF1E293B),
                 borderRadius: BorderRadius.only(
                   topLeft: const Radius.circular(18),
                   topRight: const Radius.circular(18),
@@ -2568,11 +2569,11 @@ class _ChatScreenState extends State<ChatScreen> {
                   bottomRight: Radius.circular(isMe ? 4 : 18),
                 ),
                 border: Border.all(
-                  color: isMe ? const Color(0xFFBAE6FD) : NexaColors.borderLight,
+                  color: isMe ? const Color(0xFF0369A1) : const Color(0xFF26334A),
                 ),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.03),
+                    color: Colors.black.withValues(alpha: 0.15),
                     blurRadius: 4,
                     offset: const Offset(0, 1),
                   ),
@@ -2965,7 +2966,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   ] else ...[
                     Text(
                       text,
-                      style: const TextStyle(color: NexaColors.textPrimary, fontSize: 15, height: 1.35),
+                      style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.35),
                     ),
                   ],
                   const SizedBox(height: 4),
@@ -2974,10 +2975,16 @@ class _ChatScreenState extends State<ChatScreen> {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(time, style: const TextStyle(color: NexaColors.textMuted, fontSize: 11)),
+                        Text(
+                          time,
+                          style: TextStyle(
+                            color: isMe ? Colors.white70 : const Color(0xFF94A3B8),
+                            fontSize: 11,
+                          ),
+                        ),
                         if (isMe) ...[
                           const SizedBox(width: 4),
-                          const Icon(Icons.done_all, color: NexaColors.primary, size: 14),
+                          const Icon(Icons.done_all, color: Color(0xFF00E5FF), size: 14),
                         ],
                       ],
                     ),
@@ -3193,30 +3200,38 @@ class _ChatScreenState extends State<ChatScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: const BoxDecoration(
-        color: NexaColors.surfaceLight,
-        border: Border(top: BorderSide(color: NexaColors.borderLight)),
+        color: Color(0xFF090D16),
+        border: Border(top: BorderSide(color: Color(0x1AFFFFFF))),
       ),
       child: SafeArea(
         child: Row(
           children: [
             IconButton(
-              icon: const Icon(Icons.add_circle_outline, color: NexaColors.textSecondary, size: 24),
+              icon: const Icon(Icons.add_circle_outline, color: Color(0xFF00E5FF), size: 24),
               tooltip: 'Attach encrypted item',
               onPressed: _showAttachmentPanel,
             ),
             Expanded(
               child: TextField(
                 controller: _messageController,
-                style: const TextStyle(color: NexaColors.textPrimary, fontSize: 15),
+                style: const TextStyle(color: Colors.white, fontSize: 15),
                 decoration: InputDecoration(
                   hintText: 'End-to-end encrypted message...',
-                  hintStyle: const TextStyle(color: NexaColors.textMuted, fontSize: 14),
+                  hintStyle: const TextStyle(color: Color(0xFF64748B), fontSize: 14),
                   contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                   filled: true,
-                  fillColor: NexaColors.elevatedLight,
+                  fillColor: const Color(0xFF111827),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(24),
-                    borderSide: BorderSide.none,
+                    borderSide: const BorderSide(color: Color(0xFF26334A)),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(24),
+                    borderSide: const BorderSide(color: Color(0xFF26334A)),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(24),
+                    borderSide: const BorderSide(color: Color(0xFF00E5FF), width: 1.5),
                   ),
                 ),
                 onSubmitted: (_) => _sendMessage(),

@@ -357,7 +357,7 @@ class _AuthFlowScreenState extends State<AuthFlowScreen> {
                       style: const TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w700,
-                        color: NexaColors.primary,
+                        color: NexaColors.cyanAccent,
                       ),
                     ),
                   ),
@@ -459,24 +459,15 @@ class _AuthFlowScreenState extends State<AuthFlowScreen> {
         alignment: Alignment.center,
         padding: const EdgeInsets.symmetric(vertical: 10),
         decoration: BoxDecoration(
-          color: isSelected ? NexaColors.surfaceLight : Colors.transparent,
+          color: isSelected ? NexaColors.primary : Colors.transparent,
           borderRadius: BorderRadius.circular(10),
-          boxShadow: isSelected
-              ? [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.05),
-                    blurRadius: 4,
-                    offset: const Offset(0, 1),
-                  ),
-                ]
-              : null,
         ),
         child: Text(
           label,
           style: TextStyle(
             fontSize: 13,
             fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
-            color: isSelected ? NexaColors.primary : NexaColors.textSecondary,
+            color: isSelected ? Colors.white : NexaColors.textSecondary,
           ),
         ),
       ),
@@ -758,9 +749,9 @@ class _AuthFlowScreenState extends State<AuthFlowScreen> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
-              color: const Color(0xFFFEF2F2),
+              color: const Color(0xFF450A0A),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFFFECACA)),
+              border: Border.all(color: const Color(0xFF991B1B)),
             ),
             child: Row(
               children: [
@@ -772,7 +763,7 @@ class _AuthFlowScreenState extends State<AuthFlowScreen> {
                     style: const TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w700,
-                      color: NexaColors.rubyDestructive,
+                      color: Color(0xFFFCA5A5),
                     ),
                   ),
                 ),
@@ -784,9 +775,9 @@ class _AuthFlowScreenState extends State<AuthFlowScreen> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
-              color: const Color(0xFFF0FDF4),
+              color: const Color(0xFF064E3B),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFFBBF7D0)),
+              border: Border.all(color: const Color(0xFF059669)),
             ),
             child: Row(
               children: [
@@ -798,7 +789,7 @@ class _AuthFlowScreenState extends State<AuthFlowScreen> {
                     style: const TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w700,
-                      color: NexaColors.emeraldSecure,
+                      color: Color(0xFF6EE7B7),
                     ),
                   ),
                 ),
@@ -849,9 +840,9 @@ class _AuthFlowScreenState extends State<AuthFlowScreen> {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(
-            color: const Color(0xFFF0FDF4),
+            color: const Color(0xFF064E3B),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFFBBF7D0)),
+            border: Border.all(color: const Color(0xFF059669)),
           ),
           child: Row(
             children: [
@@ -860,7 +851,7 @@ class _AuthFlowScreenState extends State<AuthFlowScreen> {
               Expanded(
                 child: Text(
                   'Verified Handle: @$_validatedUsername',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: NexaColors.emeraldSecure),
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF6EE7B7)),
                 ),
               ),
               InkWell(
@@ -1031,16 +1022,16 @@ class _AuthFlowScreenState extends State<AuthFlowScreen> {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: isError ? const Color(0xFFFEF2F2) : const Color(0xFFF0FDF4),
+        color: isError ? const Color(0xFF450A0A) : const Color(0xFF064E3B),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: isError ? const Color(0xFFFECACA) : const Color(0xFFBBF7D0)),
+        border: Border.all(color: isError ? const Color(0xFF991B1B) : const Color(0xFF059669)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Icon(
             isError ? Icons.error_outline : Icons.check_circle_outline,
-            color: isError ? NexaColors.rubyDestructive : NexaColors.emeraldSecure,
+            color: isError ? const Color(0xFFFCA5A5) : const Color(0xFF6EE7B7),
             size: 18,
           ),
           const SizedBox(width: 8),
@@ -1050,7 +1041,7 @@ class _AuthFlowScreenState extends State<AuthFlowScreen> {
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
-                color: isError ? NexaColors.rubyDestructive : NexaColors.emeraldSecure,
+                color: isError ? const Color(0xFFFCA5A5) : const Color(0xFF6EE7B7),
               ),
             ),
           ),
