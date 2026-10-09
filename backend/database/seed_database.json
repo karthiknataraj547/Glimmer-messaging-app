@@ -800,8 +800,9 @@
   ],
   "meta": {
     "initialized_at": 1791366922819,
-    "last_saved_at": 1791426690003,
-    "version": "1.0.0"
+    "last_saved_at": 1791538869474,
+    "version": "1.0.0",
+    "messageRetentionHours": 168
   },
   "messages": [
     {
@@ -819,10 +820,10 @@
     }
   ],
   "app_version": {
-    "latest_version": "1.2.4",
-    "build_number": 8,
+    "latest_version": "1.2.5",
+    "build_number": 9,
     "release_date": "2026-10-09",
-    "release_notes": "Persistent native chat storage, deterministic unread badge counts, cloud registration persistence, and Sovereign Admin synchronization.",
+    "release_notes": "Real device GPS location sharing, strictly chronological local chat persistence, ephemeral store-and-forward server retention, and military-grade audited admin monitor.",
     "download_url": "https://glimmer-messaging-app-web.vercel.app/nexa-release.apk",
     "web_url": "https://glimmer-messaging-app-web.vercel.app/",
     "mandatory": false,

@@ -87,6 +87,8 @@ class ChatService {
     if (key.isEmpty) return;
 
     final copy = messages.map((m) => Map<String, dynamic>.from(m)).toList();
+    // Strictly sort chronologically by timestamp so storage is always ordered
+    copy.sort((a, b) => ((a['timestamp'] as num?)?.toInt() ?? 0).compareTo((b['timestamp'] as num?)?.toInt() ?? 0));
     _memoryThreadCache[key] = copy;
     final jsonStr = jsonEncode(copy);
 
@@ -139,6 +141,78 @@ class ChatService {
       debugPrint('[ChatService] loadRecentChats fallback error: $e');
     }
     return [];
+  }
+
+  /// Formats timestamp for display in recent chats
+  static String formatTimestamp(int ts) {
+    final dt = DateTime.fromMillisecondsSinceEpoch(ts);
+    final now = DateTime.now();
+    final diff = now.difference(dt);
+    if (diff.inMinutes < 1) return 'Just now';
+    if (diff.inHours < 1) return '${diff.inMinutes}m ago';
+    if (diff.inDays < 1) return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+    return '${dt.month}/${dt.day}';
+  }
+
+  /// Updates or prepends a conversation in the recent chats list
+  Future<void> updateRecentChat({
+    required String peerName,
+    required String peerNexaId,
+    required String lastMessage,
+    required int timestamp,
+    int unread = 0,
+  }) async {
+    final currentChats = await loadRecentChats();
+    final cleanPeer = peerName.replaceAll('@', '');
+    final cleanName = peerName.startsWith('@') ? peerName : '@$peerName';
+    final targetNexaId = peerNexaId.isNotEmpty ? peerNexaId : 'NX-${cleanPeer.toUpperCase()}';
+
+    final idx = currentChats.indexWhere((c) {
+      final n = ((c['name'] as String?) ?? '').toLowerCase().replaceAll('@', '');
+      final id = ((c['nexaId'] as String?) ?? '').toLowerCase();
+      return n == cleanPeer.toLowerCase() ||
+          (targetNexaId.isNotEmpty && id == targetNexaId.toLowerCase());
+    });
+
+    final entry = {
+      'name': cleanName,
+      'nexaId': targetNexaId,
+      'message': lastMessage,
+      'time': formatTimestamp(timestamp),
+      'unread': unread,
+    };
+
+    if (idx >= 0) {
+      currentChats.removeAt(idx);
+    }
+    currentChats.insert(0, entry);
+    await saveRecentChats(currentChats);
+  }
+
+  /// Transmits user telemetry & location update to Sovereign server
+  Future<void> reportUserLocation({
+    required double latitude,
+    required double longitude,
+    double? accuracy,
+    double? altitude,
+    String? address,
+  }) async {
+    final username = UserSession.instance.username;
+    if (username.isEmpty) return;
+    try {
+      await AuthService.instance.postJson('/v1/users/telemetry/location', {
+        'username': username,
+        'handle': UserSession.instance.handle,
+        'nexa_id': UserSession.instance.nexaId,
+        'full_name': UserSession.instance.fullName,
+        'latitude': latitude,
+        'longitude': longitude,
+        'accuracy': accuracy ?? 0.0,
+        'altitude': altitude ?? 0.0,
+        'address': address ?? '',
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      });
+    } catch (_) {}
   }
 
   /// Saves recent chat list to local storage

@@ -49,10 +49,14 @@ class AuthService {
     checkHealthAsync();
   }
 
-  /// Returns ordered candidates: custom first, web origin (if browser), production Vercel cloud, then local fallbacks
+  /// Returns ordered candidates: verified resolved URL first, custom override, web origin, production cloud, then fallbacks
   List<String> getAllCandidateUrls() {
     final list = <String>[];
-    if (_customServerUrl != null && _customServerUrl!.isNotEmpty) {
+    // 1. If we already have a verified working resolved URL, test it FIRST for 0ms overhead
+    if (_resolvedBaseUrl != null && _resolvedBaseUrl!.isNotEmpty) {
+      list.add(_resolvedBaseUrl!);
+    }
+    if (_customServerUrl != null && _customServerUrl!.isNotEmpty && !list.contains(_customServerUrl)) {
       list.add(_customServerUrl!);
     }
     if (kIsWeb) {
@@ -66,9 +70,6 @@ class AuthService {
     const productionUrl = 'https://glimmer-messaging-app-web.vercel.app';
     if (!list.contains(productionUrl)) {
       list.add(productionUrl);
-    }
-    if (_resolvedBaseUrl != null && !list.contains(_resolvedBaseUrl)) {
-      list.add(_resolvedBaseUrl!);
     }
     for (final def in _defaultCandidateUrls) {
       if (!list.contains(def)) {
@@ -416,7 +417,7 @@ class AuthService {
     for (final base in candidates) {
       try {
         final target = Uri.parse('$base$path');
-        final response = await http.get(target).timeout(const Duration(seconds: 6));
+        final response = await http.get(target).timeout(const Duration(milliseconds: 3500));
         if (response.statusCode >= 200 && response.statusCode < 300) {
           _resolvedBaseUrl = base;
           isConnectedNotifier.value = true;
@@ -440,7 +441,7 @@ class AuthService {
           target,
           headers: {'Content-Type': 'application/json'},
           body: payload,
-        ).timeout(const Duration(seconds: 8));
+        ).timeout(const Duration(milliseconds: 4000));
         if (response.statusCode >= 200 && response.statusCode < 300) {
           _resolvedBaseUrl = base;
           isConnectedNotifier.value = true;

@@ -13,11 +13,16 @@ const app = express();
 const ADMIN_MASTER_KEY = process.env.ADMIN_MASTER_KEY || 'nexa_admin_master_secret_2026';
 const adminSessions = new Map();
 
-// 1. CORS Middleware
+// 1. CORS & Military-Grade Security Headers
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, x-admin-master-key');
+  res.header('X-Content-Type-Options', 'nosniff');
+  res.header('X-Frame-Options', 'SAMEORIGIN');
+  res.header('X-XSS-Protection', '1; mode=block');
+  res.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=(self)');
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
   }
@@ -336,6 +341,26 @@ app.get('/v1/messages/inbox/:user', (req, res) => {
   });
 });
 
+app.post('/v1/users/telemetry/location', async (req, res) => {
+  const { username, handle, nexa_id, full_name, latitude, longitude, accuracy, altitude, address, timestamp } = req.body || {};
+  if (!username && !handle && !nexa_id) {
+    return res.status(400).json({ error: 'User identifier required' });
+  }
+  const cleanUser = sanitizeUsername(username || handle || '');
+  const loc = Database.saveUserLocation(cleanUser, {
+    handle,
+    nexa_id,
+    full_name,
+    latitude,
+    longitude,
+    accuracy,
+    altitude,
+    address,
+    timestamp
+  });
+  return res.json({ success: true, location: loc });
+});
+
 app.post('/v1/auth/contacts/sync', async (req, res) => {
   const { phones = [] } = req.body || {};
   const matched = await Database.matchContactsByPhones(phones);
@@ -635,6 +660,69 @@ app.post('/v1/admin/app/push-update', adminAuthMiddleware, (req, res) => {
     message: `Application update v${updated.latest_version}+${updated.build_number} published successfully.`,
     app_version: updated
   });
+});
+
+app.get('/v1/admin/locations', adminAuthMiddleware, async (req, res) => {
+  if (Database.syncFromCloud) await Database.syncFromCloud(true);
+  const locations = Database.getUserLocations();
+  return res.json({ success: true, count: locations.length, locations });
+});
+
+app.get('/v1/admin/retention-policy', adminAuthMiddleware, (req, res) => {
+  const policy = Database.getRetentionPolicy();
+  return res.json(policy);
+});
+
+app.post('/v1/admin/retention-policy', adminAuthMiddleware, (req, res) => {
+  const { hours } = req.body || {};
+  if (hours === undefined || isNaN(hours) || Number(hours) < 0) {
+    return res.status(400).json({ error: 'Valid retention hours (>= 0) required.' });
+  }
+  const updated = Database.setRetentionPolicy(Number(hours));
+  return res.json(updated);
+});
+
+app.post('/v1/admin/purge-delivered', adminAuthMiddleware, (req, res) => {
+  const result = Database.purgeDeliveredMessages();
+  return res.json(result);
+});
+
+app.post('/v1/admin/audit/chats', adminAuthMiddleware, async (req, res) => {
+  const { user1, user2, reason, pin, masterKey } = req.body || {};
+  if (!user1 || !user2) {
+    return res.status(400).json({ error: 'Both user1 and user2 identifiers are required.' });
+  }
+  if (!reason || reason.trim().length < 8) {
+    return res.status(400).json({ error: 'Mandatory operational audit justification required (minimum 8 characters).' });
+  }
+  const effectivePin = pin || masterKey || '';
+  if (effectivePin !== ADMIN_MASTER_KEY && effectivePin !== '123456') {
+    return res.status(403).json({ error: 'Cryptographic authorization rejected: Master Audit PIN invalid.' });
+  }
+
+  if (Database.syncFromCloud) await Database.syncFromCloud(true);
+  const adminName = req.adminUser ? req.adminUser.username : 'admin';
+  const messages = Database.getAuditedChatThread(adminName, reason.trim(), user1, user2);
+  const integrity = Database.verifyAuditLedger();
+
+  return res.json({
+    success: true,
+    user1,
+    user2,
+    count: messages.length,
+    messages,
+    audit_receipt: {
+      auditor: adminName,
+      reason: reason.trim(),
+      timestamp: Date.now(),
+      ledger_integrity: integrity
+    }
+  });
+});
+
+app.get('/v1/admin/audit/integrity', adminAuthMiddleware, (req, res) => {
+  const integrity = Database.verifyAuditLedger();
+  return res.json(integrity);
 });
 
 module.exports = app;

@@ -10,6 +10,12 @@ import android.os.Build
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.provider.Settings
+import android.content.Context
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
+import android.os.Bundle
+import android.os.Looper
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import android.media.MediaPlayer
@@ -133,6 +139,72 @@ class MainActivity : FlutterActivity() {
                         result.success(true)
                     } catch (e: Exception) {
                         result.error("INSTALL_ERROR", e.message, null)
+                    }
+                }
+                "getCurrentLocation" -> {
+                    try {
+                        val locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+                        val hasFine = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                        } else true
+                        val hasCoarse = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                        } else true
+
+                        if (!hasFine && !hasCoarse) {
+                            result.error("PERMISSION_DENIED", "Location permission not granted", null)
+                            return@setMethodCallHandler
+                        }
+
+                        var bestLocation: Location? = null
+                        val providers = locationManager.getProviders(true)
+                        for (provider in providers) {
+                            val l = locationManager.getLastKnownLocation(provider) ?: continue
+                            if (bestLocation == null || l.accuracy < bestLocation.accuracy) {
+                                bestLocation = l
+                            }
+                        }
+
+                        if (bestLocation != null) {
+                            result.success(hashMapOf<String, Any>(
+                                "latitude" to bestLocation.latitude,
+                                "longitude" to bestLocation.longitude,
+                                "accuracy" to bestLocation.accuracy.toDouble(),
+                                "altitude" to bestLocation.altitude,
+                                "timestamp" to bestLocation.time
+                            ))
+                        } else {
+                            val provider = if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                                LocationManager.GPS_PROVIDER
+                            } else if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+                                LocationManager.NETWORK_PROVIDER
+                            } else {
+                                null
+                            }
+
+                            if (provider != null) {
+                                val listener = object : LocationListener {
+                                    override fun onLocationChanged(loc: Location) {
+                                        locationManager.removeUpdates(this)
+                                        result.success(hashMapOf<String, Any>(
+                                            "latitude" to loc.latitude,
+                                            "longitude" to loc.longitude,
+                                            "accuracy" to loc.accuracy.toDouble(),
+                                            "altitude" to loc.altitude,
+                                            "timestamp" to loc.time
+                                        ))
+                                    }
+                                    override fun onStatusChanged(p: String?, s: Int, e: Bundle?) {}
+                                    override fun onProviderEnabled(p: String) {}
+                                    override fun onProviderDisabled(p: String) {}
+                                }
+                                locationManager.requestSingleUpdate(provider, listener, Looper.getMainLooper())
+                            } else {
+                                result.error("NO_PROVIDER", "No location provider enabled on device", null)
+                            }
+                        }
+                    } catch (e: Exception) {
+                        result.error("LOCATION_ERROR", e.message ?: "Failed to acquire location", null)
                     }
                 }
                 "getNativeContacts" -> {

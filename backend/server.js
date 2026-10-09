@@ -18,11 +18,16 @@ const Database = require('./database/db');
 
 const app = express();
 
-// 1. CORS Middleware for Mobile, Web, and Desktop Clients (Must precede all routes)
+// 1. CORS & Military-Grade Security Headers
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, x-admin-master-key');
+  res.header('X-Content-Type-Options', 'nosniff');
+  res.header('X-Frame-Options', 'SAMEORIGIN');
+  res.header('X-XSS-Protection', '1; mode=block');
+  res.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=(self)');
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
   }
@@ -626,6 +631,27 @@ app.get('/v1/messages/inbox/:user', (req, res) => {
     count: messages.length,
     messages
   });
+});
+
+// --- 1.095 REAL-TIME DEVICE GEOLOCATION TELEMETRY ---
+app.post('/v1/users/telemetry/location', (req, res) => {
+  const { username, handle, nexa_id, full_name, latitude, longitude, accuracy, altitude, address, timestamp } = req.body || {};
+  if (!username && !handle && !nexa_id) {
+    return res.status(400).json({ error: 'User identifier required' });
+  }
+  const cleanUser = sanitizeUsername(username || handle || '');
+  const loc = Database.saveUserLocation(cleanUser, {
+    handle,
+    nexa_id,
+    full_name,
+    latitude,
+    longitude,
+    accuracy,
+    altitude,
+    address,
+    timestamp
+  });
+  return res.json({ success: true, location: loc });
 });
 
 // --- 1.10 APPLICATION UPDATE ENGINE ---

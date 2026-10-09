@@ -81,8 +81,9 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
   /// Instant cached recent chats restore
   Future<void> _loadCachedChats() async {
     final cached = await ChatService.instance.loadRecentChats();
-    if (cached.isNotEmpty && mounted && _chats.isEmpty) {
+    if (cached.isNotEmpty && mounted) {
       setState(() {
+        _chats.clear();
         _chats.addAll(cached);
       });
     }
@@ -92,6 +93,14 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
   Future<void> _syncInbox() async {
     if (!mounted || !_session.isLoggedIn) return;
     try {
+      if (_chats.isEmpty) {
+        final cached = await ChatService.instance.loadRecentChats();
+        if (cached.isNotEmpty && mounted) {
+          setState(() {
+            _chats.addAll(cached);
+          });
+        }
+      }
       final messages = await ChatService.instance.fetchInbox();
       if (messages.isEmpty) return;
 
@@ -241,6 +250,13 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
     );
 
     if (mounted) {
+      final updated = await ChatService.instance.loadRecentChats();
+      if (mounted) {
+        setState(() {
+          _chats.clear();
+          _chats.addAll(updated);
+        });
+      }
       _syncInbox();
     }
   }

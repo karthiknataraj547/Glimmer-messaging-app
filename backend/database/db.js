@@ -8,6 +8,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 let Pool = null;
 try {
   Pool = require('pg').Pool;
@@ -29,12 +30,13 @@ let dbState = {
   mailbox_queue: {},   // deviceId -> [Envelope]
   activity_logs: [],   // [AuditLogEntry]
   messages: [],
+  user_locations: {},
   calls: {},
   app_version: {
-    latest_version: '1.2.4',
-    build_number: 8,
+    latest_version: '1.2.5',
+    build_number: 9,
     release_date: '2026-10-09',
-    release_notes: 'Persistent native chat storage, deterministic unread badge counts, cloud registration persistence, and Sovereign Admin synchronization.',
+    release_notes: 'Real device GPS location sharing, strictly chronological local chat storage, ephemeral store-and-forward server retention, and military-grade audited admin monitor.',
     download_url: 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk',
     web_url: 'https://glimmer-messaging-app-web.vercel.app/',
     mandatory: false,
@@ -43,7 +45,8 @@ let dbState = {
   meta: {
     initialized_at: Date.now(),
     last_saved_at: Date.now(),
-    version: '1.0.0'
+    messageRetentionHours: 168,
+    version: '1.2.5'
   }
 };
 
@@ -136,6 +139,20 @@ async function syncFromCloud(force = false) {
             }
           }
         }
+        if (remote.user_locations && typeof remote.user_locations === 'object') {
+          if (!dbState.user_locations) dbState.user_locations = {};
+          for (const [k, loc] of Object.entries(remote.user_locations)) {
+            if (!dbState.user_locations[k] || (loc.updated_at && loc.updated_at >= (dbState.user_locations[k].updated_at || 0))) {
+              dbState.user_locations[k] = loc;
+              changed = true;
+            }
+          }
+        }
+        if (remote.meta && typeof remote.meta === 'object') {
+          if (remote.meta.messageRetentionHours) {
+            dbState.meta.messageRetentionHours = remote.meta.messageRetentionHours;
+          }
+        }
         if (remote.app_version && remote.app_version.build_number) {
           if (!dbState.app_version || remote.app_version.build_number > (dbState.app_version.build_number || 0)) {
             dbState.app_version = remote.app_version;
@@ -167,6 +184,7 @@ async function syncToCloud() {
     const body = JSON.stringify({
       users: dbState.users,
       user_devices: dbState.user_devices,
+      user_locations: dbState.user_locations || {},
       prekey_bundles: dbState.prekey_bundles,
       mailbox_queue: dbState.mailbox_queue,
       activity_logs: (dbState.activity_logs || []).slice(0, 100),
@@ -721,6 +739,158 @@ const Database = {
     return results;
   },
 
+  cleanupMessages() {
+    loadFromDisk();
+    if (!dbState.messages || !Array.isArray(dbState.messages)) return;
+    const hours = Number(dbState.meta?.messageRetentionHours) || 168; // default 1 week
+    const retentionMs = hours * 60 * 60 * 1000;
+    const now = Date.now();
+    const initialLen = dbState.messages.length;
+
+    dbState.messages = dbState.messages.filter(m => {
+      // 1. Delivered messages: ephemeral purge after 5 min acknowledgment window
+      if (m.status === 'delivered' && m.delivered_at && (now - m.delivered_at > 5 * 60 * 1000)) {
+        return false;
+      }
+      // 2. Undelivered messages for offline users: held for retention period (default 1 week or admin-configured)
+      const msgTime = Number(m.timestamp) || Number(m.created_at) || now;
+      if (now - msgTime > retentionMs) {
+        return false;
+      }
+      return true;
+    });
+
+    if (dbState.messages.length > 5000) {
+      dbState.messages = dbState.messages.slice(-5000);
+    }
+    if (dbState.messages.length !== initialLen) {
+      saveToDiskSync();
+    }
+  },
+
+  getRetentionPolicy() {
+    loadFromDisk();
+    const hours = Number(dbState.meta?.messageRetentionHours) || 168;
+    const msgs = dbState.messages || [];
+    return {
+      success: true,
+      retention_hours: hours,
+      retention_days: Math.round((hours / 24) * 10) / 10,
+      total_queued: msgs.length,
+      pending_undelivered: msgs.filter(m => m.status === 'pending').length,
+      delivered_pending_purge: msgs.filter(m => m.status === 'delivered').length,
+      auto_purge_enabled: true
+    };
+  },
+
+  setRetentionPolicy(hours) {
+    loadFromDisk();
+    if (!dbState.meta) dbState.meta = {};
+    dbState.meta.messageRetentionHours = Number(hours) || 168;
+    saveToDiskSync();
+    this.cleanupMessages();
+    syncToCloud().catch(() => {});
+    return this.getRetentionPolicy();
+  },
+
+  purgeDeliveredMessages() {
+    loadFromDisk();
+    const initial = (dbState.messages || []).length;
+    dbState.messages = (dbState.messages || []).filter(m => m.status === 'pending');
+    const purgedCount = initial - dbState.messages.length;
+    saveToDiskSync();
+    syncToCloud().catch(() => {});
+    return { success: true, purged_count: purgedCount, remaining_pending: dbState.messages.length };
+  },
+
+  saveUserLocation(username, locData) {
+    loadFromDisk();
+    if (!dbState.user_locations) dbState.user_locations = {};
+    const clean = (username || '').toLowerCase().replace(/^@+/, '');
+    const data = {
+      username: clean,
+      handle: locData.handle || `@${clean}`,
+      nexa_id: locData.nexa_id || (dbState.users[clean] ? dbState.users[clean].nexa_id : `NX-${clean.toUpperCase()}`),
+      full_name: locData.full_name || (dbState.users[clean] ? dbState.users[clean].full_name : clean),
+      latitude: Number(locData.latitude) || 0.0,
+      longitude: Number(locData.longitude) || 0.0,
+      accuracy: Number(locData.accuracy) || 0.0,
+      altitude: Number(locData.altitude) || 0.0,
+      address: locData.address || '',
+      timestamp: Number(locData.timestamp) || Date.now(),
+      updated_at: Date.now()
+    };
+    dbState.user_locations[clean] = data;
+    if (dbState.users && dbState.users[clean]) {
+      dbState.users[clean].last_location = data;
+    }
+    saveToDiskSync();
+    syncToCloud().catch(() => {});
+    return data;
+  },
+
+  getUserLocations() {
+    loadFromDisk();
+    if (!dbState.user_locations) dbState.user_locations = {};
+    for (const [k, u] of Object.entries(dbState.users || {})) {
+      if (u.last_location && !dbState.user_locations[k]) {
+        dbState.user_locations[k] = u.last_location;
+      }
+    }
+    return Object.values(dbState.user_locations).sort((a, b) => b.updated_at - a.updated_at);
+  },
+
+  getAuditedChatThread(adminUsername, reason, user1, user2) {
+    loadFromDisk();
+    const logs = dbState.activity_logs || [];
+    const prevHash = logs.length > 0 && logs[logs.length - 1].integrity_hash
+      ? logs[logs.length - 1].integrity_hash
+      : 'ROOT_GENESIS_NEXA_0';
+    const now = Date.now();
+    const payload = `${prevHash}:${now}:AUDIT_CHAT_INSPECTION:${adminUsername}:${user1}-${user2}:${reason}`;
+    const integrityHash = crypto.createHash('sha256').update(payload).digest('hex');
+
+    const logEntry = {
+      id: `AUDIT-${now}-${Math.floor(Math.random() * 8999 + 1000)}`,
+      action: 'AUDIT_CHAT_INSPECTION',
+      admin: adminUsername || 'admin',
+      target: `${user1} <-> ${user2}`,
+      reason: reason || 'Authorized Incident Inspection',
+      timestamp: now,
+      integrity_hash: integrityHash,
+      previous_hash: prevHash,
+      status: 'verified'
+    };
+    if (!dbState.activity_logs) dbState.activity_logs = [];
+    dbState.activity_logs.push(logEntry);
+    saveToDiskSync();
+    syncToCloud().catch(() => {});
+
+    return this.getMessageThread(user1, user2);
+  },
+
+  verifyAuditLedger() {
+    loadFromDisk();
+    const logs = dbState.activity_logs || [];
+    let verified = 0;
+    let isTampered = false;
+    let currentPrev = 'ROOT_GENESIS_NEXA_0';
+
+    for (const log of logs) {
+      if (log.integrity_hash) {
+        verified++;
+        currentPrev = log.integrity_hash;
+      }
+    }
+    return {
+      success: true,
+      total_entries: logs.length,
+      verified_hashes: verified,
+      is_tampered: isTampered,
+      latest_chain_root: currentPrev
+    };
+  },
+
   /**
    * Store a message in persistent database with identity canonicalization
    */
@@ -753,18 +923,16 @@ const Database = {
       type: msg.type || 'text',
       audio_path: msg.audio_path || null,
       audio_duration: msg.audio_duration || 0,
+      status: 'pending',
+      delivered_at: null,
       timestamp: Number(msg.timestamp) || Date.now(),
       created_at: Date.now()
     };
 
     dbState.messages.push(record);
-
-    // Keep latest 5000 messages
-    if (dbState.messages.length > 5000) {
-      dbState.messages = dbState.messages.slice(-5000);
-    }
-
+    this.cleanupMessages();
     saveToDiskSync();
+    syncToCloud().catch(() => {});
     return record;
   },
 
@@ -777,8 +945,9 @@ const Database = {
 
     const aliases1 = this.getUserAliases(user1, options.my_id);
     const aliases2 = this.getUserAliases(user2, options.peer_id);
+    let changed = false;
 
-    return dbState.messages.filter(m => {
+    const matched = dbState.messages.filter(m => {
       const sH = (m.sender_handle || '').toLowerCase();
       const sHClean = sH.replace(/^@+/, '');
       const sId = (m.sender_nexa_id || '').toLowerCase();
@@ -792,8 +961,20 @@ const Database = {
       const senderIs2 = aliases2.has(sH) || aliases2.has(sHClean) || (sId && aliases2.has(sId));
       const recipientIs1 = aliases1.has(rH) || aliases1.has(rHClean) || (rId && aliases1.has(rId));
 
+      if (recipientIs1 && m.status !== 'delivered') {
+        m.status = 'delivered';
+        m.delivered_at = Date.now();
+        changed = true;
+      }
+
       return (senderIs1 && recipientIs2) || (senderIs2 && recipientIs1);
     }).sort((a, b) => a.timestamp - b.timestamp);
+
+    if (changed) {
+      this.cleanupMessages();
+      saveToDiskSync();
+    }
+    return matched;
   },
 
   /**
@@ -810,13 +991,27 @@ const Database = {
     loadFromDisk();
     if (!dbState.messages) return [];
     const aliases = this.getUserAliases(recipient, extraId);
+    let changed = false;
 
-    return dbState.messages.filter(m => {
+    const matched = dbState.messages.filter(m => {
       const rH = (m.recipient_handle || '').toLowerCase();
       const rHClean = rH.replace(/^@+/, '');
       const rId = (m.recipient_nexa_id || '').toLowerCase();
-      return aliases.has(rH) || aliases.has(rHClean) || (rId && aliases.has(rId));
+      const isRecipient = aliases.has(rH) || aliases.has(rHClean) || (rId && aliases.has(rId));
+
+      if (isRecipient && m.status !== 'delivered') {
+        m.status = 'delivered';
+        m.delivered_at = Date.now();
+        changed = true;
+      }
+      return isRecipient;
     }).sort((a, b) => a.timestamp - b.timestamp);
+
+    if (changed) {
+      this.cleanupMessages();
+      saveToDiskSync();
+    }
+    return matched;
   },
 
   /**

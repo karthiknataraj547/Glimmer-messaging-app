@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
+import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../core/services/chat_service.dart';
@@ -103,6 +105,8 @@ class _ChatScreenState extends State<ChatScreen> {
     }
     if (!mounted || cached.isEmpty) return;
 
+    cached.sort((a, b) => ((a['timestamp'] as num?)?.toInt() ?? 0).compareTo((b['timestamp'] as num?)?.toInt() ?? 0));
+
     if (_messages.isEmpty) {
       setState(() {
         _messages.addAll(cached);
@@ -113,37 +117,63 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _loadThread() async {
     final history = await ChatService.instance.fetchThread(widget.contactName, peerNexaId: widget.nexaId);
-    if (!mounted || history.isEmpty) return;
+    if (!mounted) return;
 
     final myHandle = UserSession.instance.handle.replaceAll('@', '').toLowerCase();
     final myNexaId = UserSession.instance.nexaId.toLowerCase();
 
+    // Preserve local unconfirmed or existing messages
+    final Map<String, Map<String, dynamic>> merged = {};
+    for (final m in _messages) {
+      final id = (m['id'] ?? '').toString();
+      if (id.isNotEmpty) merged[id] = m;
+    }
+
+    for (final m in history) {
+      final senderHandle = (m['sender_handle'] ?? '').toString().toLowerCase();
+      final senderNexaId = (m['sender_nexa_id'] ?? '').toString().toLowerCase();
+      final isMe = senderHandle == myHandle || (myNexaId.isNotEmpty && (senderHandle == myNexaId || senderNexaId == myNexaId));
+      final ts = (m['timestamp'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch;
+      final dt = DateTime.fromMillisecondsSinceEpoch(ts);
+      final timeStr = '${dt.hour > 12 ? dt.hour - 12 : (dt.hour == 0 ? 12 : dt.hour)}:${dt.minute.toString().padLeft(2, '0')} ${dt.hour >= 12 ? 'PM' : 'AM'}';
+      final msgId = (m['id'] ?? 'm_${ts}_${merged.length}').toString();
+      final text = (m['text'] ?? '').toString();
+
+      // Deduplicate unconfirmed outgoing message
+      if (isMe) {
+        final localKeys = merged.entries
+            .where((e) => e.value['isMe'] == true && e.value['text'] == text && e.key.startsWith('m_'))
+            .map((e) => e.key)
+            .toList();
+        for (final k in localKeys) {
+          merged.remove(k);
+        }
+      }
+
+      merged[msgId] = {
+        'id': msgId,
+        'isMe': isMe,
+        'text': text,
+        'time': timeStr,
+        'timestamp': ts,
+        'isAudio': m['type'] == 'voice',
+        'attachmentType': m['type'] != null && m['type'] != 'text' ? m['type'] : null,
+        'audioDuration': m['audio_duration'] != null && (m['audio_duration'] as num) > 0
+            ? _formatDuration((m['audio_duration'] as num).toInt())
+            : null,
+        'hasAction': false,
+        'actionAdded': false,
+        'actionDismissed': false,
+        'reactions': <String>[],
+      };
+    }
+
+    final sortedList = merged.values.toList();
+    sortedList.sort((a, b) => ((a['timestamp'] as num?)?.toInt() ?? 0).compareTo((b['timestamp'] as num?)?.toInt() ?? 0));
+
     setState(() {
       _messages.clear();
-      for (final m in history) {
-        final senderHandle = (m['sender_handle'] ?? '').toString().toLowerCase();
-        final senderNexaId = (m['sender_nexa_id'] ?? '').toString().toLowerCase();
-        final isMe = senderHandle == myHandle || (myNexaId.isNotEmpty && (senderHandle == myNexaId || senderNexaId == myNexaId));
-        final ts = (m['timestamp'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch;
-        final dt = DateTime.fromMillisecondsSinceEpoch(ts);
-        final timeStr = '${dt.hour > 12 ? dt.hour - 12 : (dt.hour == 0 ? 12 : dt.hour)}:${dt.minute.toString().padLeft(2, '0')} ${dt.hour >= 12 ? 'PM' : 'AM'}';
-
-        _messages.add({
-          'id': m['id'] ?? 'm_${ts}_${_messages.length}',
-          'isMe': isMe,
-          'text': (m['text'] ?? '').toString(),
-          'time': timeStr,
-          'isAudio': m['type'] == 'voice',
-          'attachmentType': m['type'] == 'voice' ? 'voice' : null,
-          'audioDuration': m['audio_duration'] != null && (m['audio_duration'] as num) > 0
-              ? _formatDuration((m['audio_duration'] as num).toInt())
-              : null,
-          'hasAction': false,
-          'actionAdded': false,
-          'actionDismissed': false,
-          'reactions': <String>[],
-        });
-      }
+      _messages.addAll(sortedList);
     });
     _scrollToBottom();
     final now = DateTime.now().millisecondsSinceEpoch;
@@ -165,7 +195,7 @@ class _ChatScreenState extends State<ChatScreen> {
     bool addedAny = false;
 
     for (final m in history) {
-      final msgId = m['id'] ?? '';
+      final msgId = (m['id'] ?? '').toString();
       if (msgId.isNotEmpty && !existingIds.contains(msgId)) {
         final senderHandle = (m['sender_handle'] ?? '').toString().toLowerCase();
         final senderNexaId = (m['sender_nexa_id'] ?? '').toString().toLowerCase();
@@ -194,8 +224,9 @@ class _ChatScreenState extends State<ChatScreen> {
           'isMe': isMe,
           'text': msgText,
           'time': timeStr,
+          'timestamp': ts,
           'isAudio': m['type'] == 'voice',
-          'attachmentType': m['type'] == 'voice' ? 'voice' : null,
+          'attachmentType': m['type'] != null && m['type'] != 'text' ? m['type'] : null,
           'audioDuration': m['audio_duration'] != null && (m['audio_duration'] as num) > 0
               ? _formatDuration((m['audio_duration'] as num).toInt())
               : null,
@@ -210,6 +241,7 @@ class _ChatScreenState extends State<ChatScreen> {
     }
 
     if (addedAny && mounted) {
+      _messages.sort((a, b) => ((a['timestamp'] as num?)?.toInt() ?? 0).compareTo((b['timestamp'] as num?)?.toInt() ?? 0));
       setState(() {});
       _scrollToBottom();
       final now = DateTime.now().millisecondsSinceEpoch;
@@ -218,6 +250,16 @@ class _ChatScreenState extends State<ChatScreen> {
       if (widget.contactName.isNotEmpty) {
         ChatService.instance.saveReadTimestamp(widget.contactName, now);
         ChatService.instance.saveLocalMessages(widget.contactName, _messages);
+      }
+      if (_messages.isNotEmpty) {
+        final lastMsg = _messages.last;
+        ChatService.instance.updateRecentChat(
+          peerName: widget.contactName,
+          peerNexaId: widget.nexaId,
+          lastMessage: (lastMsg['text'] ?? '').toString(),
+          timestamp: (lastMsg['timestamp'] as num?)?.toInt() ?? now,
+          unread: 0,
+        );
       }
     }
   }
@@ -238,33 +280,46 @@ class _ChatScreenState extends State<ChatScreen> {
     final text = _messageController.text.trim();
     if (text.isEmpty) return;
 
-    final now = TimeOfDay.now();
-    final timeStr = '${now.hourOfPeriod}:${now.minute.toString().padLeft(2, '0')} ${now.period == DayPeriod.am ? 'AM' : 'PM'}';
+    final now = DateTime.now();
+    final ts = now.millisecondsSinceEpoch;
+    final tod = TimeOfDay.fromDateTime(now);
+    final timeStr = '${tod.hourOfPeriod}:${tod.minute.toString().padLeft(2, '0')} ${tod.period == DayPeriod.am ? 'AM' : 'PM'}';
 
     setState(() {
       _messages.add({
-        'id': 'm_${DateTime.now().millisecondsSinceEpoch}',
+        'id': 'm_$ts',
         'isMe': true,
         'text': text,
         'time': timeStr,
+        'timestamp': ts,
         'hasAction': false,
         'actionAdded': false,
         'actionDismissed': false,
         'reactions': <String>[],
       });
+      _messages.sort((a, b) => ((a['timestamp'] as num?)?.toInt() ?? 0).compareTo((b['timestamp'] as num?)?.toInt() ?? 0));
       _messageController.clear();
       _isComposing = false;
     });
 
     _scrollToBottom();
 
-    // Persist immediately to local storage
+    // 1. Persist immediately to local storage
     ChatService.instance.saveLocalMessages(_threadKey, _messages);
     if (widget.contactName.isNotEmpty) {
       ChatService.instance.saveLocalMessages(widget.contactName, _messages);
     }
 
-    // Transmit to server relay so recipient receives the message in real time
+    // 2. Retain conversation in recent chats immediately even before peer replies!
+    ChatService.instance.updateRecentChat(
+      peerName: widget.contactName,
+      peerNexaId: widget.nexaId,
+      lastMessage: text,
+      timestamp: ts,
+      unread: 0,
+    );
+
+    // 3. Transmit to server relay so recipient receives message in real time
     ChatService.instance.sendMessage(
       recipientHandle: widget.contactName,
       recipientNexaId: widget.nexaId,
@@ -272,10 +327,10 @@ class _ChatScreenState extends State<ChatScreen> {
     );
 
     // Accelerated delivery confirmation polls
-    Future.delayed(const Duration(milliseconds: 250), () {
+    Future.delayed(const Duration(milliseconds: 200), () {
       if (mounted) _syncIncomingMessages();
     });
-    Future.delayed(const Duration(milliseconds: 700), () {
+    Future.delayed(const Duration(milliseconds: 600), () {
       if (mounted) _syncIncomingMessages();
     });
   }
@@ -1098,33 +1153,60 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _sendAttachment(String type, String title, {String? subtitle, Map<String, dynamic>? extra}) {
-    final now = TimeOfDay.now();
-    final timeStr = '${now.hourOfPeriod}:${now.minute.toString().padLeft(2, '0')} ${now.period == DayPeriod.am ? 'AM' : 'PM'}';
+    final now = DateTime.now();
+    final ts = now.millisecondsSinceEpoch;
+    final tod = TimeOfDay.fromDateTime(now);
+    final timeStr = '${tod.hourOfPeriod}:${tod.minute.toString().padLeft(2, '0')} ${tod.period == DayPeriod.am ? 'AM' : 'PM'}';
 
     setState(() {
       _messages.add({
-        'id': 'm_${DateTime.now().millisecondsSinceEpoch}',
+        'id': 'm_$ts',
         'isMe': true,
         'attachmentType': type.toLowerCase(),
         'text': title,
         'subtitle': subtitle,
         'extra': extra,
         'time': timeStr,
+        'timestamp': ts,
         'hasAction': false,
         'actionAdded': false,
         'actionDismissed': false,
         'reactions': <String>[],
       });
+      _messages.sort((a, b) => ((a['timestamp'] as num?)?.toInt() ?? 0).compareTo((b['timestamp'] as num?)?.toInt() ?? 0));
     });
+
+    _scrollToBottom();
+
+    // 1. Save locally immediately
+    ChatService.instance.saveLocalMessages(_threadKey, _messages);
+    if (widget.contactName.isNotEmpty) {
+      ChatService.instance.saveLocalMessages(widget.contactName, _messages);
+    }
+
+    // 2. Retain conversation in recent chats immediately
+    ChatService.instance.updateRecentChat(
+      peerName: widget.contactName,
+      peerNexaId: widget.nexaId,
+      lastMessage: '$type: $title',
+      timestamp: ts,
+      unread: 0,
+    );
+
+    // 3. Send over relay
+    ChatService.instance.sendMessage(
+      recipientHandle: widget.contactName,
+      recipientNexaId: widget.nexaId,
+      text: title,
+      type: type.toLowerCase(),
+    );
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('$type encrypted and sent via PointyCastle.'),
+        content: Text('$type encrypted and sent.'),
         duration: const Duration(seconds: 2),
       ),
     );
-
-    _scrollToBottom();
   }
 
   void _showAttachmentPanel() {
@@ -1837,6 +1919,47 @@ class _ChatScreenState extends State<ChatScreen> {
     );
     if (!granted || !mounted) return;
 
+    // 1. Acquire real device location from native Android or network fallback
+    double realLat = 12.9716;
+    double realLng = 77.5946;
+    double realAcc = 5.0;
+    String realAddress = 'Acquired Device Coordinates';
+    bool isRealGps = false;
+
+    try {
+      final dynamic loc = await _nativeMediaChannel.invokeMethod('getCurrentLocation');
+      if (loc is Map) {
+        realLat = (loc['latitude'] as num?)?.toDouble() ?? realLat;
+        realLng = (loc['longitude'] as num?)?.toDouble() ?? realLng;
+        realAcc = (loc['accuracy'] as num?)?.toDouble() ?? realAcc;
+        isRealGps = true;
+        realAddress = 'Real Device GPS Sensors (±${realAcc.toStringAsFixed(0)}m)';
+      }
+    } catch (_) {}
+
+    // Fallback if not on native android
+    if (!isRealGps) {
+      try {
+        final res = await http.get(Uri.parse('https://ipapi.co/json/')).timeout(const Duration(milliseconds: 2500));
+        if (res.statusCode == 200) {
+          final data = jsonDecode(res.body);
+          if (data['latitude'] != null && data['longitude'] != null) {
+            realLat = (data['latitude'] as num).toDouble();
+            realLng = (data['longitude'] as num).toDouble();
+            final city = data['city'] ?? '';
+            final region = data['region'] ?? '';
+            final country = data['country_name'] ?? '';
+            realAddress = [city, region, country].where((s) => s.isNotEmpty).join(', ');
+            isRealGps = true;
+          }
+        }
+      } catch (_) {}
+    }
+
+    final coordFormatted = '${realLat >= 0 ? realLat.toStringAsFixed(4) : (-realLat).toStringAsFixed(4)}° ${realLat >= 0 ? 'N' : 'S'}, ${realLng >= 0 ? realLng.toStringAsFixed(4) : (-realLng).toStringAsFixed(4)}° ${realLng >= 0 ? 'E' : 'W'}';
+
+    if (!mounted) return;
+
     int shareMode = 0; // 0 = Current Pin, 1 = 15m Live, 2 = 1h Live
     showModalBottomSheet(
       context: context,
@@ -1856,12 +1979,12 @@ class _ChatScreenState extends State<ChatScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text('Share Encrypted Location', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: NexaColors.textPrimary)),
+                        const Text('Share Real Location', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: NexaColors.textPrimary)),
                         IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(ctx)),
                       ],
                     ),
                     const SizedBox(height: 10),
-                    // Simulated Map Widget
+                    // Live Coordinates Widget
                     Container(
                       height: 120,
                       decoration: BoxDecoration(
@@ -1873,18 +1996,19 @@ class _ChatScreenState extends State<ChatScreen> {
                         alignment: Alignment.center,
                         children: [
                           Icon(Icons.map, size: 80, color: Colors.blueGrey.withValues(alpha: 0.2)),
-                          const Column(
+                          Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Icon(Icons.location_on, color: Color(0xFFEF4444), size: 36),
-                              SizedBox(height: 4),
-                              Text('12.9716° N, 77.5946° E', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                              Text('MG Road, Bangalore • Accuracy ±3m', style: TextStyle(color: NexaColors.textSecondary, fontSize: 11)),
+                              const Icon(Icons.location_on, color: Color(0xFFEF4444), size: 36),
+                              const SizedBox(height: 4),
+                              Text(coordFormatted, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.black87)),
+                              Text('$realAddress • Accuracy ±${realAcc.toStringAsFixed(0)}m', style: const TextStyle(color: NexaColors.textSecondary, fontSize: 11)),
                             ],
                           ),
                         ],
                       ),
                     ),
+                    const SizedBox(height: 10),
                     Container(
                       margin: const EdgeInsets.only(bottom: 6),
                       decoration: BoxDecoration(
@@ -1894,8 +2018,8 @@ class _ChatScreenState extends State<ChatScreen> {
                       ),
                       child: ListTile(
                         leading: Icon(Icons.pin_drop, color: shareMode == 0 ? NexaColors.primary : NexaColors.textMuted),
-                        title: const Text('Send Static Location Pin', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                        subtitle: const Text('Exact current coordinates snapshot', style: TextStyle(fontSize: 11)),
+                        title: const Text('Send Real Location Pin', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                        subtitle: Text('Exact GPS coordinates snapshot ($coordFormatted)', style: const TextStyle(fontSize: 11)),
                         trailing: shareMode == 0 ? const Icon(Icons.check_circle, color: NexaColors.primary, size: 20) : null,
                         onTap: () => setModalState(() => shareMode = 0),
                       ),
@@ -1910,7 +2034,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       child: ListTile(
                         leading: Icon(Icons.timer_outlined, color: shareMode == 1 ? NexaColors.primary : NexaColors.textMuted),
                         title: const Text('Share Live Location (15 Minutes)', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                        subtitle: const Text('Auto-zeroized and wipes on peer device', style: TextStyle(fontSize: 11)),
+                        subtitle: const Text('Live GPS stream • Auto-zeroized on peer device', style: TextStyle(fontSize: 11)),
                         trailing: shareMode == 1 ? const Icon(Icons.check_circle, color: NexaColors.primary, size: 20) : null,
                         onTap: () => setModalState(() => shareMode = 1),
                       ),
@@ -1938,9 +2062,26 @@ class _ChatScreenState extends State<ChatScreen> {
                         onPressed: () {
                           Navigator.pop(ctx);
                           final label = shareMode == 0
-                              ? '📍 Location Pin • MG Road, Bangalore'
-                              : (shareMode == 1 ? '📍 Live Location (15 min active)' : '📍 Live Location (1 hour active)');
-                          _sendAttachment('Location', label, subtitle: '12.9716° N, 77.5946° E • Encrypted GPS');
+                              ? '📍 Real Location Pin • $coordFormatted'
+                              : (shareMode == 1 ? '📍 Live Location (15 min active) • $coordFormatted' : '📍 Live Location (1 hour active) • $coordFormatted');
+                          final subtitle = '$realAddress • Accuracy ±${realAcc.toStringAsFixed(0)}m';
+                          _sendAttachment(
+                            'Location',
+                            label,
+                            subtitle: subtitle,
+                            extra: {
+                              'latitude': realLat,
+                              'longitude': realLng,
+                              'accuracy': realAcc,
+                              'address': realAddress,
+                            },
+                          );
+                          ChatService.instance.reportUserLocation(
+                            latitude: realLat,
+                            longitude: realLng,
+                            accuracy: realAcc,
+                            address: realAddress,
+                          );
                         },
                       ),
                     ),
