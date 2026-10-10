@@ -1049,7 +1049,8 @@ app.post('/v1/calls/offer', (req, res) => {
  */
 app.get('/v1/calls/incoming/:user', (req, res) => {
   const user = req.params.user;
-  const call = Database.getIncomingCall(user);
+  const nexaId = req.query.nexa_id || req.query.nexaId;
+  const call = Database.getIncomingCall(user, nexaId);
   return res.json({
     success: true,
     has_incoming: Boolean(call),

@@ -617,7 +617,7 @@ app.post('/v1/auth/contacts/sync', async (req, res) => {
 // --------------------------------------------------------------------------
 // 5.5 CALL SIGNALING & VIDEO/VOICE CALL INVITATION ENGINE
 // --------------------------------------------------------------------------
-app.post('/v1/calls/offer', (req, res) => {
+app.post('/v1/calls/offer', async (req, res) => {
   const body = req.body || {};
   const caller_handle = body.caller_handle || body.callerHandle || body.caller_id || body.callerId || 'anonymous';
   const caller_nexa_id = body.caller_nexa_id || body.callerNexaId || body.callerId || null;
@@ -632,6 +632,8 @@ app.post('/v1/calls/offer', (req, res) => {
     return res.status(400).json({ error: 'caller_handle and recipient identifier are required.' });
   }
 
+  if (Database.syncFromCloud) await Database.syncFromCloud(true);
+
   const session = Database.createCallSession({
     call_id: offer_id,
     caller_handle,
@@ -643,6 +645,8 @@ app.post('/v1/calls/offer', (req, res) => {
     sdp_offer
   });
 
+  if (Database.syncToCloud) await Database.syncToCloud();
+
   return res.status(200).json({
     success: true,
     call_id: session.call_id,
@@ -651,9 +655,11 @@ app.post('/v1/calls/offer', (req, res) => {
   });
 });
 
-app.get('/v1/calls/incoming/:user', (req, res) => {
+app.get('/v1/calls/incoming/:user', async (req, res) => {
+  if (Database.syncFromCloud) await Database.syncFromCloud(true);
   const user = req.params.user;
-  const call = Database.getIncomingCall(user);
+  const nexaId = req.query.nexa_id || req.query.nexaId;
+  const call = Database.getIncomingCall(user, nexaId);
   return res.json({
     success: true,
     has_incoming: Boolean(call),
@@ -661,7 +667,7 @@ app.get('/v1/calls/incoming/:user', (req, res) => {
   });
 });
 
-app.post('/v1/calls/answer', (req, res) => {
+app.post('/v1/calls/answer', async (req, res) => {
   const body = req.body || {};
   const call_id = body.call_id || body.callId || body.offer_id;
   const accepted = body.accepted !== undefined ? body.accepted : true;
@@ -671,13 +677,18 @@ app.post('/v1/calls/answer', (req, res) => {
     return res.status(400).json({ error: 'call_id is required.' });
   }
 
+  if (Database.syncFromCloud) await Database.syncFromCloud(true);
+
   const session = Database.answerCallSession(call_id, Boolean(accepted), sdp_answer);
   if (!session) {
     return res.status(404).json({ error: 'Call session not found or already expired.' });
   }
 
+  if (Database.syncToCloud) await Database.syncToCloud();
+
   return res.json({
     success: true,
+    call_id,
     session
   });
 });

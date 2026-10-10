@@ -1212,17 +1212,18 @@ const Database = {
     return session;
   },
 
-  getIncomingCall(user) {
+  getIncomingCall(user, nexaId) {
     loadFromDisk();
     if (!dbState.calls) return null;
     const clean = (user || '').trim().replace(/^@+/, '').toLowerCase();
+    const cleanNexaId = (nexaId || '').trim().toLowerCase();
     let targetHandle = clean;
-    let targetNexaId = clean.startsWith('nx-') ? clean : null;
+    let targetNexaId = clean.startsWith('nx-') ? clean : (cleanNexaId || null);
     if (dbState.users) {
       for (const u of Object.values(dbState.users)) {
         const uH = (u.handle || '').toLowerCase().replace(/^@+/, '');
         const uN = (u.nexa_id || '').toLowerCase();
-        if (uH === clean || uN === clean) {
+        if (uH === clean || uN === clean || (cleanNexaId && uN === cleanNexaId)) {
           targetHandle = uH;
           targetNexaId = uN;
           break;
@@ -1235,6 +1236,7 @@ const Database = {
       const recN = (call.recipient_nexa_id || '').toLowerCase();
       const matches = (
         recH === clean || recN === clean ||
+        (cleanNexaId && (recH === cleanNexaId || recN === cleanNexaId)) ||
         (targetHandle && (recH === targetHandle || recN === targetHandle)) ||
         (targetNexaId && (recH === targetNexaId || recN === targetNexaId))
       );
