@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import '../network/auth_service.dart';
@@ -8,6 +9,69 @@ class ContactsService {
   ContactsService._internal();
 
   static const MethodChannel _nativeChannel = MethodChannel('com.nexa.media_picker');
+
+  final Map<String, String> _savedContactsMap = {};
+  List<Map<String, dynamic>> _lastFetchedContacts = [];
+
+  List<Map<String, dynamic>> get lastFetchedContacts => _lastFetchedContacts;
+
+  void cacheFetchedContacts(List<Map<String, dynamic>> contacts) {
+    _lastFetchedContacts = contacts;
+    for (final c in contacts) {
+      final name = c['name']?.toString() ?? '';
+      final nexaId = (c['nexaId'] ?? c['nexa_id'])?.toString();
+      final handle = (c['handle'] ?? c['username'])?.toString();
+      if (name.isNotEmpty && name != 'Contact' && name != 'Unknown') {
+        if (nexaId != null && nexaId.isNotEmpty) {
+          _savedContactsMap[nexaId.trim().toLowerCase()] = name;
+        }
+        if (handle != null && handle.isNotEmpty) {
+          _savedContactsMap[handle.trim().toLowerCase().replaceAll('@', '')] = name;
+        }
+      }
+    }
+  }
+
+  String? getSavedContactName(String? peerIdOrHandle) {
+    if (peerIdOrHandle == null || peerIdOrHandle.trim().isEmpty) return null;
+    final clean = peerIdOrHandle.trim().toLowerCase().replaceAll('@', '');
+    if (_savedContactsMap.containsKey(clean)) {
+      return _savedContactsMap[clean];
+    }
+    for (final c in _lastFetchedContacts) {
+      final nId = (c['nexaId'] ?? c['nexa_id'])?.toString().trim().toLowerCase();
+      final h = (c['handle'] ?? c['username'])?.toString().trim().toLowerCase().replaceAll('@', '');
+      final name = c['name']?.toString();
+      if (name != null && name.isNotEmpty && name != 'Contact' && name != 'Unknown') {
+        if (nId == clean || h == clean) {
+          _savedContactsMap[clean] = name;
+          return name;
+        }
+      }
+    }
+    return null;
+  }
+
+  Future<void> saveContact(String peerIdOrHandle, String contactName) async {
+    final clean = peerIdOrHandle.trim().toLowerCase().replaceAll('@', '');
+    _savedContactsMap[clean] = contactName.trim();
+    try {
+      final jsonStr = jsonEncode(_savedContactsMap);
+      await _nativeChannel.invokeMethod('saveChatThread', {'key': 'saved_contacts_book', 'data': jsonStr});
+    } catch (_) {}
+  }
+
+  Future<void> loadSavedContacts() async {
+    try {
+      final dynamic raw = await _nativeChannel.invokeMethod('loadChatThread', {'key': 'saved_contacts_book'});
+      if (raw is String && raw.isNotEmpty) {
+        final Map<String, dynamic> decoded = jsonDecode(raw);
+        decoded.forEach((k, v) {
+          _savedContactsMap[k.toLowerCase()] = v.toString();
+        });
+      }
+    } catch (_) {}
+  }
 
   /// Fetches real contacts from the user's mobile device and correlates with online NEXA accounts
   Future<List<Map<String, dynamic>>> fetchDeviceContacts() async {

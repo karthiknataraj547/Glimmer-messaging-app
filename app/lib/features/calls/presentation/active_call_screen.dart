@@ -93,6 +93,12 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> with SingleTickerPr
       }
     });
 
+    // Start native full-duplex VoIP call audio hardware
+    _nativeMediaChannel.invokeMethod('startVoipCall', {
+      'isCaller': !widget.isIncoming,
+      'remotePort': widget.isIncoming ? 19850 : 19851,
+    }).catchError((_) => null);
+
     // Also poll to detect if remote peer hangs up
     if (widget.callId != null) {
       _signalingTimer?.cancel();
@@ -253,11 +259,13 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> with SingleTickerPr
   void _toggleMute() {
     HapticFeedback.lightImpact();
     setState(() => _isMuted = !_isMuted);
+    _nativeMediaChannel.invokeMethod('setVoipCallMuted', {'muted': _isMuted}).catchError((_) => null);
   }
 
   void _toggleSpeaker() {
     HapticFeedback.lightImpact();
     setState(() => _isSpeaker = !_isSpeaker);
+    _nativeMediaChannel.invokeMethod('setVoipCallSpeaker', {'speaker': _isSpeaker}).catchError((_) => null);
   }
 
   void _endCall({bool notifyServer = true}) {
@@ -266,6 +274,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> with SingleTickerPr
     _waveformTimer?.cancel();
     _cameraController?.dispose();
     _cameraController = null;
+    _nativeMediaChannel.invokeMethod('stopVoipCall').catchError((_) => null);
     HapticFeedback.heavyImpact();
 
     if (notifyServer && widget.callId != null) {
@@ -285,6 +294,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> with SingleTickerPr
     _waveformTimer?.cancel();
     _pulseController.dispose();
     _cameraController?.dispose();
+    _nativeMediaChannel.invokeMethod('stopVoipCall').catchError((_) => null);
     super.dispose();
   }
 

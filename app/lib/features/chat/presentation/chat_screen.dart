@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../core/services/chat_service.dart';
+import '../../../core/services/contacts_service.dart';
 import '../../../core/services/call_service.dart';
 import '../../../core/network/nexa_network_service.dart';
 import '../../../core/session/user_session.dart';
@@ -70,6 +71,9 @@ class _ChatScreenState extends State<ChatScreen> {
   // Media Download & Upload State
   final Map<String, String> _downloadedMediaFiles = {};
   final Set<String> _activeDownloadingMsgIds = {};
+
+  // Active Game State Notifier for instant real-time multiplayer updates
+  final ValueNotifier<Map<String, dynamic>?> _activeGameNotifier = ValueNotifier(null);
 
   String _formatBytes(dynamic bytes) {
     if (bytes == null) return 'Media';
@@ -205,9 +209,10 @@ class _ChatScreenState extends State<ChatScreen> {
   final List<Map<String, dynamic>> _messages = [];
 
   String get _displayName {
-    if (widget.contactName.trim().isNotEmpty) return widget.contactName.trim();
+    final saved = ContactsService.instance.getSavedContactName(widget.nexaId) ?? ContactsService.instance.getSavedContactName(widget.contactName);
+    if (saved != null && saved.trim().isNotEmpty) return saved.trim();
     if (widget.nexaId.trim().isNotEmpty) return widget.nexaId.trim();
-    return 'Chat';
+    return widget.contactName.trim().isNotEmpty ? widget.contactName.trim() : 'Chat';
   }
 
   String get _contactInitial {
@@ -223,9 +228,45 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _isBackgroundSyncing = false;
   StreamSubscription? _realtimeMessageSub;
 
+  // Real-time online/offline presence tracking (Not mocked - live from socket and heartbeat)
+  bool _isPeerOnline = false;
+  int? _peerLastSeen;
+  StreamSubscription? _presenceSub;
+  Timer? _presencePollTimer;
+
+  Future<void> _fetchPeerPresence() async {
+    final targetIdent = widget.nexaId.isNotEmpty ? widget.nexaId : widget.contactName;
+    if (targetIdent.isEmpty) return;
+    try {
+      final res = await NexaNetworkService.instance.fetchPresence(targetIdent);
+      if (mounted) {
+        setState(() {
+          _isPeerOnline = res['is_online'] == true;
+          if (res['last_seen'] is num) {
+            _peerLastSeen = (res['last_seen'] as num).toInt();
+          }
+        });
+      }
+    } catch (_) {}
+  }
+
+  String _formatLastSeen(int? lastSeenTs) {
+    if (lastSeenTs == null || lastSeenTs == 0) return 'Offline';
+    final diff = DateTime.now().millisecondsSinceEpoch - lastSeenTs;
+    if (diff < 60000) return 'Offline • Last seen just now';
+    final mins = diff ~/ 60000;
+    if (mins < 60) return 'Offline • Last seen ${mins}m ago';
+    final hrs = mins ~/ 60;
+    if (hrs < 24) return 'Offline • Last seen ${hrs}h ago';
+    final dt = DateTime.fromMillisecondsSinceEpoch(lastSeenTs);
+    return 'Offline • Last seen ${dt.month}/${dt.day}';
+  }
+
   @override
   void initState() {
     super.initState();
+    ChatService.instance.currentActiveChatPeer = _threadKey;
+
     if (widget.conversationId != null && widget.conversationId!.isNotEmpty) {
       _activeConversationId = widget.conversationId;
     }
@@ -257,7 +298,27 @@ class _ChatScreenState extends State<ChatScreen> {
     // 2. Non-blocking background sync with server
     _startBackgroundSync();
 
-    // 3. High-speed periodic background sync (500ms) for real-time instantaneous message delivery
+    // 3. Real-time live presence tracking & periodic polling
+    _fetchPeerPresence();
+    _presencePollTimer = Timer.periodic(const Duration(seconds: 8), (_) {
+      if (mounted) _fetchPeerPresence();
+    });
+    _presenceSub = NexaNetworkService.instance.onPresenceUpdate.listen((data) {
+      if (!mounted) return;
+      final ident = (data['user_ident'] ?? '').toString().toLowerCase();
+      final pId = widget.nexaId.toLowerCase();
+      final pHandle = widget.contactName.toLowerCase().replaceAll('@', '');
+      if (ident.isNotEmpty && (ident == pId || ident == pHandle)) {
+        setState(() {
+          _isPeerOnline = data['online'] == true;
+          if (data['last_seen'] is num) {
+            _peerLastSeen = (data['last_seen'] as num).toInt();
+          }
+        });
+      }
+    });
+
+    // 4. High-speed periodic background sync (500ms) for real-time instantaneous message delivery
     NexaNetworkService.instance.connectRealtime();
     _pollingTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
       if (mounted) _syncIncomingMessages();
@@ -270,7 +331,7 @@ class _ChatScreenState extends State<ChatScreen> {
       }
     });
 
-    // 4. Instant WebSocket live incoming message listener
+    // 5. Instant WebSocket live incoming message listener
     _realtimeMessageSub = ChatService.instance.onMessageReceived.listen((evt) {
       if (!mounted) return;
       final cId = evt['conversation_id']?.toString();
@@ -291,7 +352,13 @@ class _ChatScreenState extends State<ChatScreen> {
         final rawMsg = Map<String, dynamic>.from(evt['message'] as Map);
         final m = ChatService.formatMessageForUi(rawMsg);
         final msgId = (m['id'] ?? '').toString();
-        final existingIdx = _messages.indexWhere((x) => x['id'] == msgId);
+        final gameId = (m['extra'] is Map ? m['extra']['game_id'] : null)?.toString();
+
+        int existingIdx = _messages.indexWhere((x) => x['id'] == msgId);
+        if (existingIdx == -1 && gameId != null && gameId.isNotEmpty) {
+          existingIdx = _messages.indexWhere((x) => (x['extra'] is Map ? x['extra']['game_id'] : null)?.toString() == gameId);
+        }
+
         if (existingIdx == -1) {
           setState(() {
             _messages.add(m);
@@ -300,11 +367,16 @@ class _ChatScreenState extends State<ChatScreen> {
           });
           _scrollToBottom();
         } else {
-          final newStatus = m['status']?.toString();
-          if (newStatus != null && _messages[existingIdx]['status'] != newStatus) {
-            setState(() {
-              _messages[existingIdx]['status'] = newStatus;
-            });
+          setState(() {
+            _messages[existingIdx] = m;
+          });
+        }
+
+        // Live notification for active open game modal
+        if (gameId != null && _activeGameNotifier.value != null) {
+          final curGameId = (_activeGameNotifier.value!['extra'] is Map ? _activeGameNotifier.value!['extra']['game_id'] : null)?.toString();
+          if (curGameId == gameId) {
+            _activeGameNotifier.value = m;
           }
         }
       }
@@ -313,6 +385,9 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   void dispose() {
+    ChatService.instance.currentActiveChatPeer = null;
+    _presencePollTimer?.cancel();
+    _presenceSub?.cancel();
     _pollingTimer?.cancel();
     _realtimeMessageSub?.cancel();
     _messageController.dispose();
@@ -320,6 +395,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _recordingTimer?.cancel();
     _amplitudeTimer?.cancel();
     _playbackTimer?.cancel();
+    _activeGameNotifier.dispose();
     super.dispose();
   }
 
@@ -1062,6 +1138,20 @@ class _ChatScreenState extends State<ChatScreen> {
 
     if (!mounted) return;
 
+    final recordedPath = nativeAudioInfo?['path']?.toString();
+    String? audioBase64;
+    if (recordedPath != null && recordedPath.isNotEmpty) {
+      try {
+        final f = File(recordedPath);
+        if (f.existsSync()) {
+          final bytes = await f.readAsBytes();
+          audioBase64 = base64Encode(bytes);
+        }
+      } catch (e) {
+        debugPrint('Error encoding recorded audio to base64: $e');
+      }
+    }
+
     final now = TimeOfDay.now();
     final timeStr = '${now.hourOfPeriod}:${now.minute.toString().padLeft(2, '0')} ${now.period == DayPeriod.am ? 'AM' : 'PM'}';
     final ts = DateTime.now().millisecondsSinceEpoch;
@@ -1078,7 +1168,8 @@ class _ChatScreenState extends State<ChatScreen> {
       'durationSeconds': durationSeconds,
       'waveformData': recordedWave,
       'extra': {
-        'path': nativeAudioInfo?['path'],
+        'path': recordedPath,
+        'data_base64': ?audioBase64,
         'size': nativeAudioInfo?['size'] ?? '320 KB',
         'source': 'microphone_hardware',
       },
@@ -1126,16 +1217,23 @@ class _ChatScreenState extends State<ChatScreen> {
 
     HapticFeedback.mediumImpact();
 
+    final locationPayload = <String, dynamic>{
+      'data_base64': ?audioBase64,
+      'duration_seconds': durationSeconds,
+      'waveformData': recordedWave,
+    };
+
     // 4. Send asynchronously without blocking
     ChatService.instance.sendMessage(
       recipientHandle: widget.contactName,
       recipientNexaId: widget.nexaId,
       text: 'Voice memo ($durationStr)',
       type: 'voice',
-      audioPath: nativeAudioInfo?['path']?.toString(),
+      audioPath: recordedPath,
       audioDuration: durationSeconds,
       conversationId: _activeConversationId,
       clientMessageId: clientMessageId,
+      locationData: locationPayload,
     ).then((serverMsg) {
       if (!mounted) return;
       final idx = _messages.indexWhere((m) => m['id'] == localMsgId || m['clientMessageId'] == clientMessageId);
@@ -1390,7 +1488,7 @@ class _ChatScreenState extends State<ChatScreen> {
       await _nativeMediaChannel.invokeMethod('stopNativeAudioPlayback');
     } catch (_) {}
 
-    final audioPath = msg['extra']?['path']?.toString();
+    String? audioPath = msg['extra']?['path']?.toString();
     final durationSeconds = (msg['durationSeconds'] as num?)?.toInt() ?? 14;
 
     setState(() {
@@ -1398,6 +1496,29 @@ class _ChatScreenState extends State<ChatScreen> {
       _playbackProgress = 0.0;
       _playbackElapsedSeconds = 0;
     });
+
+    // If local file is missing on this device (e.g. receiver), decode base64 audio cache
+    if (audioPath == null || !File(audioPath).existsSync()) {
+      final b64 = (msg['extra']?['data_base64'] ?? msg['location_data']?['data_base64'])?.toString();
+      if (b64 != null && b64.isNotEmpty) {
+        try {
+          final res = await _nativeMediaChannel.invokeMethod('saveBase64Audio', {
+            'base64Data': b64,
+            'fileName': 'voice_${msgId.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')}.m4a',
+          });
+          if (res is Map && res['path'] != null) {
+            audioPath = res['path'].toString();
+            if (msg['extra'] is Map) {
+              msg['extra']['path'] = audioPath;
+            } else {
+              msg['extra'] = {'path': audioPath};
+            }
+          }
+        } catch (e) {
+          debugPrint('saveBase64Audio error: $e');
+        }
+      }
+    }
 
     if (audioPath != null && audioPath.isNotEmpty && File(audioPath).existsSync()) {
       try {
@@ -2020,6 +2141,15 @@ class _ChatScreenState extends State<ChatScreen> {
                       onTap: () {
                         Navigator.pop(ctx);
                         _openShareAppAccessModal();
+                      },
+                    ),
+                    _buildAttachmentItem(
+                      icon: Icons.sports_esports_rounded,
+                      color: const Color(0xFFF59E0B),
+                      label: 'Game Mode',
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        _openGameModeModal();
                       },
                     ),
                   ],
@@ -2685,6 +2815,1183 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  // ==========================================
+  // REAL-TIME MULTIPLAYER GAME ARCADE MODE
+  // ==========================================
+
+  void _openGameModeModal() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF0F172A),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF59E0B).withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(Icons.sports_esports_rounded, color: Color(0xFFF59E0B), size: 24),
+                    ),
+                    const SizedBox(width: 12),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'NEXA Realtime Game Arcade',
+                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+                        ),
+                        Text(
+                          'Challenge ${widget.contactName} to play in chat',
+                          style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.7)),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                _buildGameOptionTile(
+                  icon: Icons.grid_3x3_rounded,
+                  color: const Color(0xFFEC4899),
+                  title: 'Tic-Tac-Toe',
+                  subtitle: 'Classic 3x3 strategy duel with X & O',
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _sendGameInvitation('tictactoe', 'Tic-Tac-Toe');
+                  },
+                ),
+                const SizedBox(height: 12),
+                _buildGameOptionTile(
+                  icon: Icons.circle_outlined,
+                  color: const Color(0xFF0284C7),
+                  title: 'Connect 4',
+                  subtitle: 'Drop disks into 7 columns to align 4 in a row',
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _sendGameInvitation('connect4', 'Connect 4');
+                  },
+                ),
+                const SizedBox(height: 12),
+                _buildGameOptionTile(
+                  icon: Icons.front_hand_rounded,
+                  color: const Color(0xFFF59E0B),
+                  title: 'Rock Paper Scissors',
+                  subtitle: 'Fast duel of wits (Rock, Paper, Scissors)',
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _sendGameInvitation('rps', 'Rock Paper Scissors');
+                  },
+                ),
+                const SizedBox(height: 12),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildGameOptionTile({
+    required IconData icon,
+    required Color color,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1E293B),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: color.withValues(alpha: 0.3)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.2),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: color, size: 24),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.white),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    subtitle,
+                    style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.65)),
+                  ),
+                ],
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: color,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Text(
+                'Challenge',
+                style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _sendGameInvitation(String gameType, String gameTitle) {
+    final gameId = 'game_${DateTime.now().millisecondsSinceEpoch}_${math.Random().nextInt(9999)}';
+    final currentUserId = UserSession.instance.nexaId.isNotEmpty ? UserSession.instance.nexaId : UserSession.instance.handle;
+    final peerId = widget.nexaId.isNotEmpty ? widget.nexaId : widget.contactName;
+
+    Map<String, dynamic> initialState = {};
+    if (gameType == 'tictactoe') {
+      initialState = {
+        'board': List.filled(9, ''),
+        'turn': 'X',
+        'x_player': currentUserId,
+        'o_player': peerId,
+        'status': 'in_progress',
+        'winner': null,
+        'winning_line': <int>[],
+      };
+    } else if (gameType == 'connect4') {
+      initialState = {
+        'board': List.filled(42, ''),
+        'turn': 'R',
+        'r_player': currentUserId,
+        'y_player': peerId,
+        'status': 'in_progress',
+        'winner': null,
+        'winning_slots': <int>[],
+      };
+    } else {
+      // rps
+      initialState = {
+        'p1_choice': null,
+        'p2_choice': null,
+        'p1_score': 0,
+        'p2_score': 0,
+        'round': 1,
+        'status': 'in_progress',
+        'winner': null,
+      };
+    }
+
+    final gamePayload = <String, dynamic>{
+      'game_type': gameType,
+      'game_title': gameTitle,
+      'game_id': gameId,
+      'host_id': currentUserId,
+      'guest_id': peerId,
+      'game_state': initialState,
+    };
+
+    final now = DateTime.now();
+    final ts = now.millisecondsSinceEpoch;
+    final timeStr = '${now.hour > 12 ? now.hour - 12 : (now.hour == 0 ? 12 : now.hour)}:${now.minute.toString().padLeft(2, '0')} ${now.hour >= 12 ? 'PM' : 'AM'}';
+    final gameMsg = <String, dynamic>{
+      'id': 'gmsg_$ts',
+      'isMe': true,
+      'text': '🎮 Game Invite: $gameTitle',
+      'time': timeStr,
+      'timestamp': ts,
+      'status': 'delivered',
+      'attachmentType': 'game',
+      'extra': gamePayload,
+    };
+
+    setState(() {
+      _messages.add(gameMsg);
+      _chatState = ChatState.loaded;
+    });
+    _scrollToBottom();
+
+    ChatService.instance.saveLocalMessagesMulti(
+      conversationId: _activeConversationId,
+      peerNexaId: widget.nexaId,
+      peerHandle: widget.contactName,
+      messages: _messages,
+    );
+
+    ChatService.instance.sendMessage(
+      recipientHandle: widget.contactName,
+      recipientNexaId: widget.nexaId,
+      text: '🎮 Game Invite: $gameTitle',
+      attachmentType: 'game',
+      locationData: gamePayload,
+    );
+
+    _openInteractiveGame(gameMsg);
+  }
+
+  void _broadcastGameMove(Map<String, dynamic> msg, Map<String, dynamic> updatedGameState) {
+    final extra = msg['extra'] is Map ? Map<String, dynamic>.from(msg['extra'] as Map) : <String, dynamic>{};
+    extra['game_state'] = updatedGameState;
+    msg['extra'] = extra;
+
+    final gameTitle = extra['game_title']?.toString() ?? 'Game';
+    final status = updatedGameState['status']?.toString();
+    String moveDesc = '🎮 Move made in $gameTitle';
+    if (status == 'won') {
+      moveDesc = '🏆 Game Won in $gameTitle!';
+    } else if (status == 'draw') {
+      moveDesc = '🤝 Draw in $gameTitle!';
+    }
+    msg['text'] = moveDesc;
+
+    setState(() {});
+    _activeGameNotifier.value = Map<String, dynamic>.from(msg);
+
+    ChatService.instance.saveLocalMessagesMulti(
+      conversationId: _activeConversationId,
+      peerNexaId: widget.nexaId,
+      peerHandle: widget.contactName,
+      messages: _messages,
+    );
+
+    ChatService.instance.sendMessage(
+      recipientHandle: widget.contactName,
+      recipientNexaId: widget.nexaId,
+      text: moveDesc,
+      attachmentType: 'game',
+      locationData: extra,
+    );
+  }
+
+  void _openInteractiveGame(Map<String, dynamic> initialMsg) {
+    _activeGameNotifier.value = Map<String, dynamic>.from(initialMsg);
+
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (dlgCtx) {
+        return Dialog(
+          backgroundColor: const Color(0xFF0F172A),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+          child: ValueListenableBuilder<Map<String, dynamic>?>(
+            valueListenable: _activeGameNotifier,
+            builder: (context, currentMsg, _) {
+              if (currentMsg == null) {
+                return const SizedBox(height: 100, child: Center(child: CircularProgressIndicator()));
+              }
+              final extra = currentMsg['extra'] is Map ? Map<String, dynamic>.from(currentMsg['extra'] as Map) : <String, dynamic>{};
+              final gameType = (extra['game_type'] ?? 'tictactoe').toString();
+              final gameTitle = (extra['game_title'] ?? 'Arcade Game').toString();
+
+              Widget gameWidget;
+              if (gameType == 'connect4') {
+                gameWidget = _buildConnect4Game(currentMsg);
+              } else if (gameType == 'rps') {
+                gameWidget = _buildRpsGame(currentMsg);
+              } else {
+                gameWidget = _buildTicTacToeGame(currentMsg);
+              }
+
+              return SingleChildScrollView(
+                child: Padding(
+                  padding: const EdgeInsets.all(18),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Header
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF6366F1).withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Icon(Icons.sports_esports_rounded, color: Color(0xFF818CF8), size: 22),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              gameTitle,
+                              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.close_rounded, color: Colors.white70),
+                            onPressed: () => Navigator.pop(dlgCtx),
+                          ),
+                        ],
+                      ),
+                      const Divider(color: Color(0xFF334155), height: 20),
+                      gameWidget,
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildTicTacToeGame(Map<String, dynamic> currentMsg) {
+    final extra = currentMsg['extra'] is Map ? Map<String, dynamic>.from(currentMsg['extra'] as Map) : <String, dynamic>{};
+    final gameState = extra['game_state'] is Map ? Map<String, dynamic>.from(extra['game_state'] as Map) : <String, dynamic>{};
+    final rawBoard = gameState['board'] is List ? (gameState['board'] as List) : List.filled(9, '');
+    final List<String> board = rawBoard.map((e) => e?.toString() ?? '').toList();
+    while (board.length < 9) {
+      board.add('');
+    }
+    final turn = (gameState['turn'] ?? 'X').toString();
+    final status = (gameState['status'] ?? 'in_progress').toString();
+    final winner = gameState['winner']?.toString();
+    final rawWinningLine = gameState['winning_line'] is List ? (gameState['winning_line'] as List) : [];
+    final Set<int> winSet = rawWinningLine.whereType<num>().map((e) => e.toInt()).toSet();
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Status Bar
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+          decoration: BoxDecoration(
+            color: status == 'won'
+                ? const Color(0xFF10B981).withValues(alpha: 0.2)
+                : (status == 'draw'
+                    ? const Color(0xFFF59E0B).withValues(alpha: 0.2)
+                    : const Color(0xFF6366F1).withValues(alpha: 0.2)),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: status == 'won'
+                  ? const Color(0xFF10B981)
+                  : (status == 'draw' ? const Color(0xFFF59E0B) : const Color(0xFF6366F1)),
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (status == 'won') ...[
+                const Icon(Icons.emoji_events_rounded, color: Color(0xFF10B981), size: 18),
+                const SizedBox(width: 6),
+                Text(
+                  'Winner: Player $winner! 🏆',
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                ),
+              ] else if (status == 'draw') ...[
+                const Icon(Icons.handshake_rounded, color: Color(0xFFF59E0B), size: 18),
+                const SizedBox(width: 6),
+                const Text(
+                  "It's a Draw! 🤝",
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                ),
+              ] else ...[
+                Container(
+                  width: 10,
+                  height: 10,
+                  decoration: BoxDecoration(
+                    color: turn == 'X' ? const Color(0xFF06B6D4) : const Color(0xFFEC4899),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Current Turn: Player $turn',
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        // 3x3 Grid
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E293B),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFF334155)),
+          ),
+          child: AspectRatio(
+            aspectRatio: 1.0,
+            child: GridView.builder(
+              physics: const NeverScrollableScrollPhysics(),
+              shrinkWrap: true,
+              itemCount: 9,
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3,
+                crossAxisSpacing: 8,
+                mainAxisSpacing: 8,
+              ),
+              itemBuilder: (context, index) {
+                final cell = board[index];
+                final isWinningCell = winSet.contains(index);
+
+                return InkWell(
+                  onTap: () {
+                    if (status != 'in_progress' || cell.isNotEmpty) return;
+                    HapticFeedback.lightImpact();
+
+                    final newBoard = List<String>.from(board);
+                    newBoard[index] = turn;
+
+                    const winPatterns = [
+                      [0, 1, 2], [3, 4, 5], [6, 7, 8],
+                      [0, 3, 6], [1, 4, 7], [2, 5, 8],
+                      [0, 4, 8], [2, 4, 6],
+                    ];
+
+                    String? newWinner;
+                    List<int> newWinLine = [];
+                    for (final p in winPatterns) {
+                      if (newBoard[p[0]].isNotEmpty &&
+                          newBoard[p[0]] == newBoard[p[1]] &&
+                          newBoard[p[0]] == newBoard[p[2]]) {
+                        newWinner = newBoard[p[0]];
+                        newWinLine = p;
+                        break;
+                      }
+                    }
+
+                    String newStatus = 'in_progress';
+                    String nextTurn = turn == 'X' ? 'O' : 'X';
+                    if (newWinner != null) {
+                      newStatus = 'won';
+                    } else if (newBoard.every((e) => e.isNotEmpty)) {
+                      newStatus = 'draw';
+                    }
+
+                    final updatedGameState = {
+                      ...gameState,
+                      'board': newBoard,
+                      'turn': nextTurn,
+                      'status': newStatus,
+                      'winner': newWinner,
+                      'winning_line': newWinLine,
+                    };
+
+                    _broadcastGameMove(currentMsg, updatedGameState);
+                  },
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: isWinningCell
+                          ? const Color(0xFF10B981).withValues(alpha: 0.3)
+                          : const Color(0xFF0F172A),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isWinningCell
+                            ? const Color(0xFF10B981)
+                            : const Color(0xFF475569),
+                        width: isWinningCell ? 2.5 : 1.0,
+                      ),
+                    ),
+                    child: Center(
+                      child: Text(
+                        cell,
+                        style: TextStyle(
+                          fontSize: 42,
+                          fontWeight: FontWeight.w900,
+                          color: cell == 'X'
+                              ? const Color(0xFF06B6D4)
+                              : const Color(0xFFEC4899),
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        // Rematch Button
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.white,
+                side: const BorderSide(color: Color(0xFF475569)),
+              ),
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: const Text('Rematch / Reset'),
+              onPressed: () {
+                final updatedGameState = {
+                  ...gameState,
+                  'board': List.filled(9, ''),
+                  'turn': 'X',
+                  'status': 'in_progress',
+                  'winner': null,
+                  'winning_line': <int>[],
+                };
+                _broadcastGameMove(currentMsg, updatedGameState);
+              },
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildConnect4Game(Map<String, dynamic> currentMsg) {
+    final extra = currentMsg['extra'] is Map ? Map<String, dynamic>.from(currentMsg['extra'] as Map) : <String, dynamic>{};
+    final gameState = extra['game_state'] is Map ? Map<String, dynamic>.from(extra['game_state'] as Map) : <String, dynamic>{};
+    final rawBoard = gameState['board'] is List ? (gameState['board'] as List) : List.filled(42, '');
+    final List<String> board = rawBoard.map((e) => e?.toString() ?? '').toList();
+    while (board.length < 42) {
+      board.add('');
+    }
+    final turn = (gameState['turn'] ?? 'R').toString(); // 'R' Red or 'Y' Yellow
+    final status = (gameState['status'] ?? 'in_progress').toString();
+    final winner = gameState['winner']?.toString();
+    final rawWinningSlots = gameState['winning_slots'] is List ? (gameState['winning_slots'] as List) : [];
+    final Set<int> winSlots = rawWinningSlots.whereType<num>().map((e) => e.toInt()).toSet();
+
+    void dropTokenInColumn(int col) {
+      if (status != 'in_progress') return;
+      int targetRow = -1;
+      for (int r = 5; r >= 0; r--) {
+        if (board[r * 7 + col].isEmpty) {
+          targetRow = r;
+          break;
+        }
+      }
+      if (targetRow == -1) return; // Column full
+      HapticFeedback.lightImpact();
+
+      final newBoard = List<String>.from(board);
+      newBoard[targetRow * 7 + col] = turn;
+
+      // Check Connect 4 win
+      String? newWinner;
+      List<int> newWinSlots = [];
+
+      bool check4(int s1, int s2, int s3, int s4) {
+        final val = newBoard[s1];
+        if (val.isNotEmpty && val == newBoard[s2] && val == newBoard[s3] && val == newBoard[s4]) {
+          newWinner = val;
+          newWinSlots = [s1, s2, s3, s4];
+          return true;
+        }
+        return false;
+      }
+
+      // Horizontal
+      for (int r = 0; r < 6; r++) {
+        for (int c = 0; c < 4; c++) {
+          final s1 = r * 7 + c;
+          if (check4(s1, s1 + 1, s1 + 2, s1 + 3)) break;
+        }
+        if (newWinner != null) break;
+      }
+      // Vertical
+      if (newWinner == null) {
+        for (int c = 0; c < 7; c++) {
+          for (int r = 0; r < 3; r++) {
+            final s1 = r * 7 + c;
+            if (check4(s1, s1 + 7, s1 + 14, s1 + 21)) break;
+          }
+          if (newWinner != null) break;
+        }
+      }
+      // Diagonal down-right
+      if (newWinner == null) {
+        for (int r = 0; r < 3; r++) {
+          for (int c = 0; c < 4; c++) {
+            final s1 = r * 7 + c;
+            if (check4(s1, s1 + 8, s1 + 16, s1 + 24)) break;
+          }
+          if (newWinner != null) break;
+        }
+      }
+      // Diagonal up-right
+      if (newWinner == null) {
+        for (int r = 3; r < 6; r++) {
+          for (int c = 0; c < 4; c++) {
+            final s1 = r * 7 + c;
+            if (check4(s1, s1 - 6, s1 - 12, s1 - 18)) break;
+          }
+          if (newWinner != null) break;
+        }
+      }
+
+      String newStatus = 'in_progress';
+      String nextTurn = turn == 'R' ? 'Y' : 'R';
+      if (newWinner != null) {
+        newStatus = 'won';
+      } else if (newBoard.every((e) => e.isNotEmpty)) {
+        newStatus = 'draw';
+      }
+
+      final updatedGameState = {
+        ...gameState,
+        'board': newBoard,
+        'turn': nextTurn,
+        'status': newStatus,
+        'winner': newWinner,
+        'winning_slots': newWinSlots,
+      };
+
+      _broadcastGameMove(currentMsg, updatedGameState);
+    }
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Status Bar
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+          decoration: BoxDecoration(
+            color: status == 'won'
+                ? const Color(0xFF10B981).withValues(alpha: 0.2)
+                : (status == 'draw'
+                    ? const Color(0xFFF59E0B).withValues(alpha: 0.2)
+                    : (turn == 'R' ? const Color(0xFFEF4444).withValues(alpha: 0.2) : const Color(0xFFF59E0B).withValues(alpha: 0.2))),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: status == 'won'
+                  ? const Color(0xFF10B981)
+                  : (turn == 'R' ? const Color(0xFFEF4444) : const Color(0xFFF59E0B)),
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (status == 'won') ...[
+                const Icon(Icons.emoji_events_rounded, color: Color(0xFF10B981), size: 18),
+                const SizedBox(width: 6),
+                Text(
+                  '${winner == 'R' ? "Red" : "Yellow"} Player WINS! 🏆',
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                ),
+              ] else if (status == 'draw') ...[
+                const Icon(Icons.handshake_rounded, color: Color(0xFFF59E0B), size: 18),
+                const SizedBox(width: 6),
+                const Text(
+                  "Board Full • Draw! 🤝",
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                ),
+              ] else ...[
+                Container(
+                  width: 12,
+                  height: 12,
+                  decoration: BoxDecoration(
+                    color: turn == 'R' ? const Color(0xFFEF4444) : const Color(0xFFF59E0B),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Turn: ${turn == 'R' ? "Red" : "Yellow"} Player',
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        // Drop Arrow Buttons
+        Row(
+          children: List.generate(7, (col) {
+            return Expanded(
+              child: IconButton(
+                padding: EdgeInsets.zero,
+                icon: const Icon(Icons.arrow_downward_rounded, size: 20, color: Color(0xFF60A5FA)),
+                onPressed: () => dropTokenInColumn(col),
+              ),
+            );
+          }),
+        ),
+        // 7x6 Connect 4 Grid
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E3A8A),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFF3B82F6), width: 2),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF1E3A8A).withValues(alpha: 0.5),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Column(
+            children: List.generate(6, (r) {
+              return Row(
+                children: List.generate(7, (c) {
+                  final idx = r * 7 + c;
+                  final slot = board[idx];
+                  final isWinSlot = winSlots.contains(idx);
+
+                  Color slotColor = const Color(0xFF0F172A);
+                  if (slot == 'R') slotColor = const Color(0xFFEF4444);
+                  if (slot == 'Y') slotColor = const Color(0xFFFBBF24);
+
+                  return Expanded(
+                    child: GestureDetector(
+                      onTap: () => dropTokenInColumn(c),
+                      child: Container(
+                        margin: const EdgeInsets.all(3),
+                        height: 32,
+                        decoration: BoxDecoration(
+                          color: slotColor,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: isWinSlot
+                                ? const Color(0xFF10B981)
+                                : (slot.isEmpty ? const Color(0xFF1E293B) : Colors.white.withValues(alpha: 0.4)),
+                            width: isWinSlot ? 3 : 1.5,
+                          ),
+                          boxShadow: slot.isNotEmpty
+                              ? [
+                                  BoxShadow(
+                                    color: slotColor.withValues(alpha: 0.6),
+                                    blurRadius: 4,
+                                    offset: const Offset(0, 1),
+                                  ),
+                                ]
+                              : null,
+                        ),
+                      ),
+                    ),
+                  );
+                }),
+              );
+            }),
+          ),
+        ),
+        const SizedBox(height: 14),
+        // Rematch Button
+        OutlinedButton.icon(
+          style: OutlinedButton.styleFrom(
+            foregroundColor: Colors.white,
+            side: const BorderSide(color: Color(0xFF475569)),
+          ),
+          icon: const Icon(Icons.refresh_rounded, size: 18),
+          label: const Text('Rematch / Reset'),
+          onPressed: () {
+            final updatedGameState = {
+              ...gameState,
+              'board': List.filled(42, ''),
+              'turn': 'R',
+              'status': 'in_progress',
+              'winner': null,
+              'winning_slots': <int>[],
+            };
+            _broadcastGameMove(currentMsg, updatedGameState);
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRpsGame(Map<String, dynamic> currentMsg) {
+    final extra = currentMsg['extra'] is Map ? Map<String, dynamic>.from(currentMsg['extra'] as Map) : <String, dynamic>{};
+    final gameState = extra['game_state'] is Map ? Map<String, dynamic>.from(extra['game_state'] as Map) : <String, dynamic>{};
+    final p1Choice = gameState['p1_choice']?.toString();
+    final p2Choice = gameState['p2_choice']?.toString();
+    final p1Score = (gameState['p1_score'] as num?)?.toInt() ?? 0;
+    final p2Score = (gameState['p2_score'] as num?)?.toInt() ?? 0;
+    final round = (gameState['round'] as num?)?.toInt() ?? 1;
+    final winner = gameState['winner']?.toString();
+
+    String iconForChoice(String? choice) {
+      if (choice == 'rock') return '🪨 Rock';
+      if (choice == 'paper') return '📄 Paper';
+      if (choice == 'scissors') return '✂️ Scissors';
+      return '❓';
+    }
+
+    void handlePick(String choice) {
+      HapticFeedback.lightImpact();
+      if (p1Choice == null) {
+        // Player 1 picked
+        final updatedGameState = {
+          ...gameState,
+          'p1_choice': choice,
+        };
+        _broadcastGameMove(currentMsg, updatedGameState);
+      } else if (p2Choice == null) {
+        // Player 2 picked -> evaluate round!
+        String roundWinner = 'draw';
+        int newP1Score = p1Score;
+        int newP2Score = p2Score;
+
+        if (p1Choice == choice) {
+          roundWinner = 'draw';
+        } else if ((p1Choice == 'rock' && choice == 'scissors') ||
+                   (p1Choice == 'scissors' && choice == 'paper') ||
+                   (p1Choice == 'paper' && choice == 'rock')) {
+          roundWinner = 'Player 1';
+          newP1Score++;
+        } else {
+          roundWinner = 'Player 2';
+          newP2Score++;
+        }
+
+        final updatedGameState = {
+          ...gameState,
+          'p2_choice': choice,
+          'winner': roundWinner,
+          'p1_score': newP1Score,
+          'p2_score': newP2Score,
+          'status': 'won',
+        };
+        _broadcastGameMove(currentMsg, updatedGameState);
+      }
+    }
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Score Board
+        Container(
+          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E293B),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xFF334155)),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              Column(
+                children: [
+                  const Text('Player 1', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                  const SizedBox(height: 2),
+                  Text('$p1Score', style: const TextStyle(color: Color(0xFF06B6D4), fontSize: 24, fontWeight: FontWeight.bold)),
+                ],
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF6366F1).withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text('Round $round', style: const TextStyle(color: Color(0xFF818CF8), fontWeight: FontWeight.bold, fontSize: 13)),
+              ),
+              Column(
+                children: [
+                  const Text('Player 2', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                  const SizedBox(height: 2),
+                  Text('$p2Score', style: const TextStyle(color: Color(0xFFEC4899), fontSize: 24, fontWeight: FontWeight.bold)),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 18),
+        // Arena Reveal
+        if (p1Choice != null && p2Choice != null) ...[
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0F172A),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: const Color(0xFF10B981)),
+            ),
+            child: Column(
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    Column(
+                      children: [
+                        Text(iconForChoice(p1Choice), style: const TextStyle(fontSize: 32)),
+                        const SizedBox(height: 4),
+                        const Text('Player 1', style: TextStyle(color: Colors.white70, fontSize: 11)),
+                      ],
+                    ),
+                    const Text('VS', style: TextStyle(color: Color(0xFFF59E0B), fontWeight: FontWeight.w900, fontSize: 18)),
+                    Column(
+                      children: [
+                        Text(iconForChoice(p2Choice), style: const TextStyle(fontSize: 32)),
+                        const SizedBox(height: 4),
+                        const Text('Player 2', style: TextStyle(color: Colors.white70, fontSize: 11)),
+                      ],
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  winner == 'draw' ? "It's a Tie! 🤝" : "$winner Wins the Round! 🏆",
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF6366F1),
+              foregroundColor: Colors.white,
+            ),
+            icon: const Icon(Icons.play_arrow_rounded),
+            label: const Text('Next Round'),
+            onPressed: () {
+              final updatedGameState = {
+                ...gameState,
+                'p1_choice': null,
+                'p2_choice': null,
+                'winner': null,
+                'round': round + 1,
+              };
+              _broadcastGameMove(currentMsg, updatedGameState);
+            },
+          ),
+        ] else ...[
+          Text(
+            p1Choice == null ? 'Player 1: Pick your move' : 'Player 2: Pick your move',
+            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              _buildRpsChoiceButton('🪨', 'Rock', () => handlePick('rock')),
+              _buildRpsChoiceButton('📄', 'Paper', () => handlePick('paper')),
+              _buildRpsChoiceButton('✂️', 'Scissors', () => handlePick('scissors')),
+            ],
+          ),
+        ],
+        const SizedBox(height: 14),
+      ],
+    );
+  }
+
+  Widget _buildRpsChoiceButton(String emoji, String label, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1E293B),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFF475569)),
+        ),
+        child: Column(
+          children: [
+            Text(emoji, style: const TextStyle(fontSize: 32)),
+            const SizedBox(height: 6),
+            Text(label, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGameCardInBubble(Map<String, dynamic> msg) {
+    final extra = msg['extra'] is Map ? Map<String, dynamic>.from(msg['extra'] as Map) : <String, dynamic>{};
+    final gameType = (extra['game_type'] ?? 'tictactoe').toString();
+    final gameTitle = (extra['game_title'] ?? (gameType == 'connect4' ? 'Connect 4' : (gameType == 'rps' ? 'Rock Paper Scissors' : 'Tic-Tac-Toe'))).toString();
+    final gameState = extra['game_state'] is Map ? Map<String, dynamic>.from(extra['game_state'] as Map) : <String, dynamic>{};
+    final status = (gameState['status'] ?? 'in_progress').toString();
+    final winner = gameState['winner']?.toString();
+    final isMe = msg['isMe'] == true;
+
+    Color badgeColor = const Color(0xFF6366F1);
+    IconData gameIcon = Icons.sports_esports_rounded;
+    if (gameType == 'tictactoe') {
+      badgeColor = const Color(0xFFEC4899);
+      gameIcon = Icons.grid_3x3_rounded;
+    } else if (gameType == 'connect4') {
+      badgeColor = const Color(0xFF0284C7);
+      gameIcon = Icons.circle_outlined;
+    } else if (gameType == 'rps') {
+      badgeColor = const Color(0xFFF59E0B);
+      gameIcon = Icons.front_hand_rounded;
+    }
+
+    String statusText = 'Match in progress';
+    Color statusColor = const Color(0xFF6366F1);
+    if (status == 'won') {
+      statusText = 'Winner: Player $winner! 🏆';
+      statusColor = NexaColors.emeraldSecure;
+    } else if (status == 'draw') {
+      statusText = 'Draw match! 🤝';
+      statusColor = const Color(0xFFF59E0B);
+    } else {
+      final turn = gameState['turn']?.toString() ?? 'X';
+      statusText = 'Turn: $turn';
+    }
+
+    return Container(
+      width: double.infinity,
+      constraints: const BoxConstraints(maxWidth: 290),
+      margin: const EdgeInsets.only(top: 4, bottom: 4),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0F172A),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: badgeColor.withValues(alpha: 0.5), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: badgeColor.withValues(alpha: 0.25),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Header Bar
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: badgeColor.withValues(alpha: 0.2),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(15)),
+            ),
+            child: Row(
+              children: [
+                Icon(gameIcon, color: badgeColor, size: 18),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    gameTitle.toUpperCase(),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.8,
+                    ),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: statusColor.withValues(alpha: 0.25),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: statusColor.withValues(alpha: 0.5)),
+                  ),
+                  child: Text(
+                    status == 'won' ? 'FINISHED' : (status == 'draw' ? 'DRAW' : 'LIVE'),
+                    style: TextStyle(
+                      color: statusColor,
+                      fontSize: 9.5,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Content preview & info
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [badgeColor, badgeColor.withValues(alpha: 0.6)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Center(
+                        child: Icon(gameIcon, color: Colors.white, size: 24),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            isMe ? 'You challenged ${widget.contactName}' : '${widget.contactName} challenged you!',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            statusText,
+                            style: TextStyle(
+                              color: statusColor,
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                // Play / Action Button
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: badgeColor,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      elevation: 4,
+                    ),
+                    icon: const Icon(Icons.play_circle_fill_rounded, size: 18),
+                    label: Text(
+                      status == 'won' || status == 'draw' ? 'View Board / Rematch' : 'Play / Make Move',
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                    ),
+                    onPressed: () => _openInteractiveGame(msg),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showFullImageDialog({String? filePath, String? base64Data, String? networkUrl, required String title, String? size}) {
     showDialog(
       context: context,
@@ -2930,24 +4237,25 @@ class _ChatScreenState extends State<ChatScreen> {
                               Container(
                                 width: 7,
                                 height: 7,
-                                decoration: const BoxDecoration(
-                                  color: NexaColors.mintEmerald,
+                                decoration: BoxDecoration(
+                                  color: _isPeerOnline ? NexaColors.mintEmerald : const Color(0xFF94A3B8),
                                   shape: BoxShape.circle,
                                   boxShadow: [
-                                    BoxShadow(color: Color(0x33059669), blurRadius: 4),
+                                    BoxShadow(
+                                      color: _isPeerOnline ? const Color(0x33059669) : const Color(0x22000000),
+                                      blurRadius: 4,
+                                    ),
                                   ],
                                 ),
                               ),
                               const SizedBox(width: 6),
                               Expanded(
                                 child: Text(
-                                  widget.nexaId.trim().isNotEmpty
-                                      ? '${widget.nexaId} • 256-BIT'
-                                      : 'Online • 256-Bit E2EE',
+                                  _isPeerOnline ? 'Online' : _formatLastSeen(_peerLastSeen),
                                   overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 10.5,
-                                    color: NexaColors.mintEmerald,
+                                    color: _isPeerOnline ? NexaColors.mintEmerald : NexaColors.textMuted,
                                     fontWeight: FontWeight.w700,
                                     letterSpacing: 0.2,
                                   ),
@@ -4034,6 +5342,8 @@ class _ChatScreenState extends State<ChatScreen> {
                           ],
                         ),
                       ),
+                    ] else if (attachmentType == 'game' || (extra != null && extra['game_type'] != null)) ...[
+                      _buildGameCardInBubble(msg),
                     ] else ...[
                       Text(
                         text,

@@ -996,4 +996,40 @@ app.get('/v1/admin/audit/integrity', adminAuthMiddleware, (req, res) => {
   return res.json(integrity);
 });
 
+// --- REAL-TIME PRESENCE & LAST-SEEN ENDPOINTS ---
+const serverlessPresenceMap = new Map();
+
+app.post('/v1/presence/heartbeat', (req, res) => {
+  const { user, nexa_id, handle } = req.body || {};
+  const ident = nexa_id || handle || user;
+  if (ident) {
+    const clean = ident.trim().toLowerCase().replace(/^@+/, '');
+    serverlessPresenceMap.set(clean, { is_online: true, last_seen: Date.now(), updated_at: Date.now() });
+  }
+  return res.json({ success: true, timestamp: Date.now() });
+});
+
+app.get('/v1/presence/:ident', (req, res) => {
+  const ident = req.params.ident;
+  const clean = (ident || '').trim().toLowerCase().replace(/^@+/, '');
+  const p = serverlessPresenceMap.get(clean);
+  if (!p) {
+    const user = Database.resolveUser ? Database.resolveUser(clean) : null;
+    return res.json({
+      success: true,
+      user: ident,
+      is_online: false,
+      last_seen: user?.last_seen || user?.created_at || 0
+    });
+  }
+  const isStale = (Date.now() - p.updated_at) > 25000;
+  return res.json({
+    success: true,
+    user: ident,
+    is_online: p.is_online && !isStale,
+    last_seen: p.last_seen
+  });
+});
+
 module.exports = app;
+

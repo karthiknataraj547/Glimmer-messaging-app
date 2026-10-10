@@ -31,6 +31,7 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
 
   // Chats
   final List<Map<String, dynamic>> _chats = [];
+  Map<String, dynamic>? _selectedChat;
   Timer? _inboxSyncTimer;
   bool _isSyncingInbox = false;
   final TextEditingController _chatSearchController = TextEditingController();
@@ -90,6 +91,35 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
     if (mounted) setState(() {});
   }
 
+  /// Sorts chats putting pinned chats at the very top of all chats
+  void _sortChats() {
+    _chats.sort((a, b) {
+      final aKey = ((a['nexaId'] as String?)?.isNotEmpty == true ? a['nexaId'] as String : (a['name'] as String? ?? ''));
+      final bKey = ((b['nexaId'] as String?)?.isNotEmpty == true ? b['nexaId'] as String : (b['name'] as String? ?? ''));
+      final aPinned = ChatService.instance.isChatPinned(aKey);
+      final bPinned = ChatService.instance.isChatPinned(bKey);
+      if (aPinned && !bPinned) return -1;
+      if (!aPinned && bPinned) return 1;
+      final aTs = (a['timestamp'] as num?)?.toInt() ?? 0;
+      final bTs = (b['timestamp'] as num?)?.toInt() ?? 0;
+      return bTs.compareTo(aTs);
+    });
+  }
+
+  /// Deletes the currently selected chat from recent list and disk
+  Future<void> _deleteSelectedChat() async {
+    if (_selectedChat == null) return;
+    final target = _selectedChat!;
+    final peerKey = ((target['nexaId'] as String?)?.isNotEmpty == true ? target['nexaId'] as String : (target['name'] as String? ?? ''));
+    await ChatService.instance.deleteRecentChat(peerKey);
+    if (mounted) {
+      setState(() {
+        _chats.removeWhere((c) => c == target || (c['nexaId'] != null && c['nexaId'] == target['nexaId']));
+        _selectedChat = null;
+      });
+    }
+  }
+
   /// Instant cached recent chats restore
   Future<void> _loadCachedChats() async {
     final cached = await ChatService.instance.loadRecentChats();
@@ -108,8 +138,8 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
             });
             if (!exists) _chats.add(Map<String, dynamic>.from(c));
           }
-          _chats.sort((a, b) => ((b['timestamp'] as num?)?.toInt() ?? 0).compareTo((a['timestamp'] as num?)?.toInt() ?? 0));
         }
+        _sortChats();
       });
     }
   }
@@ -237,7 +267,9 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
         final timeStr = _formatTimestamp(lastTs);
         final canonicalKey = ChatService.getCanonicalKey(finalNexaId.isNotEmpty ? finalNexaId : cleanHandle);
         final lastReadTs = await ChatService.instance.getReadTimestamp(canonicalKey);
-        final unreadCount = (conv['unread_count'] as int?) ?? (lastTs > lastReadTs ? 1 : 0);
+        final isUnreadByTs = lastTs > lastReadTs;
+        final srvUnread = (conv['unread_count'] as int?) ?? 0;
+        int unreadCount = isUnreadByTs ? (srvUnread > 0 ? srvUnread : 1) : 0;
 
         final idx = _chats.indexWhere((c) {
           final cId = (c['conversationId'] as String?) ?? '';
@@ -252,8 +284,14 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
           final existing = _chats[idx];
           final exMsg = existing['message'];
           final exTime = existing['time'];
-          final exUnread = existing['unread'];
+          final exUnread = (existing['unread'] as int?) ?? 0;
           final exTs = (existing['timestamp'] as num?)?.toInt() ?? 0;
+
+          if (isUnreadByTs) {
+            unreadCount = exUnread > unreadCount ? exUnread : unreadCount;
+          } else {
+            unreadCount = 0;
+          }
 
           // Never let 'Direct Conversation' clobber an actual previous message snippet
           if (lastMsg == 'Direct Conversation' && exMsg != null && (exMsg as String).isNotEmpty && exMsg != 'Direct Conversation') {
@@ -385,10 +423,13 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
           final readTs2 = await ChatService.instance.getReadTimestamp(ChatService.getCanonicalKey(senderHandle));
           final lastReadTs = readTs1 > readTs2 ? readTs1 : readTs2;
 
-          final unreadCount = peerMessages.where((m) {
+          int unreadCount = peerMessages.where((m) {
             final mTs = (m['timestamp'] as num?)?.toInt() ?? 0;
             return mTs > lastReadTs;
           }).length;
+          if (unreadCount == 0 && ts > lastReadTs) {
+            unreadCount = 1;
+          }
 
           final idx = _chats.indexWhere((c) {
             final cId = (c['conversationId'] as String?) ?? '';
@@ -402,8 +443,14 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
           if (idx >= 0) {
             final existing = _chats[idx];
             final currentMsg = existing['message'];
-            final currentUnread = existing['unread'];
+            final currentUnread = (existing['unread'] as int?) ?? 0;
             final currentTs = (existing['timestamp'] as num?)?.toInt() ?? 0;
+
+            if (ts > lastReadTs) {
+              unreadCount = currentUnread > unreadCount ? currentUnread : unreadCount;
+            } else {
+              unreadCount = 0;
+            }
 
             if (ts >= currentTs) {
               if (currentMsg != text || existing['time'] != timeStr || currentUnread != unreadCount || (convId != null && convId.isNotEmpty && existing['conversationId'] != convId)) {
@@ -435,8 +482,8 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
         }
       }
 
-      // Sort chats strictly by timestamp descending
-      _chats.sort((a, b) => ((b['timestamp'] as num?)?.toInt() ?? 0).compareTo((a['timestamp'] as num?)?.toInt() ?? 0));
+      // Sort chats with pinned on top and timestamp descending
+      _sortChats();
 
       if (changed && mounted) {
         setState(() {});
@@ -558,7 +605,7 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
             _chats.add(Map<String, dynamic>.from(u));
           }
         }
-        _chats.sort((a, b) => ((b['timestamp'] as num?)?.toInt() ?? 0).compareTo((a['timestamp'] as num?)?.toInt() ?? 0));
+        _sortChats();
         setState(() {});
       }
       _syncInbox();
@@ -635,9 +682,146 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
   }
 
   // =====================================================================
-  // 1. MAXIMALIST CYBERPUNK COMMAND BAR
+  // 1. MAXIMALIST CYBERPUNK COMMAND BAR / CONTEXTUAL ACTION BAR
   // =====================================================================
   Widget _buildMaximalistTopBar() {
+    if (_selectedChat != null) {
+      final selectedNexaId = (_selectedChat!['nexaId'] as String?) ?? '';
+      final selectedName = (_selectedChat!['name'] as String?) ?? '';
+      final selectedKey = selectedNexaId.isNotEmpty ? selectedNexaId : selectedName;
+      final isPinned = ChatService.instance.isChatPinned(selectedKey);
+      final isMuted = ChatService.instance.isChatMuted(selectedKey);
+
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          border: Border(
+            bottom: BorderSide(color: NexaColors.borderLight, width: 1.0),
+          ),
+          boxShadow: const [
+            BoxShadow(color: Color(0x08000000), blurRadius: 8, offset: Offset(0, 2)),
+          ],
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            // Close / Deselect Symbol
+            InkWell(
+              onTap: () => setState(() => _selectedChat = null),
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: NexaColors.borderLight, width: 1.2),
+                  boxShadow: const [
+                    BoxShadow(color: Color(0x0A000000), blurRadius: 6, offset: Offset(0, 2)),
+                  ],
+                ),
+                child: const Icon(Icons.close_rounded, color: NexaColors.textPrimary, size: 22),
+              ),
+            ),
+            // Contextual Action Icons (Symbols Only: Pin, Mute Bell with Cross, Delete)
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Pin Symbol
+                InkWell(
+                  onTap: () async {
+                    HapticFeedback.lightImpact();
+                    await ChatService.instance.toggleChatPinned(selectedKey);
+                    _sortChats();
+                    setState(() => _selectedChat = null);
+                  },
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    margin: const EdgeInsets.symmetric(horizontal: 4),
+                    decoration: BoxDecoration(
+                      color: isPinned ? const Color(0xFFEEF2FF) : Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isPinned ? NexaColors.electricIndigo : NexaColors.borderLight,
+                        width: 1.2,
+                      ),
+                      boxShadow: const [
+                        BoxShadow(color: Color(0x0A000000), blurRadius: 6, offset: Offset(0, 2)),
+                      ],
+                    ),
+                    child: Icon(
+                      Icons.push_pin_rounded,
+                      color: isPinned ? NexaColors.electricIndigo : NexaColors.textSecondary,
+                      size: 20,
+                    ),
+                  ),
+                ),
+                // Bell with Cross Mark (Mute Symbol)
+                InkWell(
+                  onTap: () async {
+                    HapticFeedback.lightImpact();
+                    await ChatService.instance.toggleChatMuted(selectedKey);
+                    setState(() => _selectedChat = null);
+                  },
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    margin: const EdgeInsets.symmetric(horizontal: 4),
+                    decoration: BoxDecoration(
+                      color: isMuted ? const Color(0xFFFEF2F2) : Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isMuted ? Colors.redAccent : NexaColors.borderLight,
+                        width: 1.2,
+                      ),
+                      boxShadow: const [
+                        BoxShadow(color: Color(0x0A000000), blurRadius: 6, offset: Offset(0, 2)),
+                      ],
+                    ),
+                    child: Icon(
+                      Icons.notifications_off_rounded,
+                      color: isMuted ? Colors.redAccent : NexaColors.textSecondary,
+                      size: 20,
+                    ),
+                  ),
+                ),
+                // Delete Symbol
+                InkWell(
+                  onTap: () async {
+                    HapticFeedback.mediumImpact();
+                    await _deleteSelectedChat();
+                  },
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    margin: const EdgeInsets.symmetric(horizontal: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFEF2F2),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFFFCA5A5), width: 1.2),
+                      boxShadow: const [
+                        BoxShadow(color: Color(0x0A000000), blurRadius: 6, offset: Offset(0, 2)),
+                      ],
+                    ),
+                    child: const Icon(
+                      Icons.delete_outline_rounded,
+                      color: Colors.redAccent,
+                      size: 20,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+    }
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
@@ -911,10 +1095,6 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
           ),
         ),
 
-        // Active Orbit Peer Reels (Top story-style quick contacts tray)
-        if (_chats.isNotEmpty && _chatSearchQuery.isEmpty)
-          _buildActiveOrbitReel(),
-
         // Chat List
         Expanded(
           child: filtered.isEmpty
@@ -1024,131 +1204,7 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
     );
   }
 
-  /// Active Orbit Quick Contact Reel (Instagram/Telegram style stories tray)
-  Widget _buildActiveOrbitReel() {
-    return Container(
-      height: 96,
-      margin: const EdgeInsets.only(bottom: 6),
-      child: ListView.builder(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 14),
-        itemCount: _chats.length + 1,
-        itemBuilder: (context, index) {
-          if (index == 0) {
-            // "New Peer" quick launcher
-            return GestureDetector(
-              onTap: _showNewChatDialog,
-              child: Container(
-                margin: const EdgeInsets.symmetric(horizontal: 6),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 54,
-                      height: 54,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: Colors.white,
-                        border: Border.all(color: const Color(0xFFC7D2FE), width: 1.5),
-                        boxShadow: const [
-                          BoxShadow(color: Color(0x104F46E5), blurRadius: 6, offset: Offset(0, 2)),
-                        ],
-                      ),
-                      child: const Center(
-                        child: Icon(Icons.add_rounded, color: NexaColors.electricIndigo, size: 28),
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    const Text(
-                      'New Peer',
-                      style: TextStyle(color: NexaColors.textPrimary, fontSize: 11, fontWeight: FontWeight.w700),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }
-
-          final chat = _chats[index - 1];
-          final name = (chat['name'] as String?) ?? 'Peer';
-          final nexaId = (chat['nexaId'] as String?) ?? 'NX-PEER';
-          final initial = name.replaceAll('@', '').isNotEmpty ? name.replaceAll('@', '').substring(0, 1).toUpperCase() : '?';
-
-          return GestureDetector(
-            onTap: () => _openChat(name, nexaId, conversationId: chat['conversationId'] as String?),
-            child: Container(
-              margin: const EdgeInsets.symmetric(horizontal: 6),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Stack(
-                    alignment: Alignment.bottomRight,
-                    children: [
-                      Container(
-                        width: 54,
-                        height: 54,
-                        padding: const EdgeInsets.all(2.5),
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          gradient: const LinearGradient(
-                            colors: [Color(0xFF4F46E5), Color(0xFF7C3AED)],
-                          ),
-                          boxShadow: const [
-                            BoxShadow(color: Color(0x264F46E5), blurRadius: 8, offset: Offset(0, 2)),
-                          ],
-                        ),
-                        child: Container(
-                          decoration: const BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: Colors.white,
-                          ),
-                          child: Center(
-                            child: Text(
-                              initial,
-                              style: const TextStyle(
-                                color: NexaColors.electricIndigo,
-                                fontWeight: FontWeight.w900,
-                                fontSize: 18,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      Container(
-                        width: 13,
-                        height: 13,
-                        decoration: BoxDecoration(
-                          color: NexaColors.mintEmerald,
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 2),
-                          boxShadow: const [
-                            BoxShadow(color: Color(0x33059669), blurRadius: 4),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  SizedBox(
-                    width: 58,
-                    child: Text(
-                      name.replaceAll('@', ''),
-                      textAlign: TextAlign.center,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: NexaColors.textPrimary, fontSize: 11, fontWeight: FontWeight.w700),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  /// Maximalist Chat Card with Glowing Rings and Crisp Contrast
+  /// Maximalist Chat Card with Glowing Rings, Instant Select, Pin/Mute Badges & Contact Name Resolution
   Widget _buildMaximalistChatCard(Map<String, dynamic> item) {
     final name = (item['name'] as String?) ?? 'Peer';
     final msg = (item['message'] as String?) ?? '';
@@ -1156,19 +1212,38 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
     final unread = (item['unread'] as int?) ?? 0;
     final nexaId = (item['nexaId'] as String?) ?? 'NX-PEER';
     final isUnread = unread > 0;
-    final initial = name.replaceAll('@', '').isNotEmpty ? name.replaceAll('@', '').substring(0, 1).toUpperCase() : '?';
+
+    final peerKey = nexaId.isNotEmpty ? nexaId : name;
+    final isPinned = ChatService.instance.isChatPinned(peerKey);
+    final isMuted = ChatService.instance.isChatMuted(peerKey);
+    final isSelected = _selectedChat == item;
+
+    // Contact name vs Nexa ID: if contact is saved show contact name, else ONLY Nexa ID!
+    final savedName = ContactsService.instance.getSavedContactName(nexaId) ?? ContactsService.instance.getSavedContactName(name);
+    final hasSavedContact = savedName != null && savedName.trim().isNotEmpty;
+    final displayTitle = hasSavedContact ? savedName.trim() : nexaId;
+
+    final initial = hasSavedContact
+        ? (savedName.isNotEmpty ? savedName.substring(0, 1).toUpperCase() : '?')
+        : (nexaId.replaceFirst('NX-', '').isNotEmpty ? nexaId.replaceFirst('NX-', '').substring(0, 1).toUpperCase() : '#');
 
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 4),
       decoration: BoxDecoration(
-        color: isUnread ? const Color(0xFFEEF2FF) : Colors.white,
+        color: isSelected
+            ? const Color(0xFFE0E7FF)
+            : (isUnread ? const Color(0xFFEEF2FF) : Colors.white),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isUnread ? const Color(0xFF818CF8) : NexaColors.borderLight,
-          width: isUnread ? 1.5 : 1.0,
+          color: isSelected
+              ? NexaColors.electricIndigo
+              : (isUnread ? const Color(0xFF818CF8) : (isPinned ? const Color(0xFFA5B4FC) : NexaColors.borderLight)),
+          width: isSelected || isUnread ? 1.5 : 1.0,
         ),
         boxShadow: [
-          if (isUnread)
+          if (isSelected)
+            const BoxShadow(color: Color(0x334F46E5), blurRadius: 12, offset: Offset(0, 3))
+          else if (isUnread)
             const BoxShadow(color: Color(0x1F4F46E5), blurRadius: 10, offset: Offset(0, 2))
           else
             const BoxShadow(color: Color(0x0A0F172A), blurRadius: 8, offset: Offset(0, 2)),
@@ -1178,7 +1253,21 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
         color: Colors.transparent,
         child: InkWell(
           borderRadius: BorderRadius.circular(16),
-          onTap: () => _openChat(name, nexaId, conversationId: item['conversationId'] as String?),
+          onLongPress: () {
+            HapticFeedback.mediumImpact();
+            setState(() {
+              _selectedChat = item;
+            });
+          },
+          onTap: () {
+            if (_selectedChat != null) {
+              setState(() {
+                _selectedChat = (_selectedChat == item ? null : item);
+              });
+            } else {
+              _openChat(hasSavedContact ? displayTitle : name, nexaId, conversationId: item['conversationId'] as String?);
+            }
+          },
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             child: Row(
@@ -1196,10 +1285,12 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                         gradient: LinearGradient(
                           colors: isUnread
                               ? [const Color(0xFF4F46E5), const Color(0xFF7C3AED)]
-                              : [const Color(0xFF818CF8), const Color(0xFFA78BFA)],
+                              : (isSelected
+                                  ? [const Color(0xFF4338CA), const Color(0xFF6D28D9)]
+                                  : [const Color(0xFF818CF8), const Color(0xFFA78BFA)]),
                         ),
                         boxShadow: [
-                          if (isUnread)
+                          if (isUnread || isSelected)
                             const BoxShadow(color: Color(0x334F46E5), blurRadius: 8, offset: Offset(0, 2)),
                         ],
                       ),
@@ -1250,7 +1341,7 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                               children: [
                                 Flexible(
                                   child: Text(
-                                    name,
+                                    displayTitle,
                                     style: const TextStyle(
                                       color: NexaColors.textPrimary,
                                       fontWeight: FontWeight.w800,
@@ -1261,6 +1352,14 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                                   ),
                                 ),
                                 const SizedBox(width: 5),
+                                if (isPinned) ...[
+                                  const Icon(Icons.push_pin_rounded, color: NexaColors.electricIndigo, size: 14),
+                                  const SizedBox(width: 3),
+                                ],
+                                if (isMuted) ...[
+                                  const Icon(Icons.notifications_off_rounded, color: NexaColors.textMuted, size: 14),
+                                  const SizedBox(width: 3),
+                                ],
                                 const Icon(Icons.verified_rounded, color: NexaColors.electricIndigo, size: 15),
                               ],
                             ),

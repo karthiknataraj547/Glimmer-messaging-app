@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import '../crypto/nexa_envelope.dart';
 import '../services/chat_service.dart';
 import '../session/user_session.dart';
@@ -32,10 +33,13 @@ class NexaNetworkService {
   WebSocket? _webSocket;
   bool _isConnected = false;
   Timer? _reconnectTimer;
+  Timer? _heartbeatTimer;
   final StreamController<NexaEncryptedEnvelope> _incomingEnvelopesController =
       StreamController<NexaEncryptedEnvelope>.broadcast();
   final StreamController<bool> _connectionStateController =
       StreamController<bool>.broadcast();
+  final StreamController<Map<String, dynamic>> _presenceController =
+      StreamController<Map<String, dynamic>>.broadcast();
 
   NexaNetworkService({
     required this.baseUrl,
@@ -46,6 +50,40 @@ class NexaNetworkService {
   bool get isConnected => _isConnected;
   Stream<NexaEncryptedEnvelope> get incomingEnvelopes => _incomingEnvelopesController.stream;
   Stream<bool> get connectionState => _connectionStateController.stream;
+  Stream<Map<String, dynamic>> get onPresenceUpdate => _presenceController.stream;
+
+  /// Transmit message instantly over active WebSocket frame (<10ms latency)
+  bool sendRealtimeMessage(Map<String, dynamic> msgBody) {
+    if (_webSocket != null && _isConnected) {
+      try {
+        _webSocket!.add(jsonEncode({
+          'action': 'SEND_MESSAGE',
+          'data': msgBody,
+        }));
+        return true;
+      } catch (e) {
+        debugPrint('[NexaNetworkService] sendRealtimeMessage error: $e');
+      }
+    }
+    return false;
+  }
+
+  /// Request live presence for a target user over WebSocket or HTTP
+  Future<Map<String, dynamic>> fetchPresence(String peerIdOrHandle) async {
+    try {
+      final clean = peerIdOrHandle.replaceAll('@', '');
+      final httpBase = await AuthService.instance.getBaseUrl();
+      final uri = Uri.parse('$httpBase/v1/presence/${Uri.encodeComponent(clean)}');
+      final res = await AuthService.instance.getJson(uri);
+      if (res != null && res['success'] == true) {
+        return {
+          'is_online': res['is_online'] == true,
+          'last_seen': (res['last_seen'] as num?)?.toInt() ?? 0,
+        };
+      }
+    } catch (_) {}
+    return {'is_online': false, 'last_seen': 0};
+  }
 
   /// Establishes persistent WebSocket connection and binds device ID.
   Future<void> connectRealtime({String? customWsUrl}) async {
@@ -74,6 +112,25 @@ class NexaNetworkService {
         if (userHandle.isNotEmpty) 'handle': userHandle,
         if (userNexaId.isNotEmpty) 'nexa_id': userNexaId,
       }));
+
+      // Start periodic presence heartbeat
+      _heartbeatTimer?.cancel();
+      _heartbeatTimer = Timer.periodic(const Duration(seconds: 12), (_) {
+        if (_webSocket != null && _isConnected) {
+          try {
+            _webSocket!.add(jsonEncode({
+              'action': 'PING',
+              'handle': UserSession.instance.handle,
+              'nexa_id': UserSession.instance.nexaId,
+            }));
+          } catch (_) {}
+        }
+        // Background HTTP heartbeat backup
+        AuthService.instance.postJson('/v1/presence/heartbeat', {
+          'user': UserSession.instance.handle,
+          'nexa_id': UserSession.instance.nexaId,
+        }).catchError((_) => null);
+      });
 
       _webSocket!.listen(
         _handleIncomingWsMessage,
@@ -106,6 +163,8 @@ class NexaNetworkService {
         if (rawMsg is Map) {
           ChatService.instance.handleRealtimeIncomingMessage(Map<String, dynamic>.from(rawMsg));
         }
+      } else if (event == 'PRESENCE_UPDATE') {
+        _presenceController.add(json);
       }
     } catch (_) {
       // Ignored malformed frame
@@ -116,6 +175,7 @@ class NexaNetworkService {
     _isConnected = false;
     _connectionStateController.add(false);
     _webSocket = null;
+    _heartbeatTimer?.cancel();
 
     _reconnectTimer?.cancel();
     _reconnectTimer = Timer(const Duration(seconds: 3), () {

@@ -4,7 +4,9 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import '../network/auth_service.dart';
+import '../network/nexa_network_service.dart';
 import '../session/user_session.dart';
+import 'contacts_service.dart';
 
 /// Bidirectional Real-Time Chat & Persistent Conversation Storage Service
 class ChatService {
@@ -12,6 +14,14 @@ class ChatService {
   ChatService._internal();
 
   static const MethodChannel _channel = MethodChannel('com.nexa.media_picker');
+
+  // Currently open chat screen peer (to suppress notifications and mark read)
+  String? currentActiveChatPeer;
+
+  // Persisted Muted & Pinned Conversations
+  final Set<String> _mutedChats = {};
+  final Set<String> _pinnedChats = {};
+  bool _preferencesLoaded = false;
 
   // Broadcast stream for real-time incoming messages
   final StreamController<Map<String, dynamic>> _incomingMessageStream = StreamController<Map<String, dynamic>>.broadcast();
@@ -21,6 +31,73 @@ class ChatService {
   final Map<String, List<Map<String, dynamic>>> _memoryThreadCache = {};
   List<Map<String, dynamic>>? _cachedRecentChats;
   final Map<String, int> _memoryReadState = {};
+
+  Future<void> loadMutedAndPinned() async {
+    if (_preferencesLoaded) return;
+    try {
+      final dynamic raw = await _channel.invokeMethod('loadChatThread', {'key': 'chat_meta_preferences'});
+      if (raw is String && raw.isNotEmpty) {
+        final Map<String, dynamic> decoded = jsonDecode(raw);
+        if (decoded['muted'] is List) {
+          _mutedChats.addAll((decoded['muted'] as List).map((e) => e.toString()));
+        }
+        if (decoded['pinned'] is List) {
+          _pinnedChats.addAll((decoded['pinned'] as List).map((e) => e.toString()));
+        }
+      }
+    } catch (_) {}
+    _preferencesLoaded = true;
+  }
+
+  Future<void> _saveMutedAndPinnedState() async {
+    try {
+      final jsonStr = jsonEncode({
+        'muted': _mutedChats.toList(),
+        'pinned': _pinnedChats.toList(),
+      });
+      await _channel.invokeMethod('saveChatThread', {'key': 'chat_meta_preferences', 'data': jsonStr});
+    } catch (_) {}
+  }
+
+  bool isChatMuted(String peerKey) {
+    return _mutedChats.contains(getCanonicalKey(peerKey));
+  }
+
+  Future<void> toggleChatMuted(String peerKey) async {
+    final k = getCanonicalKey(peerKey);
+    if (_mutedChats.contains(k)) {
+      _mutedChats.remove(k);
+    } else {
+      _mutedChats.add(k);
+    }
+    await _saveMutedAndPinnedState();
+  }
+
+  bool isChatPinned(String peerKey) {
+    return _pinnedChats.contains(getCanonicalKey(peerKey));
+  }
+
+  Future<void> toggleChatPinned(String peerKey) async {
+    final k = getCanonicalKey(peerKey);
+    if (_pinnedChats.contains(k)) {
+      _pinnedChats.remove(k);
+    } else {
+      _pinnedChats.add(k);
+    }
+    await _saveMutedAndPinnedState();
+  }
+
+  Future<void> deleteRecentChat(String peerKey) async {
+    final k = getCanonicalKey(peerKey);
+    final current = await loadRecentChats();
+    current.removeWhere((c) {
+      final cId = (c['conversationId'] as String?) ?? '';
+      final n = ((c['name'] as String?) ?? '').toLowerCase().replaceAll('@', '');
+      final id = ((c['nexaId'] as String?) ?? '').toLowerCase();
+      return n == k || id == k || cId == k;
+    });
+    await saveRecentChats(current);
+  }
 
   /// Formats seconds to mm:ss
   static String formatDuration(int seconds) {
@@ -136,14 +213,35 @@ class ChatService {
           snippet = '📍 Location';
         }
 
+        final isChatOpen = currentActiveChatPeer != null &&
+            (getCanonicalKey(currentActiveChatPeer!) == getCanonicalKey(senderHandle) ||
+             getCanonicalKey(currentActiveChatPeer!) == getCanonicalKey(senderNexaId));
+
+        final unreadCount = isChatOpen ? 0 : 1;
+
         updateRecentChat(
           peerName: senderHandle.isNotEmpty ? '@$senderHandle' : senderNexaId,
           peerNexaId: senderNexaId,
           lastMessage: snippet,
           timestamp: (uiMsg['timestamp'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch,
-          unread: 1,
+          unread: unreadCount,
           conversationId: convId,
         );
+
+        // Native push notification if app is in background or not currently viewing this chat
+        if (!isChatOpen) {
+          final peerKey = getCanonicalKey(senderNexaId.isNotEmpty ? senderNexaId : senderHandle);
+          if (!isChatMuted(peerKey)) {
+            final contactName = ContactsService.instance.getSavedContactName(senderNexaId) ??
+                ContactsService.instance.getSavedContactName(senderHandle) ??
+                (senderNexaId.isNotEmpty ? senderNexaId : '@$senderHandle');
+            _channel.invokeMethod('showNativeNotification', {
+              'title': contactName,
+              'body': snippet,
+              'payload': senderNexaId,
+            }).catchError((_) => null);
+          }
+        }
       }
 
       _incomingMessageStream.add({
@@ -558,6 +656,17 @@ class ChatService {
     if (attachmentName != null) body['attachment_name'] = attachmentName;
     if (attachmentSize != null) body['attachment_size'] = attachmentSize;
     if (locationData != null) body['location_data'] = locationData;
+
+    // Fast-path: deliver via active duplex WebSocket connection (<10ms)
+    final sentViaWs = NexaNetworkService.instance.sendRealtimeMessage(body);
+    if (sentViaWs) {
+      AuthService.instance.postJson('/v1/messages/send', body).catchError((_) => null);
+      return {
+        ...body,
+        'id': 'm_${body['timestamp']}',
+        'status': 'sent',
+      };
+    }
 
     try {
       final res = await AuthService.instance.postJson('/v1/messages/send', body);

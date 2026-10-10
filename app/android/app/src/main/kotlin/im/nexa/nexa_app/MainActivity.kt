@@ -20,6 +20,17 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import android.media.MediaPlayer
 import android.media.MediaRecorder
+import android.media.AudioFormat
+import android.media.AudioManager
+import android.media.AudioRecord
+import android.media.AudioTrack
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.util.Base64
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import java.net.InetAddress
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.io.FileOutputStream
@@ -39,6 +50,14 @@ class MainActivity : FlutterActivity() {
     private var currentRecordingFile: File? = null
     private var recordingStartTime: Long = 0L
     private var mediaPlayer: MediaPlayer? = null
+
+    // Real-Time Native Full-Duplex VoIP Call Audio Engine
+    private var voipRecordThread: Thread? = null
+    private var voipPlayThread: Thread? = null
+    private var isVoipRunning = false
+    private var isVoipMuted = false
+    private var voipSocket: DatagramSocket? = null
+    private val NOTIFICATION_CHANNEL_ID = "nexa_chat_messages"
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -551,6 +570,67 @@ class MainActivity : FlutterActivity() {
                         result.success(0L)
                     }
                 }
+                "showNativeNotification" -> {
+                    try {
+                        val title = call.argument<String>("title") ?: "NEXA"
+                        val body = call.argument<String>("body") ?: "New encrypted message received"
+                        val payload = call.argument<String>("payload")
+                        showNativeNotification(title, body, payload)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("NOTIFICATION_ERROR", e.message, null)
+                    }
+                }
+                "saveBase64Audio" -> {
+                    try {
+                        val base64Str = call.argument<String>("base64Data") ?: ""
+                        val fileName = call.argument<String>("fileName") ?: "nexa_voice_${System.currentTimeMillis()}.m4a"
+                        val bytes = Base64.decode(base64Str, Base64.DEFAULT)
+                        val outFile = File(cacheDir, fileName)
+                        FileOutputStream(outFile).use { it.write(bytes) }
+                        result.success(hashMapOf("path" to outFile.absolutePath, "size" to outFile.length()))
+                    } catch (e: Exception) {
+                        result.error("DECODE_ERROR", e.message, null)
+                    }
+                }
+                "startVoipCall" -> {
+                    try {
+                        val remoteHost = call.argument<String>("remoteHost")
+                        val remotePort = call.argument<Int>("remotePort") ?: 19851
+                        val isCaller = call.argument<Boolean>("isCaller") ?: false
+                        startVoipCall(remoteHost, remotePort, isCaller)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("VOIP_ERROR", e.message, null)
+                    }
+                }
+                "stopVoipCall" -> {
+                    try {
+                        stopVoipCall()
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.success(false)
+                    }
+                }
+                "setVoipCallMuted" -> {
+                    try {
+                        val muted = call.argument<Boolean>("muted") ?: false
+                        isVoipMuted = muted
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.success(false)
+                    }
+                }
+                "setVoipCallSpeaker" -> {
+                    try {
+                        val speaker = call.argument<Boolean>("speaker") ?: true
+                        val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                        audioManager.isSpeakerphoneOn = speaker
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.success(false)
+                    }
+                }
                 else -> result.notImplemented()
             }
         }
@@ -656,8 +736,172 @@ class MainActivity : FlutterActivity() {
                 Manifest.permission.ACCESS_COARSE_LOCATION
             )
             "contacts", "contact" -> listOf(Manifest.permission.READ_CONTACTS)
+            "notification", "notifications" -> {
+                if (Build.VERSION.SDK_INT >= 33) {
+                    listOf(Manifest.permission.POST_NOTIFICATIONS)
+                } else {
+                    emptyList()
+                }
+            }
             else -> emptyList()
         }
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val name = "NEXA Messages"
+            val descriptionText = "Encrypted peer chat message notifications"
+            val importance = NotificationManager.IMPORTANCE_HIGH
+            val channel = NotificationChannel(NOTIFICATION_CHANNEL_ID, name, importance).apply {
+                description = descriptionText
+                enableVibration(true)
+                vibrationPattern = longArrayOf(0, 180, 80, 180)
+            }
+            val notificationManager: NotificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.createNotificationChannel(channel)
+        }
+    }
+
+    private fun showNativeNotification(title: String, body: String, payload: String?) {
+        createNotificationChannel()
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("notification_payload", payload)
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            (System.currentTimeMillis() % 10000).toInt(),
+            intent,
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT else PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            android.app.Notification.Builder(this, NOTIFICATION_CHANNEL_ID)
+        } else {
+            @Suppress("DEPRECATION")
+            android.app.Notification.Builder(this)
+        }
+
+        builder.setContentTitle(title)
+            .setContentText(body)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .setPriority(android.app.Notification.PRIORITY_HIGH)
+
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val notificationId = (System.currentTimeMillis() % 100000).toInt()
+        notificationManager.notify(notificationId, builder.build())
+    }
+
+    private fun startVoipCall(remoteHost: String?, remotePort: Int, isCaller: Boolean) {
+        stopVoipCall()
+        isVoipRunning = true
+        isVoipMuted = false
+        val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+        audioManager.isSpeakerphoneOn = true
+
+        val sampleRate = 16000
+        val channelConfigIn = AudioFormat.CHANNEL_IN_MONO
+        val channelConfigOut = AudioFormat.CHANNEL_OUT_MONO
+        val audioFormat = AudioFormat.ENCODING_PCM_16BIT
+        val minBufIn = AudioRecord.getMinBufferSize(sampleRate, channelConfigIn, audioFormat)
+        val minBufOut = AudioTrack.getMinBufferSize(sampleRate, channelConfigOut, audioFormat)
+        val bufSize = maxOf(minBufIn, minBufOut, 1024)
+
+        try {
+            val localPort = if (isCaller) 19850 else 19851
+            val socket = try {
+                DatagramSocket(localPort)
+            } catch (_: Exception) {
+                DatagramSocket()
+            }
+            voipSocket = socket
+
+            val targetPort = if (remotePort > 0) remotePort else (if (isCaller) 19851 else 19850)
+            val targetHost = if (!remoteHost.isNullOrEmpty()) remoteHost else "255.255.255.255"
+            socket.broadcast = true
+
+            // 1. Audio Playback Thread
+            voipPlayThread = Thread {
+                var audioTrack: AudioTrack? = null
+                try {
+                    audioTrack = AudioTrack(
+                        AudioManager.STREAM_VOICE_CALL,
+                        sampleRate,
+                        channelConfigOut,
+                        audioFormat,
+                        bufSize * 2,
+                        AudioTrack.MODE_STREAM
+                    )
+                    audioTrack.play()
+                    val recvBuf = ByteArray(bufSize)
+                    val packet = DatagramPacket(recvBuf, recvBuf.size)
+                    while (isVoipRunning && !socket.isClosed) {
+                        try {
+                            socket.receive(packet)
+                            if (packet.length > 0) {
+                                audioTrack.write(packet.data, packet.offset, packet.length)
+                            }
+                        } catch (_: Exception) {}
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("NEXA_VOIP", "Playback error: ${e.message}")
+                } finally {
+                    try { audioTrack?.stop() } catch (_: Exception) {}
+                    try { audioTrack?.release() } catch (_: Exception) {}
+                }
+            }.apply { start() }
+
+            // 2. Audio Record & Stream Thread
+            voipRecordThread = Thread {
+                var audioRecord: AudioRecord? = null
+                try {
+                    audioRecord = AudioRecord(
+                        MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                        sampleRate,
+                        channelConfigIn,
+                        audioFormat,
+                        bufSize * 2
+                    )
+                    audioRecord.startRecording()
+                    val sendBuf = ByteArray(bufSize)
+                    val targetAddress = InetAddress.getByName(targetHost)
+                    while (isVoipRunning && !socket.isClosed) {
+                        val read = audioRecord.read(sendBuf, 0, sendBuf.size)
+                        if (read > 0) {
+                            if (isVoipMuted) {
+                                java.util.Arrays.fill(sendBuf, 0.toByte())
+                            }
+                            val packet = DatagramPacket(sendBuf, read, targetAddress, targetPort)
+                            socket.send(packet)
+                        }
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("NEXA_VOIP", "Recording error: ${e.message}")
+                } finally {
+                    try { audioRecord?.stop() } catch (_: Exception) {}
+                    try { audioRecord?.release() } catch (_: Exception) {}
+                }
+            }.apply { start() }
+        } catch (e: Exception) {
+            android.util.Log.e("NEXA_VOIP", "Init error: ${e.message}")
+        }
+    }
+
+    private fun stopVoipCall() {
+        isVoipRunning = false
+        try { voipSocket?.close() } catch (_: Exception) {}
+        voipSocket = null
+        try { voipRecordThread?.interrupt() } catch (_: Exception) {}
+        try { voipPlayThread?.interrupt() } catch (_: Exception) {}
+        voipRecordThread = null
+        voipPlayThread = null
+        try {
+            val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            audioManager.mode = AudioManager.MODE_NORMAL
+        } catch (_: Exception) {}
     }
 
     private fun copyUriToCache(uri: Uri, prefix: String, fallbackExt: String): Map<String, String> {

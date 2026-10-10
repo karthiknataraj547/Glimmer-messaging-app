@@ -87,9 +87,40 @@ const userDevices = new Map();       // user_id -> Map(device_id -> { identity_k
 const prekeyBundles = new Map();     // `${user_id}:${device_id}` -> { signed_prekey, opks: [] }
 const mailboxQueue = new Map();      // device_id -> Array of encrypted envelopes
 const activeUserSockets = new Map(); // canonical_user_id -> Set<WebSocket>
+const userPresenceMap = new Map();   // canonical_id -> { is_online, last_seen, updated_at }
+
+function recordUserPresence(userIdent, isOnline) {
+  if (!userIdent) return;
+  const rawClean = (typeof userIdent === 'string' ? userIdent.trim().replace(/^@+/, '') : '').toLowerCase();
+  const cUser = (Database.resolveCanonicalUserId ? Database.resolveCanonicalUserId(userIdent) : userIdent).toLowerCase();
+  const now = Date.now();
+  const data = { is_online: isOnline, last_seen: now, updated_at: now };
+  if (rawClean) userPresenceMap.set(rawClean, data);
+  if (cUser) userPresenceMap.set(cUser, data);
+}
+
+function getUserPresence(userIdent) {
+  if (!userIdent) return { is_online: false, last_seen: 0 };
+  const rawClean = (typeof userIdent === 'string' ? userIdent.trim().replace(/^@+/, '') : '').toLowerCase();
+  const cUser = (Database.resolveCanonicalUserId ? Database.resolveCanonicalUserId(userIdent) : userIdent).toLowerCase();
+  const p = userPresenceMap.get(rawClean) || userPresenceMap.get(cUser);
+  if (!p) {
+    const user = Database.resolveUser ? (Database.resolveUser(rawClean) || Database.resolveUser(cUser)) : null;
+    return {
+      is_online: false,
+      last_seen: user?.last_seen || user?.created_at || 0
+    };
+  }
+  const isStale = (Date.now() - p.updated_at) > 25000;
+  return {
+    is_online: p.is_online && !isStale,
+    last_seen: p.last_seen
+  };
+}
 
 function registerUserSocket(userIdent, ws) {
   if (!userIdent || !ws) return;
+  recordUserPresence(userIdent, true);
   const rawClean = (typeof userIdent === 'string' ? userIdent.trim().replace(/^@+/, '') : '').toLowerCase();
   const cUser = (Database.resolveCanonicalUserId ? Database.resolveCanonicalUserId(userIdent) : userIdent).toLowerCase();
   const aliases = Database.getUserAliases ? Database.getUserAliases(userIdent) : new Set();
@@ -1426,6 +1457,20 @@ app.post('/v1/mailbox/ack', (req, res) => {
   });
 });
 
+// --- 4b. REAL-TIME PRESENCE & LAST-SEEN ENDPOINTS ---
+app.post('/v1/presence/heartbeat', (req, res) => {
+  const { user, nexa_id, handle } = req.body || {};
+  const ident = nexa_id || handle || user;
+  if (ident) recordUserPresence(ident, true);
+  return res.json({ success: true, timestamp: Date.now() });
+});
+
+app.get('/v1/presence/:ident', (req, res) => {
+  const ident = req.params.ident;
+  const presence = getUserPresence(ident);
+  return res.json({ success: true, user: ident, ...presence });
+});
+
 // --- 5. WEBSOCKET REALTIME SERVER ---
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/v1/realtime' });
@@ -1459,6 +1504,63 @@ wss.on('connection', (ws, req) => {
           registerUserSocket(u, ws);
           ws.send(JSON.stringify({ event: 'USER_BOUND', user: u }));
         }
+      } else if (msg.action === 'SEND_MESSAGE') {
+        const body = msg.data || msg.message || msg;
+        const senderHandle = body.sender_handle;
+        const recipientHandle = body.recipient_handle;
+        const text = body.text || '';
+        const clientMessageId = body.client_message_id;
+
+        // Save message directly to database
+        const savedMessage = Database.saveMessage({
+          sender_handle: senderHandle,
+          sender_nexa_id: body.sender_nexa_id,
+          recipient_handle: recipientHandle,
+          recipient_nexa_id: body.recipient_nexa_id,
+          text: text,
+          type: body.type || 'text',
+          audio_path: body.audio_path,
+          audio_duration: body.audio_duration,
+          attachment_id: body.attachment_id,
+          attachment_url: body.attachment_url,
+          attachment_type: body.attachment_type,
+          attachment_name: body.attachment_name,
+          attachment_size: body.attachment_size,
+          location_data: body.location_data,
+          conversation_id: body.conversation_id,
+          client_message_id: clientMessageId,
+          timestamp: body.timestamp || Date.now()
+        });
+
+        if (Database.syncToCloud) {
+          Database.syncToCloud().catch(e => console.error('[WS sync error]', e));
+        }
+
+        // ACK back to sender (<1ms)
+        ws.send(JSON.stringify({
+          event: 'MESSAGE_ACK',
+          client_message_id: clientMessageId,
+          message: savedMessage,
+          status: 'sent'
+        }));
+
+        // Instantly push to recipient's active socket(s)
+        const recipientIdent = body.recipient_nexa_id || body.recipient_handle;
+        if (recipientIdent) {
+          sendToUser(recipientIdent, {
+            event: 'NEW_CHAT_MESSAGE',
+            message: savedMessage,
+            conversation_id: savedMessage.conversation_id
+          });
+        }
+      } else if (msg.action === 'PING' || msg.action === 'HEARTBEAT') {
+        const ident = msg.user || msg.nexa_id || msg.handle;
+        if (ident) recordUserPresence(ident, true);
+        ws.send(JSON.stringify({ event: 'PONG', timestamp: Date.now() }));
+      } else if (msg.action === 'GET_PRESENCE') {
+        const target = msg.user || msg.nexa_id || msg.handle;
+        const presence = getUserPresence(target);
+        ws.send(JSON.stringify({ event: 'PRESENCE_UPDATE', user: target, ...presence }));
       }
     } catch (e) {
       ws.send(JSON.stringify({ event: 'ERROR', message: 'Malformed JSON frame' }));
