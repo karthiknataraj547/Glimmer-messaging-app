@@ -1177,13 +1177,27 @@ const Database = {
     loadFromDisk();
     if (!dbState.calls) dbState.calls = {};
     const callId = data.call_id || data.offer_id || `call_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+    let recHandle = (data.recipient_handle || '').trim().replace(/^@+/, '').toLowerCase();
+    let recNexaId = (data.recipient_nexa_id || '').trim();
+    if (dbState.users) {
+      for (const u of Object.values(dbState.users)) {
+        const uH = (u.handle || '').toLowerCase().replace(/^@+/, '');
+        const uN = (u.nexa_id || '').toLowerCase();
+        if (uH === recHandle || uN === recHandle || (recNexaId && (uH === recNexaId.toLowerCase() || uN === recNexaId.toLowerCase()))) {
+          recHandle = uH;
+          recNexaId = u.nexa_id || recNexaId;
+          break;
+        }
+      }
+    }
+
     const session = {
       call_id: callId,
       caller_handle: (data.caller_handle || '').trim().replace(/^@+/, '').toLowerCase(),
       caller_nexa_id: data.caller_nexa_id || '',
       caller_name: data.caller_name || data.caller_handle || 'Peer',
-      recipient_handle: (data.recipient_handle || '').trim().replace(/^@+/, '').toLowerCase(),
-      recipient_nexa_id: data.recipient_nexa_id || '',
+      recipient_handle: recHandle,
+      recipient_nexa_id: recNexaId,
       call_type: data.call_type || 'voice', // 'video' | 'voice'
       status: 'ringing', // 'ringing', 'connected', 'declined', 'ended'
       sdp_offer: data.sdp_offer || null,
@@ -1194,6 +1208,7 @@ const Database = {
     };
     dbState.calls[callId] = session;
     saveToDiskSync();
+    syncToCloud().catch(() => {});
     return session;
   },
 
@@ -1201,13 +1216,29 @@ const Database = {
     loadFromDisk();
     if (!dbState.calls) return null;
     const clean = (user || '').trim().replace(/^@+/, '').toLowerCase();
+    let targetHandle = clean;
+    let targetNexaId = clean.startsWith('nx-') ? clean : null;
+    if (dbState.users) {
+      for (const u of Object.values(dbState.users)) {
+        const uH = (u.handle || '').toLowerCase().replace(/^@+/, '');
+        const uN = (u.nexa_id || '').toLowerCase();
+        if (uH === clean || uN === clean) {
+          targetHandle = uH;
+          targetNexaId = uN;
+          break;
+        }
+      }
+    }
     const now = Date.now();
     for (const call of Object.values(dbState.calls)) {
-      if (
-        (call.recipient_handle === clean || (call.recipient_nexa_id && call.recipient_nexa_id.toLowerCase() === clean)) &&
-        call.status === 'ringing' &&
-        now - call.created_at < 45000
-      ) {
+      const recH = (call.recipient_handle || '').toLowerCase();
+      const recN = (call.recipient_nexa_id || '').toLowerCase();
+      const matches = (
+        recH === clean || recN === clean ||
+        (targetHandle && (recH === targetHandle || recN === targetHandle)) ||
+        (targetNexaId && (recH === targetNexaId || recN === targetNexaId))
+      );
+      if (matches && call.status === 'ringing' && now - call.created_at < 45000) {
         return call;
       }
     }
