@@ -354,7 +354,7 @@ app.get('/v1/conversations', async (req, res) => {
 });
 
 app.get('/v1/conversations/:id/messages', async (req, res) => {
-  if (Database.syncFromCloud) await Database.syncFromCloud();
+  if (Database.syncFromCloud) await Database.syncFromCloud(false);
   const convId = req.params.id;
   const { limit, cursor, user, userId } = req.query || {};
 
@@ -366,7 +366,7 @@ app.get('/v1/conversations/:id/messages', async (req, res) => {
     });
 
     if (Database.syncToCloud) {
-      await Database.syncToCloud();
+      Database.syncToCloud().catch(() => {});
     }
 
     return res.json({
@@ -408,7 +408,7 @@ app.post('/v1/messages/send', async (req, res) => {
     return res.status(400).json({ error: 'Missing required sender, recipient, or message payload.' });
   }
 
-  if (Database.syncFromCloud) await Database.syncFromCloud(true);
+  if (Database.syncFromCloud) await Database.syncFromCloud(false);
 
   const newMsg = Database.saveMessage({
     client_message_id,
@@ -440,7 +440,7 @@ app.post('/v1/messages/send', async (req, res) => {
   }
 
   if (Database.syncToCloud) {
-    await Database.syncToCloud();
+    Database.syncToCloud().catch(() => {});
   }
 
   return res.status(201).json({
@@ -450,12 +450,12 @@ app.post('/v1/messages/send', async (req, res) => {
 });
 
 app.get('/v1/messages/thread/:user1/:user2', async (req, res) => {
-  if (Database.syncFromCloud) await Database.syncFromCloud(true);
+  if (Database.syncFromCloud) await Database.syncFromCloud(false);
   const { user1, user2 } = req.params;
   const { peer_id, my_id } = req.query || {};
   const messages = Database.getMessageThread(user1, user2, { peer_id, my_id });
   if (Database.syncToCloud) {
-    await Database.syncToCloud();
+    Database.syncToCloud().catch(() => {});
   }
   return res.json({
     success: true,
@@ -465,12 +465,12 @@ app.get('/v1/messages/thread/:user1/:user2', async (req, res) => {
 });
 
 app.get('/v1/messages/inbox/:user', async (req, res) => {
-  if (Database.syncFromCloud) await Database.syncFromCloud(true);
+  if (Database.syncFromCloud) await Database.syncFromCloud(false);
   const { user } = req.params;
   const { nexa_id } = req.query || {};
   const messages = Database.getInbox(user, nexa_id);
   if (Database.syncToCloud) {
-    await Database.syncToCloud();
+    Database.syncToCloud().catch(() => {});
   }
   return res.json({
     success: true,

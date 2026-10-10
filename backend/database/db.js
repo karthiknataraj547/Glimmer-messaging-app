@@ -55,7 +55,8 @@ let dbState = {
 
 const CLOUD_BIN_URL = 'https://extendsclass.com/api/json-storage/bin/eafefcc';
 let lastCloudSyncTime = 0;
-const CLOUD_SYNC_TTL = 3000;
+let lastCloudPushTime = 0;
+const CLOUD_SYNC_TTL = 15000;
 
 let pgPool = null;
 let isPgConnected = false;
@@ -126,9 +127,12 @@ async function syncFromCloud(force = false) {
   if (!force && (now - lastCloudSyncTime < CLOUD_SYNC_TTL)) {
     return;
   }
+  if (force && (now - lastCloudSyncTime < 8000)) {
+    return;
+  }
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 4000);
+    const timeout = setTimeout(() => controller.abort(), 2000);
     const res = await fetch(CLOUD_BIN_URL, { signal: controller.signal });
     clearTimeout(timeout);
     if (res.ok) {
@@ -233,9 +237,14 @@ async function syncFromCloud(force = false) {
 }
 
 async function syncToCloud() {
+  const now = Date.now();
+  if (now - lastCloudPushTime < 6000) {
+    return;
+  }
+  lastCloudPushTime = now;
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
+    const timeout = setTimeout(() => controller.abort(), 2500);
     const body = JSON.stringify({
       users: dbState.users,
       user_devices: dbState.user_devices,
@@ -1090,7 +1099,27 @@ const Database = {
       }).length;
 
       const lastMsg = threadHistory.length > 0 ? threadHistory[threadHistory.length - 1] : conv.last_message;
-      const lastMsgText = lastMsg ? (typeof lastMsg === 'string' ? lastMsg : (lastMsg.text || 'Direct Conversation')) : 'Direct Conversation';
+      let lastMsgText = 'Direct Conversation';
+      if (lastMsg) {
+        if (typeof lastMsg === 'string') {
+          lastMsgText = lastMsg;
+        } else {
+          const type = (lastMsg.type || '').toLowerCase();
+          if (type === 'photo' || type === 'image') {
+            lastMsgText = '📷 Photo';
+          } else if (type === 'voice' || type === 'audio') {
+            lastMsgText = '🎤 Voice Note';
+          } else if (type === 'document' || type === 'file') {
+            lastMsgText = `📄 ${lastMsg.attachment_name || 'Document'}`;
+          } else if (type === 'location') {
+            lastMsgText = '📍 Location';
+          } else if (lastMsg.text && lastMsg.text.trim()) {
+            lastMsgText = lastMsg.text.trim();
+          } else {
+            lastMsgText = 'Encrypted Message';
+          }
+        }
+      }
       const lastMsgTs = lastMsg && lastMsg.timestamp ? Number(lastMsg.timestamp) : (conv.updated_at || conv.created_at || Date.now());
 
       result.push({
