@@ -37,9 +37,9 @@ let dbState = {
   calls: {},
   app_version: {
     latest_version: '1.3.0',
-    build_number: 16,
+    build_number: 17,
     release_date: '2026-10-10',
-    release_notes: 'Release v1.3.0+16: Maximalist Cyberpunk mobile design with glowing neon holographic chips, cyberpunk message bubbles, and real-time first conversation delivery pipeline fixes for instant 0ms chat rendering.',
+    release_notes: 'Release v1.3.0+17: Mobile app UI redesign matching Admin Panel minimalist dark obsidian control deck (slate cards, hairline borders, monospace telemetry badges, and live indicator pills).',
     download_url: 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk',
     web_url: 'https://glimmer-messaging-app-web.vercel.app/',
     mandatory: false,

@@ -515,13 +515,13 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       key: _scaffoldKey,
-      backgroundColor: const Color(0xFF090D16),
+      backgroundColor: NexaColors.adminBgBase,
       drawer: _buildModernDrawer(),
       body: SafeArea(
         child: Column(
           children: [
-            // Maximalist Cyber Top Bar
-            _buildMaximalistTopBar(),
+            // Admin Panel Minimalist Command Bar
+            _buildAdminTopBar(),
 
             // Screen Content
             Expanded(
@@ -542,15 +542,18 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
       floatingActionButton: _activeNav == 0
           ? Container(
               decoration: BoxDecoration(
-                gradient: NexaColors.cyberGradient,
-                borderRadius: BorderRadius.circular(18),
-                boxShadow: NexaColors.glowCyan,
+                color: NexaColors.adminBgElevated,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0x4D38BDF8), width: 1.0),
+                boxShadow: const [
+                  BoxShadow(color: Color(0x44000000), blurRadius: 10, offset: Offset(0, 4)),
+                ],
               ),
               child: FloatingActionButton(
                 backgroundColor: Colors.transparent,
                 elevation: 0,
                 onPressed: _showNewChatDialog,
-                child: const Icon(Icons.add_comment_rounded, color: Colors.white, size: 24),
+                child: const Icon(Icons.add_comment_outlined, color: NexaColors.adminAccentCyan, size: 22),
               ),
             )
           : null,
@@ -558,78 +561,106 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
   }
 
   // =====================================================================
-  // 1. MAXIMALIST CYBER TOP APP BAR
+  // 1. ADMIN PANEL MINIMALIST COMMAND BAR (Obsidian Telemetry Header)
   // =====================================================================
-  Widget _buildMaximalistTopBar() {
+  Widget _buildAdminTopBar() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF070A12),
-        border: const Border(
-          bottom: BorderSide(color: Color(0x3300E5FF), width: 1.2),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: const BoxDecoration(
+        color: NexaColors.adminBgBase,
+        border: Border(
+          bottom: BorderSide(color: NexaColors.adminBorderSubtle, width: 1.0),
         ),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF00E5FF).withValues(alpha: 0.08),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Row(
             children: [
-              IconButton(
-                icon: const Icon(Icons.menu_rounded, color: Colors.white, size: 24),
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
-                onPressed: () => _scaffoldKey.currentState?.openDrawer(),
-              ),
-              const SizedBox(width: 14),
-              // Maximalist Holographic Brand Badge
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                decoration: BoxDecoration(
-                  gradient: NexaColors.hologramGradient,
-                  borderRadius: BorderRadius.circular(8),
-                  boxShadow: NexaColors.glowCyan,
-                ),
-                child: const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.shield_outlined, color: Colors.black, size: 14),
-                    SizedBox(width: 5),
-                    Text(
-                      'NEXA',
-                      style: TextStyle(
-                        color: Colors.black,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 1.8,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF10B981).withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.35)),
-                ),
-                child: const Text(
-                  'E2EE 256-BIT',
-                  style: TextStyle(
-                    color: Color(0xFF10B981),
-                    fontSize: 9,
-                    fontWeight: FontWeight.bold,
-                    fontFamily: 'JetBrains Mono',
+              // Minimalist Slate Menu Button
+              InkWell(
+                onTap: () => _scaffoldKey.currentState?.openDrawer(),
+                borderRadius: BorderRadius.circular(6),
+                child: Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: NexaColors.adminBgElevated,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: NexaColors.adminBorderSubtle),
                   ),
+                  child: const Icon(Icons.menu_rounded, color: NexaColors.adminTextMain, size: 20),
                 ),
+              ),
+              const SizedBox(width: 12),
+              // Brand Icon (Matches .brand-icon in Admin UI CSS)
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF1E293B), Color(0xFF0F172A)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0x4D3B82F6), width: 1.0),
+                ),
+                child: const Center(
+                  child: Icon(Icons.shield_outlined, color: NexaColors.adminAccentCyan, size: 18),
+                ),
+              ),
+              const SizedBox(width: 10),
+              // Brand Info & Monospace Badges
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'NEXA',
+                        style: TextStyle(
+                          color: NexaColors.adminTextMain,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.2,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                        decoration: BoxDecoration(
+                          color: NexaColors.adminBgElevated,
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: NexaColors.adminBorderSubtle),
+                        ),
+                        child: const Text(
+                          'SOVEREIGN',
+                          style: TextStyle(
+                            color: NexaColors.adminTextMuted,
+                            fontSize: 8.5,
+                            fontWeight: FontWeight.w700,
+                            fontFamily: 'monospace',
+                            letterSpacing: 0.8,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  const Text(
+                    'RELAY // ACTIVE',
+                    style: TextStyle(
+                      color: NexaColors.adminTextDim,
+                      fontSize: 9.5,
+                      fontWeight: FontWeight.w600,
+                      fontFamily: 'monospace',
+                      letterSpacing: 0.8,
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -644,66 +675,60 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                     margin: const EdgeInsets.only(right: 8),
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
-                      gradient: NexaColors.plasmaGradient,
-                      borderRadius: BorderRadius.circular(12),
-                      boxShadow: [
-                        BoxShadow(
-                          color: const Color(0xFFF43F5E).withValues(alpha: 0.4),
-                          blurRadius: 8,
-                        ),
-                      ],
+                      color: const Color(0x1AF59E0B),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: const Color(0x4DF59E0B)),
                     ),
                     child: const Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.system_update, color: Colors.white, size: 12),
+                        Icon(Icons.system_update, color: NexaColors.adminAccentAmber, size: 12),
                         SizedBox(width: 4),
                         Text(
                           'Update',
-                          style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                          style: TextStyle(
+                            color: NexaColors.adminAccentAmber,
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w700,
+                            fontFamily: 'monospace',
+                          ),
                         ),
                       ],
                     ),
                   ),
                 ),
               ],
-              // User handle chip with green online dot
+              // Admin Live Indicator Pill (.live-indicator)
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                 decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFF151C2E), Color(0xFF0F1424)],
-                  ),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: const Color(0xFF00E5FF).withValues(alpha: 0.4)),
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0xFF00E5FF).withValues(alpha: 0.1),
-                      blurRadius: 6,
-                    ),
-                  ],
+                  color: const Color(0x1410B981),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: const Color(0x4010B981), width: 1.0),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Container(
-                      width: 8,
-                      height: 8,
+                      width: 6,
+                      height: 6,
                       decoration: const BoxDecoration(
-                        color: Color(0xFF10B981),
+                        color: NexaColors.adminAccentEmerald,
                         shape: BoxShape.circle,
                         boxShadow: [
-                          BoxShadow(color: Color(0xFF10B981), blurRadius: 6),
+                          BoxShadow(color: Color(0x9910B981), blurRadius: 6),
                         ],
                       ),
                     ),
-                    const SizedBox(width: 7),
+                    const SizedBox(width: 6),
                     Text(
                       _session.handle.isNotEmpty ? _session.handle : '@user',
                       style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
+                        color: NexaColors.adminAccentEmerald,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        fontFamily: 'monospace',
+                        letterSpacing: 0.4,
                       ),
                     ),
                   ],
@@ -734,27 +759,31 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
 
     return Column(
       children: [
-        // Search Bar
+        // Admin Minimalist Search Bar
         Padding(
-          padding: const EdgeInsets.fromLTRB(18, 12, 18, 8),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
           child: TextField(
             controller: _chatSearchController,
             onChanged: (val) => setState(() => _chatSearchQuery = val),
-            style: const TextStyle(color: Colors.white, fontSize: 14),
+            style: const TextStyle(color: NexaColors.adminTextMain, fontSize: 13.5),
             decoration: InputDecoration(
               hintText: 'Search encrypted conversations...',
-              hintStyle: const TextStyle(color: Color(0xFF64748B), fontSize: 13),
-              prefixIcon: const Icon(Icons.search, color: Color(0xFF64748B), size: 18),
+              hintStyle: const TextStyle(color: NexaColors.adminTextDim, fontSize: 12.5),
+              prefixIcon: const Icon(Icons.search, color: NexaColors.adminTextDim, size: 18),
               filled: true,
-              fillColor: const Color(0xFF111827),
+              fillColor: NexaColors.adminBgSurface,
               contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(16),
-                borderSide: const BorderSide(color: Color(0x1AFFFFFF)),
+                borderRadius: BorderRadius.circular(8),
+                borderSide: const BorderSide(color: NexaColors.adminBorderSubtle),
               ),
               enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(16),
-                borderSide: const BorderSide(color: Color(0x1AFFFFFF)),
+                borderRadius: BorderRadius.circular(8),
+                borderSide: const BorderSide(color: NexaColors.adminBorderSubtle),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: const BorderSide(color: NexaColors.adminAccentCyan, width: 1.2),
               ),
             ),
           ),
@@ -862,99 +891,78 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                     final unread = (item['unread'] as int?) ?? 0;
                     final nexaId = (item['nexaId'] as String?) ?? 'NX-PEER';
 
+                    final isUnread = unread > 0;
                     return Container(
-                      margin: const EdgeInsets.symmetric(vertical: 4),
+                      margin: const EdgeInsets.symmetric(vertical: 3),
                       decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                          colors: [
-                            unread > 0 ? const Color(0xFF162035) : const Color(0xFF101524),
-                            const Color(0xFF090D18),
-                          ],
-                        ),
-                        borderRadius: BorderRadius.circular(16),
+                        color: isUnread ? const Color(0xFF131A26) : NexaColors.adminBgSurface,
+                        borderRadius: BorderRadius.circular(8),
                         border: Border.all(
-                          color: unread > 0
-                              ? const Color(0xFF00E5FF).withValues(alpha: 0.6)
-                              : const Color(0xFF00E5FF).withValues(alpha: 0.15),
-                          width: unread > 0 ? 1.5 : 0.8,
+                          color: isUnread ? const Color(0x6638BDF8) : NexaColors.adminBorderSubtle,
+                          width: 1.0,
                         ),
-                        boxShadow: unread > 0
-                            ? [
-                                BoxShadow(
-                                  color: const Color(0xFF00E5FF).withValues(alpha: 0.25),
-                                  blurRadius: 12,
-                                  spreadRadius: 0,
-                                ),
-                              ]
-                            : null,
                       ),
                       child: Material(
                         color: Colors.transparent,
                         child: InkWell(
-                          borderRadius: BorderRadius.circular(16),
+                          borderRadius: BorderRadius.circular(8),
                           onTap: () => _openChat(name, nexaId, conversationId: item['conversationId'] as String?),
                           child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                             child: Row(
                               children: [
-                                // Holographic Glowing Avatar Ring
+                                // Admin Square Avatar Box (Matches .brand-icon in Admin UI)
                                 Stack(
                                   alignment: Alignment.bottomRight,
                                   children: [
                                     Container(
-                                      padding: const EdgeInsets.all(2.5),
+                                      width: 42,
+                                      height: 42,
                                       decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        gradient: unread > 0
-                                            ? NexaColors.cyberGradient
-                                            : NexaColors.hologramGradient,
-                                        boxShadow: unread > 0
-                                            ? [
-                                                BoxShadow(
-                                                  color: const Color(0xFF00E5FF).withValues(alpha: 0.4),
-                                                  blurRadius: 8,
-                                                ),
-                                              ]
-                                            : null,
+                                        gradient: const LinearGradient(
+                                          colors: [Color(0xFF1E293B), Color(0xFF0F172A)],
+                                          begin: Alignment.topLeft,
+                                          end: Alignment.bottomRight,
+                                        ),
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(
+                                          color: isUnread ? const Color(0x8038BDF8) : const Color(0x3338BDF8),
+                                          width: 1.0,
+                                        ),
                                       ),
-                                      child: CircleAvatar(
-                                        radius: 23,
-                                        backgroundColor: const Color(0xFF0D121F),
+                                      child: Center(
                                         child: Text(
                                           name.isNotEmpty ? name.replaceAll('@', '').substring(0, 1).toUpperCase() : '?',
                                           style: TextStyle(
-                                            color: unread > 0 ? const Color(0xFF00E5FF) : Colors.white,
-                                            fontWeight: FontWeight.w900,
+                                            color: isUnread ? NexaColors.adminAccentCyan : NexaColors.adminTextMain,
+                                            fontWeight: FontWeight.w800,
                                             fontSize: 16,
                                           ),
                                         ),
                                       ),
                                     ),
-                                    // Live Activity Status Dot
                                     Container(
-                                      width: 10,
-                                      height: 10,
+                                      width: 8,
+                                      height: 8,
+                                      margin: const EdgeInsets.all(1),
                                       decoration: BoxDecoration(
-                                        color: const Color(0xFF10B981),
+                                        color: NexaColors.adminAccentEmerald,
                                         shape: BoxShape.circle,
-                                        border: Border.all(color: const Color(0xFF090D18), width: 1.5),
+                                        border: Border.all(color: NexaColors.adminBgSurface, width: 1.5),
                                         boxShadow: const [
-                                          BoxShadow(color: Color(0xFF10B981), blurRadius: 4),
+                                          BoxShadow(color: Color(0x9910B981), blurRadius: 4),
                                         ],
                                       ),
                                     ),
                                   ],
                                 ),
-                                const SizedBox(width: 14),
+                                const SizedBox(width: 12),
 
-                                // Chat Metadata & Details
+                                // Chat Metadata
                                 Expanded(
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      // Top Row: Peer Name & Time Chip
                                       Row(
                                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                         children: [
@@ -966,67 +974,78 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                                                   child: Text(
                                                     name,
                                                     style: const TextStyle(
-                                                      color: Colors.white,
-                                                      fontWeight: FontWeight.bold,
-                                                      fontSize: 15,
+                                                      color: NexaColors.adminTextMain,
+                                                      fontWeight: FontWeight.w700,
+                                                      fontSize: 14.5,
                                                       letterSpacing: -0.2,
                                                     ),
                                                     overflow: TextOverflow.ellipsis,
                                                   ),
                                                 ),
-                                                const SizedBox(width: 4),
-                                                const Icon(Icons.verified, color: Color(0xFF00E5FF), size: 13),
+                                                const SizedBox(width: 5),
+                                                Container(
+                                                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                                  decoration: BoxDecoration(
+                                                    color: NexaColors.adminBgElevated,
+                                                    borderRadius: BorderRadius.circular(4),
+                                                    border: Border.all(color: NexaColors.adminBorderSubtle),
+                                                  ),
+                                                  child: const Text(
+                                                    'PEER',
+                                                    style: TextStyle(
+                                                      color: NexaColors.adminAccentCyan,
+                                                      fontSize: 8,
+                                                      fontWeight: FontWeight.w700,
+                                                      fontFamily: 'monospace',
+                                                      letterSpacing: 0.5,
+                                                    ),
+                                                  ),
+                                                ),
                                               ],
                                             ),
                                           ),
                                           Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                             decoration: BoxDecoration(
-                                              color: Colors.white.withValues(alpha: 0.05),
-                                              borderRadius: BorderRadius.circular(6),
-                                              border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+                                              color: NexaColors.adminBgElevated,
+                                              borderRadius: BorderRadius.circular(4),
+                                              border: Border.all(color: NexaColors.adminBorderSubtle),
                                             ),
                                             child: Text(
                                               time,
                                               style: TextStyle(
-                                                color: unread > 0 ? const Color(0xFF00E5FF) : const Color(0xFF94A3B8),
+                                                color: isUnread ? NexaColors.adminAccentCyan : NexaColors.adminTextDim,
                                                 fontSize: 10,
                                                 fontWeight: FontWeight.w600,
+                                                fontFamily: 'monospace',
                                               ),
                                             ),
                                           ),
                                         ],
                                       ),
-                                      const SizedBox(height: 5),
+                                      const SizedBox(height: 4),
 
-                                      // Bottom Row: Message Preview & Holographic Badges
                                       Row(
                                         children: [
                                           Expanded(
                                             child: Text(
                                               msg,
                                               style: TextStyle(
-                                                color: unread > 0 ? Colors.white : const Color(0xFF94A3B8),
+                                                color: isUnread ? NexaColors.adminTextMain : NexaColors.adminTextMuted,
                                                 fontSize: 12.5,
-                                                fontWeight: unread > 0 ? FontWeight.w600 : FontWeight.normal,
+                                                fontWeight: isUnread ? FontWeight.w600 : FontWeight.normal,
                                               ),
                                               maxLines: 1,
                                               overflow: TextOverflow.ellipsis,
                                             ),
                                           ),
-                                          if (unread > 0) ...[
+                                          if (isUnread) ...[
                                             const SizedBox(width: 8),
                                             Container(
-                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                                               decoration: BoxDecoration(
-                                                gradient: NexaColors.cyberGradient,
-                                                borderRadius: BorderRadius.circular(12),
-                                                boxShadow: [
-                                                  BoxShadow(
-                                                    color: const Color(0xFF00E5FF).withValues(alpha: 0.5),
-                                                    blurRadius: 8,
-                                                  ),
-                                                ],
+                                                color: NexaColors.adminAccentCyan,
+                                                borderRadius: BorderRadius.circular(4),
                                               ),
                                               child: Text(
                                                 '$unread',
@@ -1034,6 +1053,7 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                                                   color: Colors.black,
                                                   fontSize: 10,
                                                   fontWeight: FontWeight.w900,
+                                                  fontFamily: 'monospace',
                                                 ),
                                               ),
                                             ),
@@ -1042,16 +1062,17 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                                             Container(
                                               padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
                                               decoration: BoxDecoration(
-                                                color: const Color(0xFF10B981).withValues(alpha: 0.1),
+                                                color: const Color(0x1410B981),
                                                 borderRadius: BorderRadius.circular(4),
-                                                border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.3)),
+                                                border: Border.all(color: const Color(0x4010B981)),
                                               ),
                                               child: const Text(
                                                 'E2EE',
                                                 style: TextStyle(
-                                                  color: Color(0xFF10B981),
-                                                  fontSize: 9,
-                                                  fontWeight: FontWeight.bold,
+                                                  color: NexaColors.adminAccentEmerald,
+                                                  fontSize: 8.5,
+                                                  fontWeight: FontWeight.w700,
+                                                  fontFamily: 'monospace',
                                                 ),
                                               ),
                                             ),
@@ -1160,18 +1181,19 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
           alignment: Alignment.center,
-          padding: const EdgeInsets.symmetric(vertical: 8),
+          padding: const EdgeInsets.symmetric(vertical: 7),
           decoration: BoxDecoration(
-            color: isSelected ? const Color(0xFF1E293B) : Colors.transparent,
-            borderRadius: BorderRadius.circular(10),
-            border: isSelected ? Border.all(color: const Color(0xFF00E5FF).withValues(alpha: 0.4)) : null,
+            color: isSelected ? NexaColors.adminBgElevated : Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
+            border: isSelected ? Border.all(color: const Color(0x3338BDF8), width: 1.0) : null,
           ),
           child: Text(
             label,
             style: TextStyle(
-              color: isSelected ? Colors.white : const Color(0xFF94A3B8),
+              color: isSelected ? NexaColors.adminTextMain : NexaColors.adminTextDim,
               fontSize: 11,
-              fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+              fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+              fontFamily: 'monospace',
             ),
           ),
         ),
@@ -1690,30 +1712,23 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
   // =====================================================================
   Widget _buildModernBottomBar() {
     final navItems = [
-      {'icon': Icons.chat_bubble_outline_rounded, 'activeIcon': Icons.chat_bubble_rounded, 'label': 'Chats'},
-      {'icon': Icons.people_outline_rounded, 'activeIcon': Icons.people_rounded, 'label': 'Contacts'},
-      {'icon': Icons.phone_outlined, 'activeIcon': Icons.phone_rounded, 'label': 'Calls'},
-      {'icon': Icons.tune_outlined, 'activeIcon': Icons.tune_rounded, 'label': 'Vault'},
+      {'icon': Icons.chat_bubble_outline_rounded, 'activeIcon': Icons.chat_bubble_rounded, 'label': 'CHATS'},
+      {'icon': Icons.people_outline_rounded, 'activeIcon': Icons.people_rounded, 'label': 'CONTACTS'},
+      {'icon': Icons.phone_outlined, 'activeIcon': Icons.phone_rounded, 'label': 'CALLS'},
+      {'icon': Icons.tune_outlined, 'activeIcon': Icons.tune_rounded, 'label': 'VAULT'},
     ];
 
     return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFF070A12),
-        border: const Border(
-          top: BorderSide(color: Color(0x3300E5FF), width: 1.2),
+      decoration: const BoxDecoration(
+        color: NexaColors.adminBgBase,
+        border: Border(
+          top: BorderSide(color: NexaColors.adminBorderSubtle, width: 1.0),
         ),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF00E5FF).withValues(alpha: 0.06),
-            blurRadius: 16,
-            offset: const Offset(0, -4),
-          ),
-        ],
       ),
       child: SafeArea(
         top: false,
         child: Container(
-          height: 62,
+          height: 60,
           padding: const EdgeInsets.symmetric(horizontal: 8),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
@@ -1722,46 +1737,39 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
               final item = navItems[index];
               return InkWell(
                 onTap: () => setState(() => _activeNav = index),
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(6),
                 child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
+                  duration: const Duration(milliseconds: 150),
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                   decoration: BoxDecoration(
                     color: isSelected
-                        ? const Color(0xFF00E5FF).withValues(alpha: 0.12)
+                        ? NexaColors.adminBgElevated
                         : Colors.transparent,
-                    borderRadius: BorderRadius.circular(14),
+                    borderRadius: BorderRadius.circular(6),
                     border: Border.all(
                       color: isSelected
-                          ? const Color(0xFF00E5FF).withValues(alpha: 0.35)
+                          ? const Color(0x3338BDF8)
                           : Colors.transparent,
                       width: 1,
                     ),
-                    boxShadow: isSelected
-                        ? [
-                            BoxShadow(
-                              color: const Color(0xFF00E5FF).withValues(alpha: 0.15),
-                              blurRadius: 8,
-                            ),
-                          ]
-                        : null,
                   ),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(
                         isSelected ? item['activeIcon'] as IconData : item['icon'] as IconData,
-                        color: isSelected ? const Color(0xFF00E5FF) : const Color(0xFF64748B),
-                        size: 21,
+                        color: isSelected ? NexaColors.adminAccentCyan : NexaColors.adminTextDim,
+                        size: 20,
                       ),
                       const SizedBox(height: 2),
                       Text(
                         item['label'] as String,
                         style: TextStyle(
-                          color: isSelected ? const Color(0xFF00E5FF) : const Color(0xFF64748B),
-                          fontWeight: isSelected ? FontWeight.w800 : FontWeight.w500,
-                          fontSize: 10,
-                          letterSpacing: 0.3,
+                          color: isSelected ? NexaColors.adminAccentCyan : NexaColors.adminTextDim,
+                          fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                          fontSize: 9.5,
+                          fontFamily: 'monospace',
+                          letterSpacing: 0.8,
                         ),
                       ),
                     ],
@@ -1808,20 +1816,34 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
 
   Widget _buildModernDrawer() {
     return Drawer(
-      backgroundColor: const Color(0xFF090D16),
+      backgroundColor: NexaColors.adminBgBase,
       child: SafeArea(
         child: Column(
           children: [
             Container(
               padding: const EdgeInsets.all(20),
+              decoration: const BoxDecoration(
+                border: Border(bottom: BorderSide(color: NexaColors.adminBorderSubtle, width: 1.0)),
+              ),
               child: Row(
                 children: [
-                  CircleAvatar(
-                    radius: 24,
-                    backgroundColor: const Color(0xFF00E5FF).withValues(alpha: 0.15),
-                    child: Text(
-                      _session.username.isNotEmpty ? _session.username.substring(0, 1).toUpperCase() : '?',
-                      style: const TextStyle(color: Color(0xFF00E5FF), fontWeight: FontWeight.bold, fontSize: 18),
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF1E293B), Color(0xFF0F172A)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0x3338BDF8), width: 1.0),
+                    ),
+                    child: Center(
+                      child: Text(
+                        _session.username.isNotEmpty ? _session.username.substring(0, 1).toUpperCase() : '?',
+                        style: const TextStyle(color: NexaColors.adminAccentCyan, fontWeight: FontWeight.w800, fontSize: 18),
+                      ),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -1829,43 +1851,52 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(_session.fullName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
-                        Text(_session.handle, style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12)),
+                        Text(_session.fullName, style: const TextStyle(color: NexaColors.adminTextMain, fontWeight: FontWeight.w700, fontSize: 15)),
+                        const SizedBox(height: 2),
+                        Text(
+                          _session.handle,
+                          style: const TextStyle(
+                            color: NexaColors.adminAccentCyan,
+                            fontSize: 11,
+                            fontFamily: 'monospace',
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                       ],
                     ),
                   ),
                 ],
               ),
             ),
-            const Divider(color: Color(0x1AFFFFFF)),
             ListTile(
-              leading: const Icon(Icons.verified_user_outlined, color: Color(0xFF10B981)),
-              title: const Text('Privacy Center', style: TextStyle(color: Colors.white, fontSize: 14)),
+              leading: const Icon(Icons.verified_user_outlined, color: NexaColors.adminAccentEmerald, size: 20),
+              title: const Text('Privacy Center', style: TextStyle(color: NexaColors.adminTextMain, fontSize: 13.5, fontWeight: FontWeight.w600)),
               onTap: () {
                 Navigator.pop(context);
                 Navigator.push(context, MaterialPageRoute(builder: (_) => const PrivacyCenterScreen()));
               },
             ),
             ListTile(
-              leading: const Icon(Icons.devices, color: Color(0xFF00E5FF)),
-              title: const Text('Linked Devices', style: TextStyle(color: Colors.white, fontSize: 14)),
+              leading: const Icon(Icons.devices, color: NexaColors.adminAccentCyan, size: 20),
+              title: const Text('Linked Devices', style: TextStyle(color: NexaColors.adminTextMain, fontSize: 13.5, fontWeight: FontWeight.w600)),
               onTap: () {
                 Navigator.pop(context);
                 Navigator.push(context, MaterialPageRoute(builder: (_) => const DeviceLinkQrScreen()));
               },
             ),
             ListTile(
-              leading: const Icon(Icons.system_update_alt, color: Color(0xFFF59E0B)),
-              title: const Text('App Update Engine', style: TextStyle(color: Colors.white, fontSize: 14)),
+              leading: const Icon(Icons.system_update_alt, color: NexaColors.adminAccentAmber, size: 20),
+              title: const Text('App Update Engine', style: TextStyle(color: NexaColors.adminTextMain, fontSize: 13.5, fontWeight: FontWeight.w600)),
               onTap: () {
                 Navigator.pop(context);
                 UpdateEngine.instance.openUpdateCenter(context);
               },
             ),
             const Spacer(),
+            const Divider(color: NexaColors.adminBorderSubtle, height: 1),
             ListTile(
-              leading: const Icon(Icons.logout, color: Color(0xFFEF4444)),
-              title: const Text('Lock Vault', style: TextStyle(color: Color(0xFFEF4444), fontWeight: FontWeight.bold, fontSize: 14)),
+              leading: const Icon(Icons.logout, color: NexaColors.adminAccentRose, size: 20),
+              title: const Text('Lock Vault', style: TextStyle(color: NexaColors.adminAccentRose, fontWeight: FontWeight.w700, fontSize: 13.5)),
               onTap: () {
                 Navigator.pop(context);
                 _session.logout();
@@ -2046,19 +2077,19 @@ class _NewChatSheetState extends State<_NewChatSheet> {
     return Container(
       height: MediaQuery.of(context).size.height * 0.88,
       decoration: const BoxDecoration(
-        color: Color(0xFF090D16),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-        border: Border(top: BorderSide(color: Color(0x3300E5FF), width: 1.2)),
+        color: NexaColors.adminBgBase,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        border: Border(top: BorderSide(color: NexaColors.adminBorderSubtle, width: 1.0)),
       ),
       child: Column(
         children: [
           // Drag handle
           Container(
             margin: const EdgeInsets.only(top: 12, bottom: 8),
-            width: 44,
+            width: 36,
             height: 4,
             decoration: BoxDecoration(
-              color: Colors.white24,
+              color: NexaColors.adminBorderHover,
               borderRadius: BorderRadius.circular(2),
             ),
           ),
@@ -2073,12 +2104,20 @@ class _NewChatSheetState extends State<_NewChatSheet> {
                   child: Row(
                     children: [
                       Container(
-                        padding: const EdgeInsets.all(8),
+                        width: 36,
+                        height: 36,
                         decoration: BoxDecoration(
-                          color: const Color(0xFF00E5FF).withValues(alpha: 0.15),
-                          shape: BoxShape.circle,
+                          gradient: const LinearGradient(
+                            colors: [Color(0xFF1E293B), Color(0xFF0F172A)],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: const Color(0x4D3B82F6), width: 1.0),
                         ),
-                        child: const Icon(Icons.add_comment_rounded, color: Color(0xFF00E5FF), size: 20),
+                        child: const Center(
+                          child: Icon(Icons.add_comment_outlined, color: NexaColors.adminAccentCyan, size: 18),
+                        ),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
@@ -2087,12 +2126,12 @@ class _NewChatSheetState extends State<_NewChatSheet> {
                           children: const [
                             Text(
                               'Start Conversation',
-                              style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
+                              style: TextStyle(color: NexaColors.adminTextMain, fontSize: 15, fontWeight: FontWeight.w700),
                               overflow: TextOverflow.ellipsis,
                             ),
                             Text(
-                              'Select mobile contact, identity, or enter new ID',
-                              style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+                              'PEER DISCOVERY // ZERO-KNOWLEDGE HANDSHAKE',
+                              style: TextStyle(color: NexaColors.adminTextDim, fontSize: 9.5, fontFamily: 'monospace', letterSpacing: 0.5),
                               overflow: TextOverflow.ellipsis,
                             ),
                           ],
@@ -2102,7 +2141,7 @@ class _NewChatSheetState extends State<_NewChatSheet> {
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.close_rounded, color: Colors.white70),
+                  icon: const Icon(Icons.close_rounded, color: NexaColors.adminTextMuted),
                   onPressed: () => Navigator.pop(context),
                 ),
               ],
@@ -2111,18 +2150,18 @@ class _NewChatSheetState extends State<_NewChatSheet> {
 
           // Search / Custom ID Input Bar
           Padding(
-            padding: const EdgeInsets.fromLTRB(18, 6, 18, 10),
+            padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
             child: TextField(
               controller: _searchController,
               onChanged: _onSearchChanged,
-              style: const TextStyle(color: Colors.white, fontSize: 14),
+              style: const TextStyle(color: NexaColors.adminTextMain, fontSize: 13.5),
               decoration: InputDecoration(
                 hintText: 'Search registered NEXA ID (NX-...), @handle...',
-                hintStyle: const TextStyle(color: Color(0xFF64748B), fontSize: 13),
-                prefixIcon: const Icon(Icons.search_rounded, color: Color(0xFF00E5FF), size: 20),
+                hintStyle: const TextStyle(color: NexaColors.adminTextDim, fontSize: 12.5),
+                prefixIcon: const Icon(Icons.search_rounded, color: NexaColors.adminTextDim, size: 18),
                 suffixIcon: _searchQuery.isNotEmpty
                     ? IconButton(
-                        icon: const Icon(Icons.clear, color: Colors.white60, size: 18),
+                        icon: const Icon(Icons.clear, color: NexaColors.adminTextMuted, size: 18),
                         onPressed: () {
                           _searchController.clear();
                           _onSearchChanged('');
@@ -2130,19 +2169,19 @@ class _NewChatSheetState extends State<_NewChatSheet> {
                       )
                     : null,
                 filled: true,
-                fillColor: const Color(0xFF111827),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                fillColor: NexaColors.adminBgSurface,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  borderSide: const BorderSide(color: Color(0x26FFFFFF)),
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: NexaColors.adminBorderSubtle),
                 ),
                 enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  borderSide: const BorderSide(color: Color(0x26FFFFFF)),
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: NexaColors.adminBorderSubtle),
                 ),
                 focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  borderSide: const BorderSide(color: Color(0xFF00E5FF), width: 1.5),
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: NexaColors.adminAccentCyan, width: 1.2),
                 ),
               ),
             ),

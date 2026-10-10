@@ -2,96 +2,114 @@ import 'package:flutter/material.dart';
 
 /// Modern Minimalist Design Tokens for NEXA.
 class NexaColors {
-  // Obsidian Dark Theme Tokens (Primary Modern Minimalist Aesthetic)
-  static const Color canvasDark = Color(0xFF090D16);        // Deep Obsidian Canvas
-  static const Color surfaceDark = Color(0xFF111827);       // Frosted Glass Card
-  static const Color elevatedDark = Color(0xFF1E293B);      // Pill / Input Elevated
-  static const Color borderDark = Color(0xFF26334A);        // Subtle 1px Border
-  static const Color borderSubtleDark = Color(0x1AFFFFFF);  // 10% Alpha White
+  // ==========================================================================
+  // ADMIN PANEL DESIGN SYSTEM TOKENS (Obsidian Minimalist Control Deck)
+  // ==========================================================================
+  static const Color adminBgBase = Color(0xFF090B10);        // Deep Obsidian Background
+  static const Color adminBgSurface = Color(0xFF10141D);     // Dark Control Surface
+  static const Color adminBgElevated = Color(0xFF161C28);    // Elevated Element / Input
+  static const Color adminBorderSubtle = Color(0x14FFFFFF);  // 1px Subtle Border (8% White)
+  static const Color adminBorderHover = Color(0x29FFFFFF);   // 16% White Border
+  static const Color adminBorderActive = Color(0x663B82F6);  // Active Focus Border
+  
+  static const Color adminAccentCyan = Color(0xFF38BDF8);    // Observability Cyan
+  static const Color adminAccentBlue = Color(0xFF3B82F6);    // Telemetry Blue
+  static const Color adminAccentEmerald = Color(0xFF10B981); // Verified Emerald
+  static const Color adminAccentRose = Color(0xFFF43F5E);    // Destructive Rose
+  static const Color adminAccentAmber = Color(0xFFF59E0B);   // Attention Amber
+  static const Color adminAccentViolet = Color(0xFF8B5CF6);  // Key Violet
 
-  // Re-map Light tokens to Dark tokens so all screens stay unified and avoid white-on-white text
+  static const Color adminTextMain = Color(0xFFF8FAFC);      // Crisp Text Primary
+  static const Color adminTextMuted = Color(0xFF94A3B8);     // Telemetry Muted Text
+  static const Color adminTextDim = Color(0xFF64748B);       // Monospace Subtitle Dim
+
+  // Canonical App Surface Tokens
+  static const Color canvasDark = adminBgBase;
+  static const Color surfaceDark = adminBgSurface;
+  static const Color elevatedDark = adminBgElevated;
+  static const Color borderDark = adminBorderSubtle;
+  static const Color borderSubtleDark = adminBorderSubtle;
+
+  // Re-map Light tokens to Dark tokens for consistent dark mode
   static const Color canvasLight = canvasDark;
   static const Color surfaceLight = surfaceDark;
   static const Color elevatedLight = elevatedDark;
   static const Color borderLight = borderDark;
-  static const Color borderStrongLight = borderDark;
+  static const Color borderStrongLight = adminBorderHover;
   static const Color backgroundLight = canvasDark;
 
-  // Active Defaults (Obsidian Dark Focus)
+  // Active Defaults
   static const Color canvas = canvasDark;
   static const Color surface = surfaceDark;
   static const Color elevated = elevatedDark;
   static const Color border = borderDark;
 
   // Accents & Signals
-  static const Color primary = Color(0xFF0284C7);          // Ocean Cyan
-  static const Color cyanAccent = Color(0xFF00E5FF);      // Electric Cyan Accent
-  static const Color emeraldSecure = Color(0xFF10B981);   // Verified E2EE Green
-  static const Color amberAttention = Color(0xFFF59E0B);  // Warning / Attention
-  static const Color rubyDestructive = Color(0xFFEF4444); // Destructive / End Call
+  static const Color primary = adminAccentBlue;
+  static const Color cyanAccent = adminAccentCyan;
+  static const Color emeraldSecure = adminAccentEmerald;
+  static const Color amberAttention = adminAccentAmber;
+  static const Color rubyDestructive = adminAccentRose;
   static const Color error = rubyDestructive;
   static const Color amberWarning = amberAttention;
 
-  // Typography Tokens (High-Contrast Clean Text)
-  static const Color textPrimary = Color(0xFFF8FAFC);      // Crisp White
-  static const Color textSecondary = Color(0xFF94A3B8);    // Muted Slate
-  static const Color textMuted = Color(0xFF64748B);        // Deep Slate
+  // Typography Tokens
+  static const Color textPrimary = adminTextMain;
+  static const Color textSecondary = adminTextMuted;
+  static const Color textMuted = adminTextDim;
 
-  // Re-map Light Typography Tokens to Crisp High-Contrast White/Slate
   static const Color textPrimaryLight = textPrimary;
   static const Color textSecondaryLight = textSecondary;
   static const Color textMutedLight = textMuted;
 
-  // ==========================================================================
-  // MAXIMALIST CYBERPUNK TOKENS & GRADIENTS
-  // ==========================================================================
-  static const Color neonCyan = Color(0xFF00E5FF);
-  static const Color neonEmerald = Color(0xFF10B981);
-  static const Color neonViolet = Color(0xFF8B5CF6);
-  static const Color neonPink = Color(0xFFF43F5E);
-  static const Color neonAmber = Color(0xFFF59E0B);
-  static const Color cyberCardBg = Color(0xFF111726);
+  // Subtle Sleek Admin Accents
+  static const Color neonCyan = adminAccentCyan;
+  static const Color neonEmerald = adminAccentEmerald;
+  static const Color neonViolet = adminAccentViolet;
+  static const Color neonPink = adminAccentRose;
+  static const Color neonAmber = adminAccentAmber;
+  static const Color cyberCardBg = adminBgSurface;
 
   static const LinearGradient cyberGradient = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
-    colors: [Color(0xFF00E5FF), Color(0xFF10B981)],
+    colors: [Color(0xFF1E293B), Color(0xFF0F172A)],
   );
 
   static const LinearGradient hologramGradient = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
-    colors: [Color(0xFF8B5CF6), Color(0xFF00E5FF)],
+    colors: [Color(0xFF1E293B), Color(0xFF0F172A)],
   );
 
   static const LinearGradient plasmaGradient = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
-    colors: [Color(0xFFF43F5E), Color(0xFF8B5CF6)],
+    colors: [Color(0xFF161C28), Color(0xFF10141D)],
   );
 
   static const LinearGradient bubbleOutgoingGradient = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
-    colors: [Color(0xFF0284C7), Color(0xFF00E5FF), Color(0xFF10B981)],
+    colors: [Color(0xFF1E293B), Color(0xFF162032)],
   );
 
   static const LinearGradient cyberCardGradient = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
-    colors: [Color(0xFF141C2E), Color(0xFF0D1220)],
+    colors: [Color(0xFF10141D), Color(0xFF10141D)],
   );
 
   static List<BoxShadow> get glowCyan => [
-    BoxShadow(color: const Color(0xFF00E5FF).withValues(alpha: 0.35), blurRadius: 14, spreadRadius: 0),
+    BoxShadow(color: const Color(0xFF38BDF8).withValues(alpha: 0.12), blurRadius: 10, spreadRadius: 0),
   ];
 
   static List<BoxShadow> get glowEmerald => [
-    BoxShadow(color: const Color(0xFF10B981).withValues(alpha: 0.35), blurRadius: 14, spreadRadius: 0),
+    BoxShadow(color: const Color(0xFF10B981).withValues(alpha: 0.12), blurRadius: 10, spreadRadius: 0),
   ];
 
   static List<BoxShadow> get glowViolet => [
-    BoxShadow(color: const Color(0xFF8B5CF6).withValues(alpha: 0.35), blurRadius: 14, spreadRadius: 0),
+    BoxShadow(color: const Color(0xFF8B5CF6).withValues(alpha: 0.12), blurRadius: 10, spreadRadius: 0),
   ];
 }
 
