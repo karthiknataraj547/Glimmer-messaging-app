@@ -134,7 +134,13 @@ class ChatService {
   }
 
   /// Active backend base URL for resolving attachment downloads and media assets
-  String get baseUrl => AuthService.instance.currentResolvedUrl ?? 'https://glimmer-messaging-app-web.vercel.app';
+  String get baseUrl {
+    final current = AuthService.instance.currentResolvedUrl;
+    if (current != null && current.isNotEmpty && !current.contains('localhost') && !current.contains('127.0.0.1')) {
+      return current;
+    }
+    return 'https://glimmer-messaging-app-web.vercel.app';
+  }
 
   /// Returns canonical peer key for safe indexing
   static String getCanonicalKey(String peerIdOrHandle) {
@@ -622,7 +628,18 @@ class ChatService {
     try {
       final res = await AuthService.instance.postJson('/v1/attachments/upload', body);
       if (res != null && res['success'] == true) {
-        return res['attachment'] as Map<String, dynamic>?;
+        final att = res['attachment'] is Map ? Map<String, dynamic>.from(res['attachment'] as Map) : <String, dynamic>{};
+        final attId = (res['attachmentId'] ?? att['id'])?.toString();
+        final rawUrl = (res['url'] ?? att['download_url'])?.toString();
+        final fileName = (res['fileName'] ?? att['name'])?.toString() ?? name;
+        final sizeBytes = res['sizeBytes'] ?? att['size_bytes'] ?? bytes.length;
+        return {
+          'attachmentId': attId,
+          'url': rawUrl,
+          'fileName': fileName,
+          'sizeBytes': sizeBytes is num ? sizeBytes.toInt() : bytes.length,
+          ...att,
+        };
       }
     } catch (e) {
       debugPrint('[ChatService] uploadAttachment error: $e');

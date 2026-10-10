@@ -127,6 +127,13 @@ class _ChatScreenState extends State<ChatScreen> {
       if (mounted) _syncIncomingMessages();
     });
 
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        CallService.instance.attachContext(context);
+        CallService.instance.startListening(context);
+      }
+    });
+
     // 4. Instant WebSocket live incoming message listener
     _realtimeMessageSub = ChatService.instance.onMessageReceived.listen((evt) {
       if (!mounted) return;
@@ -145,15 +152,24 @@ class _ChatScreenState extends State<ChatScreen> {
       }
 
       if (isForThisChat && evt['message'] is Map) {
-        final m = Map<String, dynamic>.from(evt['message'] as Map);
+        final rawMsg = Map<String, dynamic>.from(evt['message'] as Map);
+        final m = ChatService.formatMessageForUi(rawMsg);
         final msgId = (m['id'] ?? '').toString();
-        if (!_messages.any((x) => x['id'] == msgId)) {
+        final existingIdx = _messages.indexWhere((x) => x['id'] == msgId);
+        if (existingIdx == -1) {
           setState(() {
             _messages.add(m);
             _messages.sort((a, b) => ((a['timestamp'] as num?)?.toInt() ?? 0).compareTo((b['timestamp'] as num?)?.toInt() ?? 0));
             _chatState = ChatState.loaded;
           });
           _scrollToBottom();
+        } else {
+          final newStatus = m['status']?.toString();
+          if (newStatus != null && _messages[existingIdx]['status'] != newStatus) {
+            setState(() {
+              _messages[existingIdx]['status'] = newStatus;
+            });
+          }
         }
       }
     });
@@ -267,10 +283,10 @@ class _ChatScreenState extends State<ChatScreen> {
         final msgId = (m['id'] ?? 'm_${ts}_${merged.length}').toString();
         final text = (m['text'] ?? '').toString();
 
-        final attId = (m['attachment_id'] ?? m['attachmentId'])?.toString();
-        final attUrl = (m['attachment_url'] ?? m['attachmentUrl'])?.toString();
-        final attType = (m['attachment_type'] ?? m['attachmentType'] ?? m['type'])?.toString();
-        final attName = (m['attachment_name'] ?? m['attachmentName'])?.toString();
+        final attId = (m['attachment_id'] ?? m['attachmentId'] ?? (m['extra'] is Map ? m['extra']['attachment_id'] ?? m['extra']['attachmentId'] : null))?.toString();
+        final attUrl = (m['attachment_url'] ?? m['attachmentUrl'] ?? (m['extra'] is Map ? m['extra']['attachment_url'] ?? m['extra']['attachmentUrl'] ?? m['extra']['url'] : null))?.toString();
+        final attType = (m['attachment_type'] ?? m['attachmentType'] ?? m['type'] ?? (m['extra'] is Map ? m['extra']['attachment_type'] ?? m['extra']['type'] : null))?.toString();
+        final attName = (m['attachment_name'] ?? m['attachmentName'] ?? (m['extra'] is Map ? m['extra']['attachment_name'] ?? m['extra']['name'] : null))?.toString();
         final locData = m['location_data'] is Map
             ? Map<String, dynamic>.from(m['location_data'] as Map)
             : (m['extra'] is Map ? Map<String, dynamic>.from(m['extra'] as Map) : null);
@@ -380,10 +396,10 @@ class _ChatScreenState extends State<ChatScreen> {
         final isMe = senderHandle == myHandle || (myNexaId.isNotEmpty && (senderHandle == myNexaId || senderNexaId == myNexaId));
         final msgText = (m['text'] ?? '').toString();
 
-        final attId = (m['attachment_id'] ?? m['attachmentId'])?.toString();
-        final attUrl = (m['attachment_url'] ?? m['attachmentUrl'])?.toString();
-        final attType = (m['attachment_type'] ?? m['attachmentType'] ?? m['type'])?.toString();
-        final attName = (m['attachment_name'] ?? m['attachmentName'])?.toString();
+        final attId = (m['attachment_id'] ?? m['attachmentId'] ?? (m['extra'] is Map ? m['extra']['attachment_id'] ?? m['extra']['attachmentId'] : null))?.toString();
+        final attUrl = (m['attachment_url'] ?? m['attachmentUrl'] ?? (m['extra'] is Map ? m['extra']['attachment_url'] ?? m['extra']['attachmentUrl'] ?? m['extra']['url'] : null))?.toString();
+        final attType = (m['attachment_type'] ?? m['attachmentType'] ?? m['type'] ?? (m['extra'] is Map ? m['extra']['attachment_type'] ?? m['extra']['type'] : null))?.toString();
+        final attName = (m['attachment_name'] ?? m['attachmentName'] ?? (m['extra'] is Map ? m['extra']['attachment_name'] ?? m['extra']['name'] : null))?.toString();
         final locData = m['location_data'] is Map
             ? Map<String, dynamic>.from(m['location_data'] as Map)
             : (m['extra'] is Map ? Map<String, dynamic>.from(m['extra'] as Map) : null);
@@ -392,11 +408,13 @@ class _ChatScreenState extends State<ChatScreen> {
         if (isMe) {
           final localIdx = _messages.indexWhere((loc) =>
               loc['isMe'] == true &&
-              loc['id']?.toString().startsWith('m_') == true &&
+              (loc['id']?.toString().startsWith('m_') == true || loc['id'] == msgId) &&
               loc['text'] == msgText);
           if (localIdx >= 0) {
             _messages[localIdx]['id'] = msgId;
-            _messages[localIdx]['status'] = m['read'] == true ? 'read' : (m['delivered'] == true ? 'delivered' : 'sent');
+            _messages[localIdx]['status'] = (m['read'] == true || m['status'] == 'read')
+                ? 'read'
+                : ((m['delivered'] == true || m['status'] == 'delivered') ? 'delivered' : 'sent');
             existingIds.add(msgId);
             addedAny = true;
             continue;
@@ -437,6 +455,23 @@ class _ChatScreenState extends State<ChatScreen> {
         });
         existingIds.add(msgId);
         addedAny = true;
+      } else if (msgId.isNotEmpty) {
+        // Message is already loaded in UI: update delivery status if changed on server
+        final existingIdx = _messages.indexWhere((x) => x['id'] == msgId);
+        if (existingIdx >= 0) {
+          String newStatus = _messages[existingIdx]['status']?.toString() ?? 'sent';
+          if (m['read'] == true || m['status'] == 'read') {
+            newStatus = 'read';
+          } else if (m['delivered'] == true || m['status'] == 'delivered') {
+            if (newStatus != 'read') {
+              newStatus = 'delivered';
+            }
+          }
+          if (_messages[existingIdx]['status'] != newStatus) {
+            _messages[existingIdx]['status'] = newStatus;
+            addedAny = true;
+          }
+        }
       }
     }
 
@@ -1545,6 +1580,7 @@ class _ChatScreenState extends State<ChatScreen> {
     String? attachmentUrl;
     String? attachmentName;
     int? attachmentSize;
+    String? thumbBase64;
 
     // Check if there is a local file to upload to the server
     final localPath = extra?['path']?.toString();
@@ -1557,20 +1593,31 @@ class _ChatScreenState extends State<ChatScreen> {
             ? 'image/jpeg'
             : (type.toLowerCase() == 'document' ? 'application/octet-stream' : 'application/octet-stream');
 
+        if (bytes.length < 800000) {
+          thumbBase64 = base64Encode(bytes);
+        }
+
         final uploadResult = await ChatService.instance.uploadAttachment(
           name: fileName,
           mediaType: mediaType,
           bytes: bytes,
         );
         if (uploadResult != null) {
-          attachmentId = uploadResult['attachmentId']?.toString();
-          attachmentUrl = uploadResult['url']?.toString();
-          attachmentName = uploadResult['fileName']?.toString() ?? fileName;
-          attachmentSize = uploadResult['sizeBytes'] is num ? (uploadResult['sizeBytes'] as num).toInt() : bytes.length;
+          attachmentId = (uploadResult['attachmentId'] ?? uploadResult['id'])?.toString();
+          attachmentUrl = (uploadResult['url'] ?? uploadResult['download_url'])?.toString();
+          attachmentName = (uploadResult['fileName'] ?? uploadResult['name'])?.toString() ?? fileName;
+          attachmentSize = (uploadResult['sizeBytes'] ?? uploadResult['size_bytes']) is num
+              ? ((uploadResult['sizeBytes'] ?? uploadResult['size_bytes']) as num).toInt()
+              : bytes.length;
         }
       } catch (e) {
         debugPrint('[Attachment] Upload error: $e');
       }
+    }
+
+    final enrichedExtra = Map<String, dynamic>.from(extra ?? {});
+    if (thumbBase64 != null) {
+      enrichedExtra['data_base64'] = thumbBase64;
     }
 
     final messageMap = <String, dynamic>{
@@ -1585,7 +1632,7 @@ class _ChatScreenState extends State<ChatScreen> {
       'attachmentSize': attachmentSize,
       'text': title,
       'subtitle': subtitle,
-      'extra': extra,
+      'extra': enrichedExtra,
       'time': timeStr,
       'timestamp': ts,
       'status': 'pending', // 1. Pending: saved locally immediately
@@ -1639,7 +1686,7 @@ class _ChatScreenState extends State<ChatScreen> {
       attachmentType: type.toLowerCase(),
       attachmentName: attachmentName,
       attachmentSize: attachmentSize,
-      locationData: (type.toLowerCase() == 'location' ? extra : null),
+      locationData: enrichedExtra,
     ).then((serverMsg) {
       if (!mounted) return;
       final localMsgId = 'm_$ts';
@@ -2474,7 +2521,7 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  void _showFullImageDialog(String filePath, String title, String? size) {
+  void _showFullImageDialog({String? filePath, String? base64Data, String? networkUrl, required String title, String? size}) {
     showDialog(
       context: context,
       builder: (ctx) => Dialog(
@@ -2492,11 +2539,34 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
             ClipRRect(
               borderRadius: BorderRadius.circular(16),
-              child: Image.file(
-                File(filePath),
-                fit: BoxFit.contain,
-                errorBuilder: (context, error, stackTrace) => const Icon(Icons.broken_image, size: 80, color: Colors.white),
-              ),
+              child: (filePath != null && File(filePath).existsSync())
+                  ? Image.file(
+                      File(filePath),
+                      fit: BoxFit.contain,
+                      errorBuilder: (context, error, stackTrace) => const Icon(Icons.broken_image, size: 80, color: Colors.white),
+                    )
+                  : (base64Data != null && base64Data.isNotEmpty)
+                      ? Image.memory(
+                          base64Decode(base64Data),
+                          fit: BoxFit.contain,
+                          errorBuilder: (context, error, stackTrace) => const Icon(Icons.broken_image, size: 80, color: Colors.white),
+                        )
+                      : (networkUrl != null && networkUrl.isNotEmpty)
+                          ? Image.network(
+                              networkUrl,
+                              fit: BoxFit.contain,
+                              loadingBuilder: (context, child, loadingProgress) {
+                                if (loadingProgress == null) return child;
+                                return const Center(
+                                  child: Padding(
+                                    padding: EdgeInsets.all(32),
+                                    child: CircularProgressIndicator(color: Colors.white),
+                                  ),
+                                );
+                              },
+                              errorBuilder: (context, error, stackTrace) => const Icon(Icons.broken_image, size: 80, color: Colors.white),
+                            )
+                          : const Icon(Icons.broken_image, size: 80, color: Colors.white),
             ),
             const SizedBox(height: 12),
             Container(
@@ -3238,13 +3308,22 @@ class _ChatScreenState extends State<ChatScreen> {
                             borderRadius: BorderRadius.circular(12),
                             child: GestureDetector(
                               onTap: () {
-                                final imgPath = extra?['path']?.toString();
-                                if (imgPath != null && imgPath.isNotEmpty && File(imgPath).existsSync()) {
-                                  _showFullImageDialog(imgPath, text, extra?['size']?.toString());
-                                }
+                                final localPath = extra?['path']?.toString();
+                                final rawUrl = (msg['attachmentUrl'] ?? msg['attachment_url'] ?? extra?['url'] ?? extra?['attachment_url'] ?? extra?['attachmentUrl'])?.toString();
+                                final b64 = (extra?['data_base64'] ?? msg['data_base64'] ?? msg['dataBase64'])?.toString();
+                                final fullNetUrl = (rawUrl != null && rawUrl.isNotEmpty)
+                                    ? (rawUrl.startsWith('http') ? rawUrl : '${ChatService.instance.baseUrl}$rawUrl?raw=1')
+                                    : null;
+                                _showFullImageDialog(
+                                  filePath: localPath,
+                                  base64Data: b64,
+                                  networkUrl: fullNetUrl,
+                                  title: text,
+                                  size: extra?['size']?.toString(),
+                                );
                               },
                               child: Container(
-                                height: 145,
+                                height: 160,
                                 width: double.infinity,
                                 decoration: const BoxDecoration(
                                   color: Color(0xFF0F172A),
@@ -3264,13 +3343,42 @@ class _ChatScreenState extends State<ChatScreen> {
                                           ),
                                         ),
                                       )
-                                    else if (msg['attachmentUrl'] != null && msg['attachmentUrl'].toString().isNotEmpty)
+                                    else if ((extra?['data_base64'] ?? msg['data_base64'] ?? msg['dataBase64']) != null &&
+                                        (extra?['data_base64'] ?? msg['data_base64'] ?? msg['dataBase64']).toString().isNotEmpty)
+                                      Positioned.fill(
+                                        child: Image.memory(
+                                          base64Decode((extra?['data_base64'] ?? msg['data_base64'] ?? msg['dataBase64']).toString()),
+                                          fit: BoxFit.cover,
+                                          errorBuilder: (context, error, stackTrace) => Center(
+                                            child: Icon(Icons.broken_image, size: 48, color: Colors.white.withValues(alpha: 0.35)),
+                                          ),
+                                        ),
+                                      )
+                                    else if ((msg['attachmentUrl'] ?? msg['attachment_url'] ?? extra?['url'] ?? extra?['attachment_url'] ?? extra?['attachmentUrl']) != null &&
+                                        (msg['attachmentUrl'] ?? msg['attachment_url'] ?? extra?['url'] ?? extra?['attachment_url'] ?? extra?['attachmentUrl']).toString().isNotEmpty)
                                       Positioned.fill(
                                         child: Image.network(
-                                          msg['attachmentUrl'].toString().startsWith('http')
-                                              ? msg['attachmentUrl'].toString()
-                                              : '${ChatService.instance.baseUrl}${msg['attachmentUrl']}?raw=1',
+                                          () {
+                                            final u = (msg['attachmentUrl'] ?? msg['attachment_url'] ?? extra?['url'] ?? extra?['attachment_url'] ?? extra?['attachmentUrl']).toString();
+                                            return u.startsWith('http') ? u : '${ChatService.instance.baseUrl}$u?raw=1';
+                                          }(),
                                           fit: BoxFit.cover,
+                                          loadingBuilder: (context, child, loadingProgress) {
+                                            if (loadingProgress == null) return child;
+                                            return Center(
+                                              child: SizedBox(
+                                                width: 32,
+                                                height: 32,
+                                                child: CircularProgressIndicator(
+                                                  value: loadingProgress.expectedTotalBytes != null
+                                                      ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
+                                                      : null,
+                                                  color: NexaColors.electricIndigo,
+                                                  strokeWidth: 2.5,
+                                                ),
+                                              ),
+                                            );
+                                          },
                                           errorBuilder: (context, error, stackTrace) => Center(
                                             child: Icon(Icons.broken_image, size: 48, color: Colors.white.withValues(alpha: 0.35)),
                                           ),

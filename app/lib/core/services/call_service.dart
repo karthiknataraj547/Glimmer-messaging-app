@@ -23,8 +23,8 @@ class CallService {
   /// Start background listening for incoming calls for logged-in user
   void startListening(BuildContext context) {
     _rootContext = context;
-    _pollingTimer?.cancel();
-    _pollingTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+    if (_pollingTimer != null && _pollingTimer!.isActive) return;
+    _pollingTimer = Timer.periodic(const Duration(milliseconds: 1800), (_) {
       _pollIncomingCall();
     });
   }
@@ -54,14 +54,19 @@ class CallService {
         ? UserSession.instance.fullName
         : callerHandle;
 
-    final offerId = 'call_${DateTime.now().millisecondsSinceEpoch}_${callerHandle}_to_${recipientHandle.replaceAll('@', '')}';
+    final cleanRecipient = recipientHandle.replaceAll('@', '');
+    final recNexaId = recipientNexaId.isNotEmpty
+        ? recipientNexaId
+        : (cleanRecipient.toUpperCase().startsWith('NX-') ? cleanRecipient : '');
+
+    final offerId = 'call_${DateTime.now().millisecondsSinceEpoch}_${callerHandle}_to_$cleanRecipient';
 
     final body = {
       'caller_handle': callerHandle,
       'caller_nexa_id': callerNexaId,
       'caller_name': callerName,
-      'recipient_handle': recipientHandle.replaceAll('@', ''),
-      'recipient_nexa_id': recipientNexaId,
+      'recipient_handle': cleanRecipient,
+      'recipient_nexa_id': recNexaId,
       'call_type': isVideo ? 'video' : 'voice',
       'offer_id': offerId,
     };
@@ -78,7 +83,7 @@ class CallService {
             MaterialPageRoute(
               builder: (_) => ActiveCallScreen(
                 peerName: peerName,
-                peerNexaId: recipientNexaId,
+                peerNexaId: recNexaId.isNotEmpty ? recNexaId : recipientNexaId,
                 isVideo: isVideo,
                 callId: callId,
                 isIncoming: false,
@@ -103,9 +108,13 @@ class CallService {
     if (_rootContext == null || !_rootContext!.mounted) return;
 
     final myHandle = UserSession.instance.handle.replaceAll('@', '');
+    final myNexaId = UserSession.instance.nexaId;
+    final userIdent = myHandle.isNotEmpty ? myHandle : myNexaId;
+    if (userIdent.isEmpty) return;
+
     try {
       final baseUrl = await AuthService.instance.getBaseUrl();
-      final uri = Uri.parse('$baseUrl/v1/calls/incoming/$myHandle');
+      final uri = Uri.parse('$baseUrl/v1/calls/incoming/$userIdent?nexa_id=$myNexaId');
       final res = await AuthService.instance.getJson(uri);
 
       if (res != null && res['has_incoming'] == true && res['call'] is Map) {

@@ -338,13 +338,20 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
             final currentUnread = existing['unread'];
             final currentTs = (existing['timestamp'] as num?)?.toInt() ?? 0;
 
-            if (currentMsg != text || currentUnread != unreadCount || ts > currentTs) {
-              existing['message'] = text;
-              existing['time'] = timeStr;
-              existing['unread'] = unreadCount;
-              if (ts > currentTs) existing['timestamp'] = ts;
-              if (convId != null && convId.isNotEmpty) existing['conversationId'] = convId;
-              changed = true;
+            if (ts >= currentTs) {
+              if (currentMsg != text || existing['time'] != timeStr || currentUnread != unreadCount || (convId != null && convId.isNotEmpty && existing['conversationId'] != convId)) {
+                existing['message'] = text;
+                existing['time'] = timeStr;
+                existing['unread'] = unreadCount;
+                existing['timestamp'] = ts;
+                if (convId != null && convId.isNotEmpty) existing['conversationId'] = convId;
+                changed = true;
+              }
+            } else {
+              if (currentUnread != unreadCount) {
+                existing['unread'] = unreadCount;
+                changed = true;
+              }
             }
           } else {
             _chats.add({

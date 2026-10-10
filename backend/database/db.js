@@ -1128,6 +1128,8 @@ const Database = {
     const limit = Math.min(Number(options.limit) || 50, 100);
     const cursor = options.cursor ? Number(options.cursor) : null;
     const requestingUser = options.requestingUser ? this.resolveCanonicalUserId(options.requestingUser) : null;
+    const reqAliases = requestingUser ? this.getUserAliases(requestingUser) : null;
+    let changed = false;
 
     let conv = dbState.conversations ? dbState.conversations[conversationId] : null;
     if (requestingUser && conv && Array.isArray(conv.participants)) {
@@ -1138,8 +1140,10 @@ const Database = {
     }
 
     let msgs = dbState.messages.filter(m => {
-      if (m.conversation_id === conversationId) return true;
-      if (conv && Array.isArray(conv.participants) && conv.participants.length === 2) {
+      let isMatch = false;
+      if (m.conversation_id === conversationId) {
+        isMatch = true;
+      } else if (conv && Array.isArray(conv.participants) && conv.participants.length === 2) {
         const p1Aliases = this.getUserAliases(conv.participants[0]);
         const p2Aliases = this.getUserAliases(conv.participants[1]);
         const sH = (m.sender_handle || '').toLowerCase().replace(/^@+/, '');
@@ -1152,11 +1156,30 @@ const Database = {
         const rIs1 = p1Aliases.has(rH) || p1Aliases.has(rId);
         if ((sIs1 && rIs2) || (sIs2 && rIs1)) {
           m.conversation_id = conversationId;
-          return true;
+          isMatch = true;
         }
+      }
+
+      if (isMatch) {
+        if (reqAliases) {
+          const rH = (m.recipient_handle || '').toLowerCase().replace(/^@+/, '');
+          const rId = (m.recipient_nexa_id || '').toLowerCase();
+          const isRecipient = reqAliases.has(rH) || reqAliases.has(rId);
+          if (isRecipient && m.status !== 'delivered' && m.status !== 'read') {
+            m.status = 'delivered';
+            m.delivered_at = Date.now();
+            changed = true;
+          }
+        }
+        return true;
       }
       return false;
     });
+
+    if (changed) {
+      this.cleanupMessages();
+      saveToDiskSync();
+    }
 
     msgs.sort((a, b) => a.timestamp - b.timestamp);
 
