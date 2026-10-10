@@ -190,7 +190,7 @@ class _ChatScreenState extends State<ChatScreen> {
             peerNexaId: widget.nexaId,
           );
           if (conv != null && conv['id'] != null) {
-            _activeConversationId = conv['id'] as String;
+            _activeConversationId = conv['id'].toString();
           }
         }
       }
@@ -200,7 +200,10 @@ class _ChatScreenState extends State<ChatScreen> {
       if (_activeConversationId != null && _activeConversationId!.isNotEmpty) {
         final res = await ChatService.instance.fetchConversationMessages(_activeConversationId!);
         if (res != null && res['messages'] is List) {
-          history = List<Map<String, dynamic>>.from(res['messages'] as List);
+          history = (res['messages'] as List)
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList();
         }
       }
 
@@ -320,7 +323,10 @@ class _ChatScreenState extends State<ChatScreen> {
     if (_activeConversationId != null && _activeConversationId!.isNotEmpty) {
       final res = await ChatService.instance.fetchConversationMessages(_activeConversationId!);
       if (res != null && res['messages'] is List) {
-        history = List<Map<String, dynamic>>.from(res['messages'] as List);
+        history = (res['messages'] as List)
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList();
       }
     }
     if (history.isEmpty) {
@@ -353,7 +359,7 @@ class _ChatScreenState extends State<ChatScreen> {
         if (isMe) {
           final localIdx = _messages.indexWhere((loc) =>
               loc['isMe'] == true &&
-              (loc['id'] as String).startsWith('m_') &&
+              loc['id']?.toString().startsWith('m_') == true &&
               loc['text'] == msgText);
           if (localIdx >= 0) {
             _messages[localIdx]['id'] = msgId;
@@ -1126,7 +1132,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _toggleAudioPlayback(Map<String, dynamic> msg) async {
-    final msgId = msg['id'] as String;
+    final msgId = (msg['id'] ?? '').toString();
     if (_playingMessageId == msgId) {
       try {
         await _nativeMediaChannel.invokeMethod('stopNativeAudioPlayback');
@@ -1143,8 +1149,8 @@ class _ChatScreenState extends State<ChatScreen> {
       await _nativeMediaChannel.invokeMethod('stopNativeAudioPlayback');
     } catch (_) {}
 
-    final audioPath = msg['extra']?['path'] as String?;
-    final durationSeconds = (msg['durationSeconds'] as int?) ?? 14;
+    final audioPath = msg['extra']?['path']?.toString();
+    final durationSeconds = (msg['durationSeconds'] as num?)?.toInt() ?? 14;
 
     setState(() {
       _playingMessageId = msgId;
@@ -1474,7 +1480,7 @@ class _ChatScreenState extends State<ChatScreen> {
     int? attachmentSize;
 
     // Check if there is a local file to upload to the server
-    final localPath = extra?['path'] as String?;
+    final localPath = extra?['path']?.toString();
     if (localPath != null && File(localPath).existsSync()) {
       try {
         final file = File(localPath);
@@ -2451,12 +2457,18 @@ class _ChatScreenState extends State<ChatScreen> {
                       onTap: () {
                         Navigator.pop(ctx);
                         setState(() {
-                          final reactions = (msg['reactions'] as List<String>);
+                          final List<String> reactions = [];
+                          if (msg['reactions'] is List) {
+                            for (final r in (msg['reactions'] as List)) {
+                              if (r != null) reactions.add(r.toString());
+                            }
+                          }
                           if (reactions.contains(emoji)) {
                             reactions.remove(emoji);
                           } else {
                             reactions.add(emoji);
                           }
+                          msg['reactions'] = reactions;
                         });
                       },
                       borderRadius: BorderRadius.circular(20),
@@ -2474,7 +2486,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 title: const Text('Copy Text'),
                 onTap: () {
                   Navigator.pop(ctx);
-                  Clipboard.setData(ClipboardData(text: msg['text'] as String));
+                  Clipboard.setData(ClipboardData(text: (msg['text'] ?? '').toString()));
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('Message copied to clipboard')),
                   );
@@ -2780,23 +2792,649 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildMessageItem(Map<String, dynamic> msg) {
-    final isMe = msg['isMe'] as bool;
-    final text = msg['text'] as String;
-    final time = msg['time'] as String;
-    final hasAction = (msg['hasAction'] as bool?) ?? false;
-    final actionAdded = (msg['actionAdded'] as bool?) ?? false;
-    final actionDismissed = (msg['actionDismissed'] as bool?) ?? false;
-    final reactions = (msg['reactions'] as List<String>?) ?? [];
-    final isAudio = (msg['isAudio'] as bool?) ?? false;
+    try {
+      final isMe = msg['isMe'] == true;
+      final text = (msg['text'] ?? '').toString();
+      final time = (msg['time'] ?? '').toString();
+      final hasAction = msg['hasAction'] == true;
+      final actionAdded = msg['actionAdded'] == true;
+      final actionDismissed = msg['actionDismissed'] == true;
 
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Column(
-        crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-        children: [
-          GestureDetector(
-            onLongPress: () => _showMessageOptions(msg),
-            child: Container(
+      final List<String> reactions = [];
+      if (msg['reactions'] is List) {
+        for (final r in (msg['reactions'] as List)) {
+          if (r != null && r.toString().isNotEmpty) {
+            reactions.add(r.toString());
+          }
+        }
+      }
+
+      final isAudio = msg['isAudio'] == true || (msg['attachmentType']?.toString().toLowerCase() == 'voice');
+      final attachmentType = (msg['attachmentType'] ?? '').toString().toLowerCase();
+      final extra = msg['extra'] is Map ? Map<String, dynamic>.from(msg['extra'] as Map) : null;
+      final subtitle = msg['subtitle']?.toString();
+
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Column(
+          crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          children: [
+            GestureDetector(
+              onLongPress: () => _showMessageOptions(msg),
+              child: Container(
+                constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: isMe ? const Color(0xFF0284C7) : const Color(0xFF1E293B),
+                  borderRadius: BorderRadius.only(
+                    topLeft: const Radius.circular(18),
+                    topRight: const Radius.circular(18),
+                    bottomLeft: Radius.circular(isMe ? 18 : 4),
+                    bottomRight: Radius.circular(isMe ? 4 : 18),
+                  ),
+                  border: Border.all(
+                    color: isMe ? const Color(0xFF0369A1) : const Color(0xFF26334A),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.15),
+                      blurRadius: 4,
+                      offset: const Offset(0, 1),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (isAudio) ...[
+                      Builder(
+                        builder: (context) {
+                          final isPlaying = _playingMessageId == msg['id'];
+                          final durationStr = (msg['audioDuration'] ?? '0:14').toString();
+                          final List<double> wave = [];
+                          if (msg['waveformData'] is List) {
+                            for (final w in (msg['waveformData'] as List)) {
+                              if (w is num) wave.add(w.toDouble());
+                            }
+                          }
+                          if (wave.isEmpty) {
+                            wave.addAll([0.2, 0.4, 0.7, 0.5, 0.8, 0.6, 0.9, 0.4, 0.7, 0.5, 0.3, 0.8, 0.6, 0.4, 0.7, 0.5]);
+                          }
+
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  // Play / Pause Button
+                                  InkWell(
+                                    onTap: () => _toggleAudioPlayback(msg),
+                                    borderRadius: BorderRadius.circular(20),
+                                    child: Container(
+                                      padding: const EdgeInsets.all(7),
+                                      decoration: BoxDecoration(
+                                        color: isPlaying ? NexaColors.emeraldSecure : NexaColors.primary,
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: Icon(
+                                        isPlaying ? Icons.pause : Icons.play_arrow,
+                                        color: Colors.white,
+                                        size: 18,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+
+                                  // Waveform Scrubber
+                                  SizedBox(
+                                    width: 120,
+                                    height: 24,
+                                    child: Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: List.generate(wave.length, (i) {
+                                        final barFraction = (i + 1) / wave.length;
+                                        final isPlayed = isPlaying && barFraction <= _playbackProgress;
+                                        return Container(
+                                          width: 3,
+                                          height: (22 * wave[i]).clamp(4.0, 22.0),
+                                          decoration: BoxDecoration(
+                                            color: isPlayed ? NexaColors.emeraldSecure : NexaColors.primary.withValues(alpha: 0.35),
+                                            borderRadius: BorderRadius.circular(2),
+                                          ),
+                                        );
+                                      }),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+
+                                  // Speed button (if playing)
+                                  if (isPlaying) ...[
+                                    InkWell(
+                                      onTap: _cyclePlaybackSpeed,
+                                      borderRadius: BorderRadius.circular(6),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: NexaColors.primary.withValues(alpha: 0.12),
+                                          borderRadius: BorderRadius.circular(6),
+                                        ),
+                                        child: Text(
+                                          '${_playbackSpeed}x',
+                                          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: NexaColors.primary),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                  ],
+
+                                  // Timer / Duration
+                                  Text(
+                                    isPlaying ? _formatDuration(_playbackElapsedSeconds) : durationStr,
+                                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12, fontFamily: 'Courier', color: NexaColors.textPrimary),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              const Row(
+                                children: [
+                                  Icon(Icons.lock, color: NexaColors.emeraldSecure, size: 10),
+                                  SizedBox(width: 4),
+                                  Text('Voice Note • PointyCastle AES-GCM', style: TextStyle(fontSize: 9, color: NexaColors.textMuted)),
+                                ],
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+                    ] else if (attachmentType == 'photo' || attachmentType == 'image') ...[
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: GestureDetector(
+                              onTap: () {
+                                final imgPath = extra?['path']?.toString();
+                                if (imgPath != null && imgPath.isNotEmpty && File(imgPath).existsSync()) {
+                                  _showFullImageDialog(imgPath, text, extra?['size']?.toString());
+                                }
+                              },
+                              child: Container(
+                                height: 145,
+                                width: double.infinity,
+                                decoration: const BoxDecoration(
+                                  color: Color(0xFF0F172A),
+                                ),
+                                child: Stack(
+                                  alignment: Alignment.center,
+                                  children: [
+                                    if (extra?['path'] != null &&
+                                        extra!['path'].toString().isNotEmpty &&
+                                        File(extra['path'].toString()).existsSync())
+                                      Positioned.fill(
+                                        child: Image.file(
+                                          File(extra['path'].toString()),
+                                          fit: BoxFit.cover,
+                                          errorBuilder: (context, error, stackTrace) => Center(
+                                            child: Icon(Icons.broken_image, size: 48, color: Colors.white.withValues(alpha: 0.35)),
+                                          ),
+                                        ),
+                                      )
+                                    else if (msg['attachmentUrl'] != null && msg['attachmentUrl'].toString().isNotEmpty)
+                                      Positioned.fill(
+                                        child: Image.network(
+                                          msg['attachmentUrl'].toString().startsWith('http')
+                                              ? msg['attachmentUrl'].toString()
+                                              : '${ChatService.instance.baseUrl}${msg['attachmentUrl']}?raw=1',
+                                          fit: BoxFit.cover,
+                                          errorBuilder: (context, error, stackTrace) => Center(
+                                            child: Icon(Icons.broken_image, size: 48, color: Colors.white.withValues(alpha: 0.35)),
+                                          ),
+                                        ),
+                                      )
+                                    else
+                                      Container(
+                                        decoration: const BoxDecoration(
+                                          gradient: LinearGradient(
+                                            colors: [Color(0xFF0284C7), Color(0xFF0369A1)],
+                                            begin: Alignment.topLeft,
+                                            end: Alignment.bottomRight,
+                                          ),
+                                        ),
+                                        child: Center(
+                                          child: Icon(Icons.image, size: 48, color: Colors.white.withValues(alpha: 0.35)),
+                                        ),
+                                      ),
+                                    Positioned(
+                                      top: 6,
+                                      left: 6,
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: Colors.black.withValues(alpha: 0.6),
+                                          borderRadius: BorderRadius.circular(6),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const Icon(Icons.lock, color: NexaColors.emeraldSecure, size: 10),
+                                            const SizedBox(width: 4),
+                                            Text(
+                                              extra?['source'] == 'inbuilt_camera'
+                                                  ? 'Inbuilt Camera • AES-GCM'
+                                                  : (extra?['source'] == 'mobile_gallery' ? 'Mobile Gallery • AES-GCM' : 'PointyCastle AES-GCM'),
+                                              style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                    Positioned(
+                                      bottom: 6,
+                                      right: 6,
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: Colors.black.withValues(alpha: 0.6),
+                                          borderRadius: BorderRadius.circular(6),
+                                        ),
+                                        child: Text((extra?['size'] ?? '2.4 MB').toString(), style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w600)),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            text,
+                            style: const TextStyle(color: NexaColors.textPrimary, fontSize: 13, fontWeight: FontWeight.w600),
+                          ),
+                          if (subtitle != null && subtitle.isNotEmpty)
+                            Text(
+                              subtitle,
+                              style: const TextStyle(color: NexaColors.textSecondary, fontSize: 11),
+                            ),
+                        ],
+                      ),
+                    ] else if (attachmentType == 'document') ...[
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF8B5CF6).withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Icon(Icons.insert_drive_file, color: Color(0xFF8B5CF6), size: 24),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: NexaColors.textPrimary)),
+                                Text(subtitle ?? '1.4 MB • Encrypted File', style: const TextStyle(fontSize: 11, color: NexaColors.textMuted)),
+                              ],
+                            ),
+                          ),
+                          const Icon(Icons.download_for_offline_outlined, color: NexaColors.primary, size: 20),
+                        ],
+                      ),
+                    ] else if (attachmentType == 'location') ...[
+                      GestureDetector(
+                        onTap: () {
+                          final lat = extra?['latitude'] ?? msg['latitude'];
+                          final lng = extra?['longitude'] ?? msg['longitude'];
+                          if (lat != null && lng != null) {
+                            _nativeMediaChannel.invokeMethod('openUrlInBrowser', {
+                              'url': 'https://maps.google.com/?q=$lat,$lng',
+                            });
+                          }
+                        },
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(10),
+                              child: Container(
+                                height: 80,
+                                width: double.infinity,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFE2E8F0),
+                                  border: Border.all(color: NexaColors.borderLight),
+                                ),
+                                child: Stack(
+                                  alignment: Alignment.center,
+                                  children: [
+                                    Icon(Icons.map, size: 44, color: Colors.blueGrey.withValues(alpha: 0.25)),
+                                    const Icon(Icons.location_on, color: Color(0xFFEF4444), size: 28),
+                                    Positioned(
+                                      bottom: 4,
+                                      left: 6,
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                        decoration: BoxDecoration(
+                                          color: Colors.black.withValues(alpha: 0.6),
+                                          borderRadius: BorderRadius.circular(4),
+                                        ),
+                                        child: const Text('Live GPS • E2EE Pin', style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold)),
+                                      ),
+                                    ),
+                                    Positioned(
+                                      bottom: 4,
+                                      right: 6,
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                        decoration: BoxDecoration(
+                                          color: NexaColors.primary.withValues(alpha: 0.8),
+                                          borderRadius: BorderRadius.circular(4),
+                                        ),
+                                        child: const Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(Icons.open_in_new, color: Colors.white, size: 8),
+                                            SizedBox(width: 2),
+                                            Text('Open Map', style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold)),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(text, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: NexaColors.textPrimary)),
+                            const SizedBox(height: 2),
+                            Text(subtitle ?? '12.9716° N, 77.5946° E • Accurate to 3m', style: const TextStyle(fontSize: 11, color: NexaColors.textSecondary)),
+                          ],
+                        ),
+                      ),
+                    ] else if (attachmentType == 'contact') ...[
+                      Row(
+                        children: [
+                          CircleAvatar(
+                            backgroundColor: const Color(0xFF06B6D4).withValues(alpha: 0.2),
+                            radius: 18,
+                            child: const Icon(Icons.person, color: Color(0xFF06B6D4), size: 20),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(text, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: NexaColors.textPrimary)),
+                                Text(subtitle ?? 'NEXA Verified Peer', style: const TextStyle(fontSize: 11, color: NexaColors.textMuted)),
+                              ],
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: () {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Contact card verified and added.')),
+                              );
+                            },
+                            child: const Text('Add', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                          ),
+                        ],
+                      ),
+                    ] else if (attachmentType == 'device_data') ...[
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(6),
+                                decoration: BoxDecoration(
+                                  color: NexaColors.primary.withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: const Icon(Icons.phone_android, color: NexaColors.primary, size: 18),
+                              ),
+                              const SizedBox(width: 8),
+                              const Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'DEVICE TELEMETRY & SPECS',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w800,
+                                        letterSpacing: 0.8,
+                                        color: NexaColors.primary,
+                                      ),
+                                    ),
+                                    Text(
+                                      'Hardware Isolated Enclave',
+                                      style: TextStyle(fontSize: 11, color: NexaColors.emeraldSecure, fontWeight: FontWeight.bold),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.04),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: NexaColors.borderLight),
+                            ),
+                            child: Column(
+                              children: [
+                                _buildDeviceBubbleRow('Model', (extra?['model'] ?? 'Android ARM64').toString()),
+                                const Divider(height: 8, color: NexaColors.borderLight),
+                                _buildDeviceBubbleRow('OS', (extra?['os'] ?? 'Android 15').toString()),
+                                const Divider(height: 8, color: NexaColors.borderLight),
+                                _buildDeviceBubbleRow('Battery', (extra?['battery'] ?? '84% Nominal').toString()),
+                                const Divider(height: 8, color: NexaColors.borderLight),
+                                _buildDeviceBubbleRow('Storage', (extra?['storage'] ?? '186.4 GB free').toString()),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          const Row(
+                            children: [
+                              Icon(Icons.lock, size: 10, color: NexaColors.emeraldSecure),
+                              SizedBox(width: 4),
+                              Text(
+                                'PointyCastle AES-256-GCM Telemetry Packet',
+                                style: TextStyle(fontSize: 9, color: NexaColors.textMuted),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ] else if (attachmentType == 'mobile_access') ...[
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF0FDF4),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: const Color(0xFFBBF7D0)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Row(
+                              children: [
+                                Icon(Icons.phonelink_lock, color: NexaColors.emeraldSecure, size: 18),
+                                SizedBox(width: 6),
+                                Text('MOBILE APP ACCESS TOKEN', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: NexaColors.emeraldSecure)),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            Text(text, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: NexaColors.textPrimary)),
+                            const SizedBox(height: 2),
+                            Text(subtitle ?? 'Pairing Token', style: const TextStyle(fontSize: 11, color: NexaColors.textSecondary)),
+                          ],
+                        ),
+                      ),
+                    ] else ...[
+                      Text(
+                        text,
+                        style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.35),
+                      ),
+                    ],
+                    const SizedBox(height: 4),
+                    Align(
+                      alignment: Alignment.bottomRight,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            time,
+                            style: TextStyle(
+                              color: isMe ? Colors.white70 : const Color(0xFF94A3B8),
+                              fontSize: 11,
+                            ),
+                          ),
+                          if (isMe) ...[
+                            const SizedBox(width: 4),
+                            _buildDeliveryStatusWidget(msg),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            // Message Reactions
+            if (reactions.isNotEmpty) ...[
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Wrap(
+                  spacing: 4,
+                  children: reactions.map((emoji) {
+                    return Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: NexaColors.surfaceLight,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: NexaColors.borderLight),
+                      ),
+                      child: Text(emoji, style: const TextStyle(fontSize: 12)),
+                    );
+                  }).toList(),
+                ),
+              ),
+            ],
+
+            // Actionable Context Card (Extracted offline by local AI)
+            if (hasAction && !actionDismissed) ...[
+              const SizedBox(height: 6),
+              Container(
+                constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFFBEB),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xFFFDE68A)),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: NexaColors.amberAttention.withValues(alpha: 0.15),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.event, color: NexaColors.amberAttention, size: 18),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            (msg['actionTitle'] ?? 'Suggested Task').toString(),
+                            style: const TextStyle(color: Color(0xFF92400E), fontSize: 13, fontWeight: FontWeight.w700),
+                          ),
+                          Text(
+                            (msg['actionTime'] ?? 'Upcoming').toString(),
+                            style: const TextStyle(color: Color(0xFFB45309), fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (actionAdded) ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: NexaColors.emeraldSecure.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Row(
+                          children: [
+                            Icon(Icons.check, color: NexaColors.emeraldSecure, size: 14),
+                            SizedBox(width: 2),
+                            Text('Added', style: TextStyle(color: NexaColors.emeraldSecure, fontSize: 11, fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                      ),
+                    ] else ...[
+                      IconButton(
+                        icon: const Icon(Icons.close, size: 16, color: NexaColors.textMuted),
+                        tooltip: 'Dismiss',
+                        onPressed: () {
+                          setState(() {
+                            msg['actionDismissed'] = true;
+                          });
+                        },
+                      ),
+                      TextButton(
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        onPressed: () {
+                          setState(() {
+                            msg['actionAdded'] = true;
+                          });
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Scheduled: ${msg['actionTitle']} (${msg['actionTime']})'),
+                              backgroundColor: const Color(0xFF0F172A),
+                            ),
+                          );
+                        },
+                        child: const Text('Add', style: TextStyle(color: Color(0xFF0284C7), fontWeight: FontWeight.bold)),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      );
+    } catch (e, stackTrace) {
+      debugPrint('[ChatScreen] Error rendering message: $e\n$stackTrace');
+      return _buildFallbackMessageTile(msg);
+    }
+  }
+
+  Widget _buildFallbackMessageTile(Map<String, dynamic> msg) {
+    try {
+      final isMe = msg['isMe'] == true;
+      final text = (msg['text'] ?? '').toString();
+      final time = (msg['time'] ?? '').toString();
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Column(
+          crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          children: [
+            Container(
               constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
@@ -2810,446 +3448,14 @@ class _ChatScreenState extends State<ChatScreen> {
                 border: Border.all(
                   color: isMe ? const Color(0xFF0369A1) : const Color(0xFF26334A),
                 ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.15),
-                    blurRadius: 4,
-                    offset: const Offset(0, 1),
-                  ),
-                ],
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (isAudio) ...[
-                    Builder(
-                      builder: (context) {
-                        final isPlaying = _playingMessageId == msg['id'];
-                        final durationStr = (msg['audioDuration'] as String?) ?? '0:14';
-                        final List<double> wave = (msg['waveformData'] as List<double>?) ??
-                            [0.2, 0.4, 0.7, 0.5, 0.8, 0.6, 0.9, 0.4, 0.7, 0.5, 0.3, 0.8, 0.6, 0.4, 0.7, 0.5];
-
-                        return Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                // Play / Pause Button
-                                InkWell(
-                                  onTap: () => _toggleAudioPlayback(msg),
-                                  borderRadius: BorderRadius.circular(20),
-                                  child: Container(
-                                    padding: const EdgeInsets.all(7),
-                                    decoration: BoxDecoration(
-                                      color: isPlaying ? NexaColors.emeraldSecure : NexaColors.primary,
-                                      shape: BoxShape.circle,
-                                    ),
-                                    child: Icon(
-                                      isPlaying ? Icons.pause : Icons.play_arrow,
-                                      color: Colors.white,
-                                      size: 18,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-
-                                // Waveform Scrubber
-                                SizedBox(
-                                  width: 120,
-                                  height: 24,
-                                  child: Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                    children: List.generate(wave.length, (i) {
-                                      final barFraction = (i + 1) / wave.length;
-                                      final isPlayed = isPlaying && barFraction <= _playbackProgress;
-                                      return Container(
-                                        width: 3,
-                                        height: (22 * wave[i]).clamp(4.0, 22.0),
-                                        decoration: BoxDecoration(
-                                          color: isPlayed ? NexaColors.emeraldSecure : NexaColors.primary.withValues(alpha: 0.35),
-                                          borderRadius: BorderRadius.circular(2),
-                                        ),
-                                      );
-                                    }),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-
-                                // Speed button (if playing)
-                                if (isPlaying) ...[
-                                  InkWell(
-                                    onTap: _cyclePlaybackSpeed,
-                                    borderRadius: BorderRadius.circular(6),
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: NexaColors.primary.withValues(alpha: 0.12),
-                                        borderRadius: BorderRadius.circular(6),
-                                      ),
-                                      child: Text(
-                                        '${_playbackSpeed}x',
-                                        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: NexaColors.primary),
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 6),
-                                ],
-
-                                // Timer / Duration
-                                Text(
-                                  isPlaying ? _formatDuration(_playbackElapsedSeconds) : durationStr,
-                                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12, fontFamily: 'Courier', color: NexaColors.textPrimary),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 4),
-                            const Row(
-                              children: [
-                                Icon(Icons.lock, color: NexaColors.emeraldSecure, size: 10),
-                                SizedBox(width: 4),
-                                Text('Voice Note • PointyCastle AES-GCM', style: TextStyle(fontSize: 9, color: NexaColors.textMuted)),
-                              ],
-                            ),
-                          ],
-                        );
-                      },
-                    ),
-                  ] else if ((msg['attachmentType'] as String?) == 'photo' || (msg['attachmentType'] as String?) == 'image') ...[
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: GestureDetector(
-                            onTap: () {
-                              final imgPath = msg['extra']?['path'] as String?;
-                              if (imgPath != null && File(imgPath).existsSync()) {
-                                _showFullImageDialog(imgPath, text, msg['extra']?['size'] as String?);
-                              }
-                            },
-                            child: Container(
-                              height: 145,
-                              width: double.infinity,
-                              decoration: const BoxDecoration(
-                                color: Color(0xFF0F172A),
-                              ),
-                              child: Stack(
-                                alignment: Alignment.center,
-                                children: [
-                                  if (msg['extra']?['path'] != null &&
-                                      File(msg['extra']['path'] as String).existsSync())
-                                    Positioned.fill(
-                                      child: Image.file(
-                                        File(msg['extra']['path'] as String),
-                                        fit: BoxFit.cover,
-                                        errorBuilder: (context, error, stackTrace) => Center(
-                                          child: Icon(Icons.broken_image, size: 48, color: Colors.white.withValues(alpha: 0.35)),
-                                        ),
-                                      ),
-                                    )
-                                  else if (msg['attachmentUrl'] != null && (msg['attachmentUrl'] as String).isNotEmpty)
-                                    Positioned.fill(
-                                      child: Image.network(
-                                        msg['attachmentUrl'].toString().startsWith('http')
-                                            ? msg['attachmentUrl'].toString()
-                                            : '${ChatService.instance.baseUrl}${msg['attachmentUrl']}?raw=1',
-                                        fit: BoxFit.cover,
-                                        errorBuilder: (context, error, stackTrace) => Center(
-                                          child: Icon(Icons.broken_image, size: 48, color: Colors.white.withValues(alpha: 0.35)),
-                                        ),
-                                      ),
-                                    )
-                                  else
-                                    Container(
-                                      decoration: const BoxDecoration(
-                                        gradient: LinearGradient(
-                                          colors: [Color(0xFF0284C7), Color(0xFF0369A1)],
-                                          begin: Alignment.topLeft,
-                                          end: Alignment.bottomRight,
-                                        ),
-                                      ),
-                                      child: Center(
-                                        child: Icon(Icons.image, size: 48, color: Colors.white.withValues(alpha: 0.35)),
-                                      ),
-                                    ),
-                                  Positioned(
-                                    top: 6,
-                                    left: 6,
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: Colors.black.withValues(alpha: 0.6),
-                                        borderRadius: BorderRadius.circular(6),
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          const Icon(Icons.lock, color: NexaColors.emeraldSecure, size: 10),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            msg['extra']?['source'] == 'inbuilt_camera'
-                                                ? 'Inbuilt Camera • AES-GCM'
-                                                : (msg['extra']?['source'] == 'mobile_gallery' ? 'Mobile Gallery • AES-GCM' : 'PointyCastle AES-GCM'),
-                                            style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                  Positioned(
-                                    bottom: 6,
-                                    right: 6,
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: Colors.black.withValues(alpha: 0.6),
-                                        borderRadius: BorderRadius.circular(6),
-                                      ),
-                                      child: Text(msg['extra']?['size'] ?? '2.4 MB', style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w600)),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          text,
-                          style: const TextStyle(color: NexaColors.textPrimary, fontSize: 13, fontWeight: FontWeight.w600),
-                        ),
-                        if (msg['subtitle'] != null)
-                          Text(
-                            msg['subtitle'] as String,
-                            style: const TextStyle(color: NexaColors.textSecondary, fontSize: 11),
-                          ),
-                      ],
-                    ),
-                  ] else if ((msg['attachmentType'] as String?) == 'document') ...[
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF8B5CF6).withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: const Icon(Icons.insert_drive_file, color: Color(0xFF8B5CF6), size: 24),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: NexaColors.textPrimary)),
-                              Text(msg['subtitle'] as String? ?? '1.4 MB • Encrypted File', style: const TextStyle(fontSize: 11, color: NexaColors.textMuted)),
-                            ],
-                          ),
-                        ),
-                        const Icon(Icons.download_for_offline_outlined, color: NexaColors.primary, size: 20),
-                      ],
-                    ),
-                  ] else if ((msg['attachmentType'] as String?) == 'location') ...[
-                    GestureDetector(
-                      onTap: () {
-                        final lat = msg['extra']?['latitude'] ?? msg['latitude'];
-                        final lng = msg['extra']?['longitude'] ?? msg['longitude'];
-                        if (lat != null && lng != null) {
-                          _nativeMediaChannel.invokeMethod('openUrlInBrowser', {
-                            'url': 'https://maps.google.com/?q=$lat,$lng',
-                          });
-                        }
-                      },
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(10),
-                            child: Container(
-                              height: 80,
-                              width: double.infinity,
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFE2E8F0),
-                                border: Border.all(color: NexaColors.borderLight),
-                              ),
-                              child: Stack(
-                                alignment: Alignment.center,
-                                children: [
-                                  Icon(Icons.map, size: 44, color: Colors.blueGrey.withValues(alpha: 0.25)),
-                                  const Icon(Icons.location_on, color: Color(0xFFEF4444), size: 28),
-                                  Positioned(
-                                    bottom: 4,
-                                    left: 6,
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                                      decoration: BoxDecoration(
-                                        color: Colors.black.withValues(alpha: 0.6),
-                                        borderRadius: BorderRadius.circular(4),
-                                      ),
-                                      child: const Text('Live GPS • E2EE Pin', style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold)),
-                                    ),
-                                  ),
-                                  Positioned(
-                                    bottom: 4,
-                                    right: 6,
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                                      decoration: BoxDecoration(
-                                        color: NexaColors.primary.withValues(alpha: 0.8),
-                                        borderRadius: BorderRadius.circular(4),
-                                      ),
-                                      child: const Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Icon(Icons.open_in_new, color: Colors.white, size: 8),
-                                          SizedBox(width: 2),
-                                          Text('Open Map', style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold)),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(text, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: NexaColors.textPrimary)),
-                          const SizedBox(height: 2),
-                          Text(msg['subtitle'] as String? ?? '12.9716° N, 77.5946° E • Accurate to 3m', style: const TextStyle(fontSize: 11, color: NexaColors.textSecondary)),
-                        ],
-                      ),
-                    ),
-                  ] else if ((msg['attachmentType'] as String?) == 'contact') ...[
-                    Row(
-                      children: [
-                        CircleAvatar(
-                          backgroundColor: const Color(0xFF06B6D4).withValues(alpha: 0.2),
-                          radius: 18,
-                          child: const Icon(Icons.person, color: Color(0xFF06B6D4), size: 20),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(text, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: NexaColors.textPrimary)),
-                              Text(msg['subtitle'] as String? ?? 'NEXA Verified Peer', style: const TextStyle(fontSize: 11, color: NexaColors.textMuted)),
-                            ],
-                          ),
-                        ),
-                        TextButton(
-                          onPressed: () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Contact card verified and added.')),
-                            );
-                          },
-                          child: const Text('Add', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                        ),
-                      ],
-                    ),
-                  ] else if ((msg['attachmentType'] as String?) == 'device_data') ...[
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(6),
-                              decoration: BoxDecoration(
-                                color: NexaColors.primary.withValues(alpha: 0.15),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: const Icon(Icons.phone_android, color: NexaColors.primary, size: 18),
-                            ),
-                            const SizedBox(width: 8),
-                            const Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'DEVICE TELEMETRY & SPECS',
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w800,
-                                      letterSpacing: 0.8,
-                                      color: NexaColors.primary,
-                                    ),
-                                  ),
-                                  Text(
-                                    'Hardware Isolated Enclave',
-                                    style: TextStyle(fontSize: 11, color: NexaColors.emeraldSecure, fontWeight: FontWeight.bold),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Container(
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.04),
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: NexaColors.borderLight),
-                          ),
-                          child: Column(
-                            children: [
-                              _buildDeviceBubbleRow('Model', msg['extra']?['model'] ?? 'Android ARM64'),
-                              const Divider(height: 8, color: NexaColors.borderLight),
-                              _buildDeviceBubbleRow('OS', msg['extra']?['os'] ?? 'Android 15'),
-                              const Divider(height: 8, color: NexaColors.borderLight),
-                              _buildDeviceBubbleRow('Battery', msg['extra']?['battery'] ?? '84% Nominal'),
-                              const Divider(height: 8, color: NexaColors.borderLight),
-                              _buildDeviceBubbleRow('Storage', msg['extra']?['storage'] ?? '186.4 GB free'),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        const Row(
-                          children: [
-                            Icon(Icons.lock, size: 10, color: NexaColors.emeraldSecure),
-                            SizedBox(width: 4),
-                            Text(
-                              'PointyCastle AES-256-GCM Telemetry Packet',
-                              style: TextStyle(fontSize: 9, color: NexaColors.textMuted),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ] else if ((msg['attachmentType'] as String?) == 'mobile_access') ...[
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF0FDF4),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: const Color(0xFFBBF7D0)),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Row(
-                            children: [
-                              Icon(Icons.phonelink_lock, color: NexaColors.emeraldSecure, size: 18),
-                              SizedBox(width: 6),
-                              Text('MOBILE APP ACCESS TOKEN', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: NexaColors.emeraldSecure)),
-                            ],
-                          ),
-                          const SizedBox(height: 6),
-                          Text(text, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: NexaColors.textPrimary)),
-                          const SizedBox(height: 2),
-                          Text(msg['subtitle'] as String? ?? 'Pairing Token', style: const TextStyle(fontSize: 11, color: NexaColors.textSecondary)),
-                        ],
-                      ),
-                    ),
-                  ] else ...[
-                    Text(
-                      text,
-                      style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.35),
-                    ),
-                  ],
+                  Text(
+                    text.isNotEmpty ? text : 'Encrypted Message',
+                    style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.35),
+                  ),
                   const SizedBox(height: 4),
                   Align(
                     alignment: Alignment.bottomRight,
@@ -3273,171 +3479,72 @@ class _ChatScreenState extends State<ChatScreen> {
                 ],
               ),
             ),
-          ),
-
-          // Message Reactions
-          if (reactions.isNotEmpty) ...[
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Wrap(
-                spacing: 4,
-                children: reactions.map((emoji) {
-                  return Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: NexaColors.surfaceLight,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: NexaColors.borderLight),
-                    ),
-                    child: Text(emoji, style: const TextStyle(fontSize: 12)),
-                  );
-                }).toList(),
-              ),
-            ),
           ],
-
-          // Actionable Context Card (Extracted offline by local AI)
-          if (hasAction && !actionDismissed) ...[
-            const SizedBox(height: 6),
-            Container(
-              constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFFFBEB),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: const Color(0xFFFDE68A)),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: NexaColors.amberAttention.withValues(alpha: 0.15),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(Icons.event, color: NexaColors.amberAttention, size: 18),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          msg['actionTitle'] as String,
-                          style: const TextStyle(color: Color(0xFF92400E), fontSize: 13, fontWeight: FontWeight.w700),
-                        ),
-                        Text(
-                          msg['actionTime'] as String,
-                          style: const TextStyle(color: Color(0xFFB45309), fontSize: 12),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (actionAdded) ...[
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: NexaColors.emeraldSecure.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const Row(
-                        children: [
-                          Icon(Icons.check, color: NexaColors.emeraldSecure, size: 14),
-                          SizedBox(width: 2),
-                          Text('Added', style: TextStyle(color: NexaColors.emeraldSecure, fontSize: 11, fontWeight: FontWeight.bold)),
-                        ],
-                      ),
-                    ),
-                  ] else ...[
-                    IconButton(
-                      icon: const Icon(Icons.close, size: 16, color: NexaColors.textMuted),
-                      tooltip: 'Dismiss',
-                      onPressed: () {
-                        setState(() {
-                          msg['actionDismissed'] = true;
-                        });
-                      },
-                    ),
-                    TextButton(
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        minimumSize: Size.zero,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                      onPressed: () {
-                        setState(() {
-                          msg['actionAdded'] = true;
-                        });
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('Scheduled: ${msg['actionTitle']} (${msg['actionTime']})'),
-                            backgroundColor: const Color(0xFF0F172A),
-                          ),
-                        );
-                      },
-                      child: const Text('Add', style: TextStyle(color: Color(0xFF0284C7), fontWeight: FontWeight.bold)),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
+        ),
+      );
+    } catch (_) {
+      return const SizedBox.shrink();
+    }
   }
 
   Widget _buildDeliveryStatusWidget(Map<String, dynamic> msg) {
-    final status = (msg['status'] ?? 'sent').toString();
-    switch (status) {
-      case 'pending':
-        return const Padding(
-          padding: EdgeInsets.only(left: 3),
-          child: Icon(Icons.access_time_rounded, size: 12, color: Colors.white60),
-        );
-      case 'sending':
-        return const Padding(
-          padding: EdgeInsets.only(left: 3),
-          child: SizedBox(
-            width: 10,
-            height: 10,
-            child: CircularProgressIndicator(
-              strokeWidth: 1.5,
-              valueColor: AlwaysStoppedAnimation<Color>(Colors.white70),
-            ),
-          ),
-        );
-      case 'failed':
-        return InkWell(
-          onTap: () => _retrySendMessage(msg),
-          child: const Padding(
+    try {
+      final status = (msg['status'] ?? 'sent').toString().toLowerCase();
+      switch (status) {
+        case 'pending':
+          return const Padding(
             padding: EdgeInsets.only(left: 3),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.error_outline_rounded, size: 13, color: NexaColors.rubyDestructive),
-                SizedBox(width: 2),
-                Text('Retry', style: TextStyle(color: NexaColors.rubyDestructive, fontSize: 10, fontWeight: FontWeight.bold)),
-              ],
+            child: Icon(Icons.access_time_rounded, size: 12, color: Colors.white60),
+          );
+        case 'sending':
+          return const Padding(
+            padding: EdgeInsets.only(left: 3),
+            child: SizedBox(
+              width: 10,
+              height: 10,
+              child: CircularProgressIndicator(
+                strokeWidth: 1.5,
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.white70),
+              ),
             ),
-          ),
-        );
-      case 'read':
-        return const Padding(
-          padding: EdgeInsets.only(left: 3),
-          child: Icon(Icons.done_all_rounded, size: 14, color: Color(0xFF00E5FF)),
-        );
-      case 'delivered':
-        return const Padding(
-          padding: EdgeInsets.only(left: 3),
-          child: Icon(Icons.done_all_rounded, size: 14, color: Colors.white70),
-        );
-      case 'sent':
-      default:
-        return const Padding(
-          padding: EdgeInsets.only(left: 3),
-          child: Icon(Icons.check_rounded, size: 14, color: Colors.white70),
-        );
+          );
+        case 'failed':
+          return InkWell(
+            onTap: () => _retrySendMessage(msg),
+            child: const Padding(
+              padding: EdgeInsets.only(left: 3),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.error_outline_rounded, size: 13, color: NexaColors.rubyDestructive),
+                  SizedBox(width: 2),
+                  Text('Retry', style: TextStyle(color: NexaColors.rubyDestructive, fontSize: 10, fontWeight: FontWeight.bold)),
+                ],
+              ),
+            ),
+          );
+        case 'read':
+          return const Padding(
+            padding: EdgeInsets.only(left: 3),
+            child: Icon(Icons.done_all_rounded, size: 14, color: Color(0xFF00E5FF)),
+          );
+        case 'delivered':
+          return const Padding(
+            padding: EdgeInsets.only(left: 3),
+            child: Icon(Icons.done_all_rounded, size: 14, color: Colors.white70),
+          );
+        case 'sent':
+        default:
+          return const Padding(
+            padding: EdgeInsets.only(left: 3),
+            child: Icon(Icons.check_rounded, size: 14, color: Colors.white70),
+          );
+      }
+    } catch (_) {
+      return const Padding(
+        padding: EdgeInsets.only(left: 3),
+        child: Icon(Icons.check_rounded, size: 14, color: Colors.white70),
+      );
     }
   }
 

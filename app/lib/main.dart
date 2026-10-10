@@ -6,6 +6,10 @@ import 'features/focus_orbit/presentation/focus_orbit_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  ErrorWidget.builder = (FlutterErrorDetails details) {
+    debugPrint('[ErrorWidget] Suppressed UI build exception: ${details.exception}');
+    return const SizedBox.shrink();
+  };
   await UserSession.instance.init();
   runApp(const NexaApp());
 }
