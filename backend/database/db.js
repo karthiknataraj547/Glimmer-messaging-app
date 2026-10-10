@@ -1379,7 +1379,7 @@ const Database = {
       size_bytes: record.size_bytes,
       checksum: record.checksum,
       name: record.name,
-      download_url: `/v1/attachments/${record.id}`
+      download_url: `/v1/attachments/${record.id}?raw=1`
     };
   },
 

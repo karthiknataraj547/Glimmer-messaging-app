@@ -888,9 +888,9 @@ app.get('/v1/attachments/:id', (req, res) => {
     return res.status(404).json({ error: 'Attachment not found or expired.' });
   }
 
-  if (req.query.raw === '1' && att.data_base64) {
+  if (req.query.json !== '1' && att.data_base64) {
     const buf = Buffer.from(att.data_base64, 'base64');
-    res.setHeader('Content-Type', att.media_type || 'application/octet-stream');
+    res.setHeader('Content-Type', att.media_type || 'image/jpeg');
     res.setHeader('Content-Length', buf.length);
     res.setHeader('ETag', att.checksum || `"${att.id}"`);
     return res.send(buf);
