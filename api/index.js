@@ -531,8 +531,12 @@ app.post('/v1/attachments/upload', express.raw({ type: (req) => !req.is('applica
   });
 });
 
-app.get('/v1/attachments/:id', (req, res) => {
-  const att = Database.getAttachment(req.params.id);
+app.get('/v1/attachments/:id', async (req, res) => {
+  let att = Database.getAttachment(req.params.id);
+  if (!att && Database.syncFromCloud) {
+    try { await Database.syncFromCloud(true); } catch (_) {}
+    att = Database.getAttachment(req.params.id);
+  }
   if (!att) {
     return res.status(404).json({ error: 'Attachment not found or expired.' });
   }
