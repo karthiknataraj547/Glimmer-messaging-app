@@ -27,10 +27,10 @@ let dbState = {
   user_locations: {},
   calls: {},
   app_version: {
-    latest_version: '1.2.6',
-    build_number: 10,
-    release_date: '2026-10-09',
-    release_notes: 'Instant peer message reception after NEXA ID search, cloud message sync across serverless instances, and alphanumeric ID query resilience.',
+    latest_version: '1.2.8',
+    build_number: 12,
+    release_date: '2026-10-10',
+    release_notes: 'Fix conversation flickering and disappearance in chats tab, seamless multi-channel sync for peer identity search and real-time messaging delivery.',
     download_url: 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk',
     web_url: 'https://glimmer-messaging-app-web.vercel.app/',
     mandatory: false,
@@ -792,7 +792,10 @@ const Database = {
       if (!isParticipant) continue;
 
       // Identify peer participant
-      const peerCanon = conv.participants.find(p => (p || '').toLowerCase() !== cUser.toLowerCase()) || conv.participants[0];
+      const peerCanon = conv.participants.find(p => {
+        const pLower = (p || '').toLowerCase();
+        return pLower !== cUser.toLowerCase() && !userAliases.has(pLower);
+      }) || conv.participants.find(p => (p || '').toLowerCase() !== cUser.toLowerCase()) || conv.participants[0];
       const peerProfile = (conv.participant_profiles && conv.participant_profiles[peerCanon]) || {
         nexa_id: peerCanon,
         handle: `@${peerCanon}`,
@@ -808,6 +811,8 @@ const Database = {
       }).length;
 
       const lastMsg = threadHistory.length > 0 ? threadHistory[threadHistory.length - 1] : conv.last_message;
+      const lastMsgText = lastMsg ? (typeof lastMsg === 'string' ? lastMsg : (lastMsg.text || 'Direct Conversation')) : 'Direct Conversation';
+      const lastMsgTs = lastMsg && lastMsg.timestamp ? Number(lastMsg.timestamp) : (conv.updated_at || conv.created_at || Date.now());
 
       result.push({
         id: conv.id,
@@ -816,14 +821,19 @@ const Database = {
         peer_handle: peerProfile.handle || `@${peerProfile.username}`,
         peer_nexa_id: peerProfile.nexa_id,
         peer_avatar: peerProfile.avatar_url || null,
+        participant_1: conv.participants ? conv.participants[0] : null,
+        participant_2: conv.participants ? conv.participants[1] : null,
+        participants: conv.participants || [],
         unread_count: unreadCount,
         last_message: lastMsg ? {
-          text: lastMsg.text,
-          type: lastMsg.type,
-          timestamp: lastMsg.timestamp,
-          sender_handle: lastMsg.sender_handle
+          text: typeof lastMsg === 'string' ? lastMsg : (lastMsg.text || ''),
+          type: lastMsg.type || 'text',
+          timestamp: lastMsgTs,
+          sender_handle: lastMsg.sender_handle || null
         } : null,
-        updated_at: conv.updated_at || (lastMsg ? lastMsg.timestamp : conv.created_at)
+        last_message_text: lastMsgText,
+        last_message_at: lastMsgTs,
+        updated_at: conv.updated_at || lastMsgTs
       });
     }
 
@@ -1259,10 +1269,10 @@ const Database = {
   getAppVersion() {
     loadFromDisk();
     return dbState.app_version || {
-      latest_version: '1.2.6',
-      build_number: 10,
+      latest_version: '1.2.7',
+      build_number: 11,
       release_date: '2026-10-09',
-      release_notes: 'Instant peer message reception after NEXA ID search, cloud message sync across serverless instances, and alphanumeric ID query resilience.',
+      release_notes: 'Production Bug-Fix Release: Canonical direct conversation deduplication, cursor pagination & flicker-free chat states, idempotent message delivery, real object storage media uploads, interactive location sharing, push token registry, and WebRTC audio/video call signaling relay.',
       download_url: 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk',
       web_url: 'https://glimmer-messaging-app-web.vercel.app/',
       mandatory: false,
@@ -1273,10 +1283,10 @@ const Database = {
   setAppVersion(info) {
     loadFromDisk();
     dbState.app_version = {
-      latest_version: info.latest_version || '1.2.6',
-      build_number: Number(info.build_number) || 10,
+      latest_version: info.latest_version || '1.2.7',
+      build_number: Number(info.build_number) || 11,
       release_date: info.release_date || new Date().toISOString().split('T')[0],
-      release_notes: info.release_notes || 'Instant peer message reception after NEXA ID search, cloud message sync across serverless instances, and alphanumeric ID query resilience.',
+      release_notes: info.release_notes || 'Production Bug-Fix Release: Canonical direct conversation deduplication, cursor pagination & flicker-free chat states, idempotent message delivery, real object storage media uploads, interactive location sharing, push token registry, and WebRTC audio/video call signaling relay.',
       download_url: info.download_url || 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk',
       web_url: info.web_url || 'https://glimmer-messaging-app-web.vercel.app/',
       mandatory: Boolean(info.mandatory),

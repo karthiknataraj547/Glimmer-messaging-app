@@ -341,6 +341,7 @@ class _ChatScreenState extends State<ChatScreen> {
           lastMessage: (lastMsg['text'] ?? '').toString(),
           timestamp: (lastMsg['timestamp'] as num?)?.toInt() ?? now,
           unread: 0,
+          conversationId: _activeConversationId,
         );
       }
     }
@@ -399,6 +400,7 @@ class _ChatScreenState extends State<ChatScreen> {
       lastMessage: text,
       timestamp: ts,
       unread: 0,
+      conversationId: _activeConversationId,
     );
 
     final clientMessageId = 'cl_$ts';
@@ -1318,6 +1320,7 @@ class _ChatScreenState extends State<ChatScreen> {
       lastMessage: '$type: $title',
       timestamp: ts,
       unread: 0,
+      conversationId: _activeConversationId,
     );
 
     // 3. Send over relay

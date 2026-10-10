@@ -164,28 +164,40 @@ class ChatService {
     required String lastMessage,
     required int timestamp,
     int unread = 0,
+    String? conversationId,
   }) async {
     final currentChats = await loadRecentChats();
     final cleanPeer = peerName.replaceAll('@', '');
-    final cleanName = peerName.startsWith('@') ? peerName : '@$peerName';
-    final targetNexaId = peerNexaId.isNotEmpty ? peerNexaId : 'NX-${cleanPeer.toUpperCase()}';
+    final cleanName = peerName.startsWith('@')
+        ? peerName
+        : (peerName.startsWith('NX-') ? peerName : '@$peerName');
+    final targetNexaId = peerNexaId.isNotEmpty
+        ? peerNexaId
+        : (cleanPeer.toUpperCase().startsWith('NX-') ? cleanPeer.toUpperCase() : 'NX-${cleanPeer.toUpperCase()}');
 
     final idx = currentChats.indexWhere((c) {
+      final cId = (c['conversationId'] as String?) ?? '';
+      if (conversationId != null && conversationId.isNotEmpty && cId.isNotEmpty && cId == conversationId) return true;
       final n = ((c['name'] as String?) ?? '').toLowerCase().replaceAll('@', '');
       final id = ((c['nexaId'] as String?) ?? '').toLowerCase();
-      return n == cleanPeer.toLowerCase() ||
+      return (cleanPeer.isNotEmpty && n == cleanPeer.toLowerCase()) ||
           (targetNexaId.isNotEmpty && id == targetNexaId.toLowerCase());
     });
 
     final entry = {
+      if (conversationId != null && conversationId.isNotEmpty) 'conversationId': conversationId,
       'name': cleanName,
       'nexaId': targetNexaId,
       'message': lastMessage,
       'time': formatTimestamp(timestamp),
+      'timestamp': timestamp,
       'unread': unread,
     };
 
     if (idx >= 0) {
+      if (conversationId == null && currentChats[idx]['conversationId'] != null) {
+        entry['conversationId'] = currentChats[idx]['conversationId'];
+      }
       currentChats.removeAt(idx);
     }
     currentChats.insert(0, entry);

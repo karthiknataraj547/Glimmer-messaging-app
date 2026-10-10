@@ -555,6 +555,7 @@
       opacity: 1;
     }
   </style>
+  <link rel="stylesheet" href="/admin/admin-ui.css">
 </head>
 <body>
 
@@ -1253,11 +1254,13 @@
 
     async function fetchFullDashboard(showFeedback) {
       if (!adminToken) return;
+      const activityType = document.getElementById('logTypeFilter')?.value || 'all';
+      const activityEndpoint = `/v1/admin/activity?limit=50&type=${encodeURIComponent(activityType)}`;
       try {
         const [overviewRes, usersRes, activityRes] = await Promise.all([
           adminFetch('/v1/admin/overview', { headers: { 'Authorization': 'Bearer ' + adminToken } }),
           adminFetch('/v1/admin/users', { headers: { 'Authorization': 'Bearer ' + adminToken } }),
-          adminFetch('/v1/admin/activity?limit=50', { headers: { 'Authorization': 'Bearer ' + adminToken } })
+          adminFetch(activityEndpoint, { headers: { 'Authorization': 'Bearer ' + adminToken } })
         ]);
 
         if (overviewRes.status === 401 || overviewRes.status === 403) {
@@ -1804,5 +1807,6 @@
       }
     }
   </script>
+  <script src="/admin/admin-enhancements.js"></script>
 </body>
 </html>

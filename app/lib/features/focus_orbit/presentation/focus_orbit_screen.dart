@@ -30,6 +30,7 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
   // Chats
   final List<Map<String, dynamic>> _chats = [];
   Timer? _inboxSyncTimer;
+  bool _isSyncingInbox = false;
   final TextEditingController _chatSearchController = TextEditingController();
   String _chatSearchQuery = '';
 
@@ -83,155 +84,250 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
     final cached = await ChatService.instance.loadRecentChats();
     if (cached.isNotEmpty && mounted) {
       setState(() {
-        _chats.clear();
-        _chats.addAll(cached);
+        if (_chats.isEmpty) {
+          _chats.addAll(cached);
+        } else {
+          for (final c in cached) {
+            final cName = ((c['name'] as String?) ?? '').toLowerCase().replaceAll('@', '');
+            final cId = ((c['nexaId'] as String?) ?? '').toLowerCase();
+            final exists = _chats.any((x) {
+              final xName = ((x['name'] as String?) ?? '').toLowerCase().replaceAll('@', '');
+              final xId = ((x['nexaId'] as String?) ?? '').toLowerCase();
+              return (cName.isNotEmpty && xName == cName) || (cId.isNotEmpty && xId == cId);
+            });
+            if (!exists) _chats.add(Map<String, dynamic>.from(c));
+          }
+          _chats.sort((a, b) => ((b['timestamp'] as num?)?.toInt() ?? 0).compareTo((a['timestamp'] as num?)?.toInt() ?? 0));
+        }
       });
     }
   }
 
   /// Synchronize incoming chat messages and canonical conversations from server relay
   Future<void> _syncInbox() async {
-    if (!mounted || !_session.isLoggedIn) return;
+    if (_isSyncingInbox || !mounted || !_session.isLoggedIn) return;
+    _isSyncingInbox = true;
     try {
-      // 1. Fetch server-persisted canonical conversations
-      final serverConvs = await ChatService.instance.fetchConversations();
-      if (serverConvs.isNotEmpty) {
-        final List<Map<String, dynamic>> updatedChats = [];
-        final myHandle = UserSession.instance.handle.replaceAll('@', '').toLowerCase();
-        final myNexaId = UserSession.instance.nexaId.toLowerCase();
-
-        for (final conv in serverConvs) {
-          final convId = conv['id']?.toString() ?? '';
-          final p1 = (conv['participant_1'] as String?) ?? '';
-          final p2 = (conv['participant_2'] as String?) ?? '';
-          final isP1Me = p1.toLowerCase() == myNexaId || p1.toLowerCase() == myHandle;
-          final peerId = isP1Me ? p2 : p1;
-          if (peerId.isEmpty) continue;
-
-          final lastMsg = (conv['last_message'] as String?) ?? 'Direct Conversation';
-          final lastTs = (conv['last_message_at'] as num?)?.toInt() ??
-              (conv['created_at'] as num?)?.toInt() ??
-              DateTime.now().millisecondsSinceEpoch;
-          final timeStr = _formatTimestamp(lastTs);
-
-          final canonicalKey = ChatService.getCanonicalKey(peerId);
-          final lastReadTs = await ChatService.instance.getReadTimestamp(canonicalKey);
-          final unreadCount = (conv['unread_count'] as int?) ?? (lastTs > lastReadTs ? 1 : 0);
-
-          updatedChats.add({
-            'conversationId': convId,
-            'name': peerId.startsWith('NX-') ? peerId : '@$peerId',
-            'nexaId': peerId.startsWith('NX-') ? peerId : 'NX-${peerId.toUpperCase()}',
-            'message': lastMsg,
-            'time': timeStr,
-            'timestamp': lastTs,
-            'unread': unreadCount,
-          });
-        }
-
-        updatedChats.sort((a, b) => ((b['timestamp'] as num?)?.toInt() ?? 0).compareTo((a['timestamp'] as num?)?.toInt() ?? 0));
-
-        if (mounted) {
-          setState(() {
-            _chats.clear();
-            _chats.addAll(updatedChats);
-          });
-          ChatService.instance.saveRecentChats(_chats);
-        }
-      } else if (_chats.isEmpty) {
-        final cached = await ChatService.instance.loadRecentChats();
-        if (cached.isNotEmpty && mounted) {
-          setState(() {
-            _chats.addAll(cached);
-          });
-        }
-      }
-
-      // 2. Also check real-time inbox messages
-      final messages = await ChatService.instance.fetchInbox();
-      if (messages.isEmpty) return;
-
       final myHandle = UserSession.instance.handle.replaceAll('@', '').toLowerCase();
       final myNexaId = UserSession.instance.nexaId.toLowerCase();
-
-      // Group incoming messages by sender
-      final Map<String, List<Map<String, dynamic>>> bySender = {};
-      for (final msg in messages) {
-        final senderHandle = ((msg['sender_handle'] as String?) ?? '').replaceAll('@', '').toLowerCase();
-        final senderNexaId = ((msg['sender_nexa_id'] as String?) ?? '').toLowerCase();
-        // Ignore messages sent by me
-        if (senderHandle == myHandle || (myNexaId.isNotEmpty && (senderHandle == myNexaId || senderNexaId == myNexaId))) {
-          continue;
-        }
-        final peerKey = senderNexaId.isNotEmpty ? senderNexaId : senderHandle;
-        if (peerKey.isEmpty) continue;
-        bySender.putIfAbsent(peerKey, () => []).add(msg);
-      }
-
+      final myUsername = UserSession.instance.username.toLowerCase();
       bool changed = false;
-      for (final entry in bySender.entries) {
-        final peerMessages = entry.value;
-        if (peerMessages.isEmpty) continue;
-        peerMessages.sort((a, b) => ((a['timestamp'] as num?)?.toInt() ?? 0).compareTo((b['timestamp'] as num?)?.toInt() ?? 0));
-        final lastMsg = peerMessages.last;
 
-        final senderHandle = (lastMsg['sender_handle'] as String?) ?? 'Peer';
-        final senderNexaId = (lastMsg['sender_nexa_id'] as String?) ?? 'NX-${senderHandle.toUpperCase()}';
-        final text = (lastMsg['text'] as String?) ?? 'Encrypted Memo';
-        final ts = (lastMsg['timestamp'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch;
-        final timeStr = _formatTimestamp(ts);
-        final convId = lastMsg['conversation_id'] as String?;
+      // 1. Fetch server-persisted canonical conversations
+      final serverConvs = await ChatService.instance.fetchConversations();
+      for (final conv in serverConvs) {
+        final convId = conv['id']?.toString() ?? '';
 
-        final canonicalKey = ChatService.getCanonicalKey(senderNexaId.isNotEmpty ? senderNexaId : senderHandle);
-        final readTs1 = await ChatService.instance.getReadTimestamp(canonicalKey);
-        final readTs2 = await ChatService.instance.getReadTimestamp(ChatService.getCanonicalKey(senderHandle));
-        final lastReadTs = readTs1 > readTs2 ? readTs1 : readTs2;
+        // Resolve Peer Identifier & Name
+        String peerName = (conv['peer_name'] as String?) ?? '';
+        String peerHandle = (conv['peer_handle'] as String?) ?? '';
+        String peerNexaId = (conv['peer_nexa_id'] as String?) ?? '';
 
-        final unreadCount = peerMessages.where((m) {
-          final mTs = (m['timestamp'] as num?)?.toInt() ?? 0;
-          return mTs > lastReadTs;
-        }).length;
+        if (peerHandle.isEmpty && peerNexaId.isEmpty) {
+          final p1 = (conv['participant_1'] as String?) ?? '';
+          final p2 = (conv['participant_2'] as String?) ?? '';
+          final isP1Me = p1.toLowerCase() == myNexaId || p1.toLowerCase() == myHandle || p1.toLowerCase() == myUsername;
+          final pPeer = isP1Me ? p2 : p1;
+          if (pPeer.isNotEmpty) {
+            if (pPeer.toUpperCase().startsWith('NX-')) {
+              peerNexaId = pPeer;
+            } else {
+              peerHandle = pPeer;
+            }
+          }
+        }
+
+        if (peerHandle.isEmpty && peerNexaId.isEmpty && conv['participants'] is List) {
+          for (final p in conv['participants']) {
+            final pStr = p?.toString() ?? '';
+            final pLower = pStr.toLowerCase();
+            if (pLower != myNexaId && pLower != myHandle && pLower != myUsername && pLower.isNotEmpty) {
+              if (pStr.toUpperCase().startsWith('NX-')) {
+                peerNexaId = pStr;
+              } else {
+                peerHandle = pStr;
+              }
+              break;
+            }
+          }
+        }
+
+        final cleanHandle = peerHandle.replaceAll('@', '');
+        final displayName = peerName.isNotEmpty
+            ? peerName
+            : (cleanHandle.isNotEmpty ? '@$cleanHandle' : peerNexaId);
+        final finalNexaId = peerNexaId.isNotEmpty
+            ? peerNexaId
+            : (cleanHandle.isNotEmpty ? 'NX-${cleanHandle.toUpperCase()}' : 'NX-PEER');
+
+        if (displayName.isEmpty && finalNexaId.isEmpty) continue;
+
+        String lastMsg = 'Direct Conversation';
+        int lastTs = DateTime.now().millisecondsSinceEpoch;
+
+        final rawLastMsg = conv['last_message'];
+        if (rawLastMsg is Map) {
+          lastMsg = rawLastMsg['text']?.toString() ?? 'Direct Conversation';
+          final tsVal = rawLastMsg['timestamp'];
+          if (tsVal is num) lastTs = tsVal.toInt();
+        } else if (rawLastMsg is String && rawLastMsg.isNotEmpty) {
+          lastMsg = rawLastMsg;
+        } else if (conv['last_message_text'] is String && (conv['last_message_text'] as String).isNotEmpty) {
+          lastMsg = conv['last_message_text'] as String;
+        }
+
+        if (conv['last_message_at'] is num) {
+          lastTs = (conv['last_message_at'] as num).toInt();
+        } else if (conv['updated_at'] is num) {
+          lastTs = (conv['updated_at'] as num).toInt();
+        } else if (conv['created_at'] is num) {
+          lastTs = (conv['created_at'] as num).toInt();
+        }
+
+        final timeStr = _formatTimestamp(lastTs);
+        final canonicalKey = ChatService.getCanonicalKey(finalNexaId.isNotEmpty ? finalNexaId : cleanHandle);
+        final lastReadTs = await ChatService.instance.getReadTimestamp(canonicalKey);
+        final unreadCount = (conv['unread_count'] as int?) ?? (lastTs > lastReadTs ? 1 : 0);
 
         final idx = _chats.indexWhere((c) {
-          final n = (c['name'] as String).toLowerCase();
-          final id = (c['nexaId'] as String).toLowerCase();
-          return n == senderHandle.toLowerCase() ||
-              n == '@${senderHandle.toLowerCase()}' ||
-              id == senderNexaId.toLowerCase();
+          final cId = (c['conversationId'] as String?) ?? '';
+          if (convId.isNotEmpty && cId.isNotEmpty && cId == convId) return true;
+          final n = ((c['name'] as String?) ?? '').toLowerCase().replaceAll('@', '');
+          final id = ((c['nexaId'] as String?) ?? '').toLowerCase();
+          return (cleanHandle.isNotEmpty && n == cleanHandle.toLowerCase()) ||
+              (finalNexaId.isNotEmpty && id == finalNexaId.toLowerCase());
         });
 
         if (idx >= 0) {
-          final currentMsg = _chats[idx]['message'];
-          final currentUnread = _chats[idx]['unread'];
-          if (currentMsg != text || currentUnread != unreadCount) {
-            _chats[idx]['message'] = text;
-            _chats[idx]['time'] = timeStr;
-            _chats[idx]['unread'] = unreadCount;
-            if (convId != null) _chats[idx]['conversationId'] = convId;
-            if (currentMsg != text) {
-              final item = _chats.removeAt(idx);
-              _chats.insert(0, item);
-            }
+          final existing = _chats[idx];
+          final exMsg = existing['message'];
+          final exTime = existing['time'];
+          final exUnread = existing['unread'];
+          final exTs = (existing['timestamp'] as num?)?.toInt() ?? 0;
+
+          if (exMsg != lastMsg || exUnread != unreadCount || exTime != timeStr || (convId.isNotEmpty && existing['conversationId'] != convId)) {
+            existing['message'] = lastMsg;
+            existing['time'] = timeStr;
+            existing['unread'] = unreadCount;
+            if (convId.isNotEmpty) existing['conversationId'] = convId;
+            if (lastTs > exTs) existing['timestamp'] = lastTs;
             changed = true;
           }
         } else {
-          _chats.insert(0, {
+          _chats.add({
             'conversationId': convId,
-            'name': '@$senderHandle',
-            'nexaId': senderNexaId,
-            'message': text,
+            'name': displayName,
+            'nexaId': finalNexaId,
+            'message': lastMsg,
             'time': timeStr,
+            'timestamp': lastTs,
             'unread': unreadCount,
           });
           changed = true;
         }
       }
 
+      // If chats were completely empty and server returned nothing, try loading local cache
+      if (_chats.isEmpty && serverConvs.isEmpty) {
+        final cached = await ChatService.instance.loadRecentChats();
+        if (cached.isNotEmpty) {
+          _chats.addAll(cached);
+          changed = true;
+        }
+      }
+
+      // 2. Also check real-time inbox messages
+      final messages = await ChatService.instance.fetchInbox();
+      if (messages.isNotEmpty) {
+        // Group incoming messages by sender
+        final Map<String, List<Map<String, dynamic>>> bySender = {};
+        for (final msg in messages) {
+          final senderHandle = ((msg['sender_handle'] as String?) ?? '').replaceAll('@', '').toLowerCase();
+          final senderNexaId = ((msg['sender_nexa_id'] as String?) ?? '').toLowerCase();
+          // Ignore messages sent by me
+          if (senderHandle == myHandle || senderHandle == myUsername ||
+              (myNexaId.isNotEmpty && (senderHandle == myNexaId || senderNexaId == myNexaId))) {
+            continue;
+          }
+          final peerKey = senderNexaId.isNotEmpty ? senderNexaId : senderHandle;
+          if (peerKey.isEmpty) continue;
+          bySender.putIfAbsent(peerKey, () => []).add(msg);
+        }
+
+        for (final entry in bySender.entries) {
+          final peerMessages = entry.value;
+          if (peerMessages.isEmpty) continue;
+          peerMessages.sort((a, b) => ((a['timestamp'] as num?)?.toInt() ?? 0).compareTo((b['timestamp'] as num?)?.toInt() ?? 0));
+          final lastMsg = peerMessages.last;
+
+          final senderHandle = (lastMsg['sender_handle'] as String?) ?? 'Peer';
+          final senderNexaId = (lastMsg['sender_nexa_id'] as String?) ?? 'NX-${senderHandle.toUpperCase()}';
+          final text = (lastMsg['text'] as String?) ?? 'Encrypted Memo';
+          final ts = (lastMsg['timestamp'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch;
+          final timeStr = _formatTimestamp(ts);
+          final convId = lastMsg['conversation_id'] as String?;
+
+          final canonicalKey = ChatService.getCanonicalKey(senderNexaId.isNotEmpty ? senderNexaId : senderHandle);
+          final readTs1 = await ChatService.instance.getReadTimestamp(canonicalKey);
+          final readTs2 = await ChatService.instance.getReadTimestamp(ChatService.getCanonicalKey(senderHandle));
+          final lastReadTs = readTs1 > readTs2 ? readTs1 : readTs2;
+
+          final unreadCount = peerMessages.where((m) {
+            final mTs = (m['timestamp'] as num?)?.toInt() ?? 0;
+            return mTs > lastReadTs;
+          }).length;
+
+          final cleanSenderHandle = senderHandle.replaceAll('@', '');
+          final idx = _chats.indexWhere((c) {
+            final cId = (c['conversationId'] as String?) ?? '';
+            if (convId != null && convId.isNotEmpty && cId.isNotEmpty && cId == convId) return true;
+            final n = ((c['name'] as String?) ?? '').toLowerCase().replaceAll('@', '');
+            final id = ((c['nexaId'] as String?) ?? '').toLowerCase();
+            return (cleanSenderHandle.isNotEmpty && n == cleanSenderHandle.toLowerCase()) ||
+                (senderNexaId.isNotEmpty && id == senderNexaId.toLowerCase());
+          });
+
+          if (idx >= 0) {
+            final existing = _chats[idx];
+            final currentMsg = existing['message'];
+            final currentUnread = existing['unread'];
+            final currentTs = (existing['timestamp'] as num?)?.toInt() ?? 0;
+
+            if (currentMsg != text || currentUnread != unreadCount || ts > currentTs) {
+              existing['message'] = text;
+              existing['time'] = timeStr;
+              existing['unread'] = unreadCount;
+              if (ts > currentTs) existing['timestamp'] = ts;
+              if (convId != null && convId.isNotEmpty) existing['conversationId'] = convId;
+              changed = true;
+            }
+          } else {
+            _chats.add({
+              'conversationId': convId,
+              'name': '@$cleanSenderHandle',
+              'nexaId': senderNexaId,
+              'message': text,
+              'time': timeStr,
+              'timestamp': ts,
+              'unread': unreadCount,
+            });
+            changed = true;
+          }
+        }
+      }
+
+      // Sort chats strictly by timestamp descending
+      _chats.sort((a, b) => ((b['timestamp'] as num?)?.toInt() ?? 0).compareTo((a['timestamp'] as num?)?.toInt() ?? 0));
+
       if (changed && mounted) {
         setState(() {});
         ChatService.instance.saveRecentChats(_chats);
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[_syncInbox error] $e');
+    } finally {
+      _isSyncingInbox = false;
+    }
   }
 
   /// Load device contacts and online user directory
@@ -273,11 +369,12 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
     }
 
     final idx = _chats.indexWhere((c) {
-      final n = (c['name'] as String).toLowerCase();
-      final id = (c['nexaId'] as String).toLowerCase();
-      return n == contactName.toLowerCase() ||
-          n == '@${contactName.replaceAll('@', '').toLowerCase()}' ||
-          id == nexaId.toLowerCase();
+      final n = ((c['name'] as String?) ?? '').toLowerCase().replaceAll('@', '');
+      final id = ((c['nexaId'] as String?) ?? '').toLowerCase();
+      final targetN = contactName.toLowerCase().replaceAll('@', '');
+      final targetId = nexaId.toLowerCase();
+      return (targetN.isNotEmpty && n == targetN) ||
+          (targetId.isNotEmpty && id == targetId);
     });
     if (idx >= 0 && mounted) {
       setState(() {
@@ -300,11 +397,26 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
 
     if (mounted) {
       final updated = await ChatService.instance.loadRecentChats();
-      if (mounted) {
-        setState(() {
-          _chats.clear();
-          _chats.addAll(updated);
-        });
+      if (mounted && updated.isNotEmpty) {
+        for (final u in updated) {
+          final uName = ((u['name'] as String?) ?? '').toLowerCase().replaceAll('@', '');
+          final uId = ((u['nexaId'] as String?) ?? '').toLowerCase();
+          final cIdx = _chats.indexWhere((c) {
+            final n = ((c['name'] as String?) ?? '').toLowerCase().replaceAll('@', '');
+            final id = ((c['nexaId'] as String?) ?? '').toLowerCase();
+            return (uName.isNotEmpty && n == uName) || (uId.isNotEmpty && id == uId);
+          });
+          if (cIdx >= 0) {
+            _chats[cIdx]['message'] = u['message'] ?? _chats[cIdx]['message'];
+            _chats[cIdx]['time'] = u['time'] ?? _chats[cIdx]['time'];
+            _chats[cIdx]['unread'] = u['unread'] ?? _chats[cIdx]['unread'];
+            _chats[cIdx]['timestamp'] = u['timestamp'] ?? _chats[cIdx]['timestamp'];
+          } else {
+            _chats.add(Map<String, dynamic>.from(u));
+          }
+        }
+        _chats.sort((a, b) => ((b['timestamp'] as num?)?.toInt() ?? 0).compareTo((a['timestamp'] as num?)?.toInt() ?? 0));
+        setState(() {});
       }
       _syncInbox();
     }
@@ -464,8 +576,8 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
     final filtered = _chats.where((c) {
       if (_chatSearchQuery.isEmpty) return true;
       final q = _chatSearchQuery.toLowerCase();
-      final n = (c['name'] as String).toLowerCase();
-      final m = (c['message'] as String).toLowerCase();
+      final n = ((c['name'] as String?) ?? '').toLowerCase();
+      final m = ((c['message'] as String?) ?? '').toLowerCase();
       final id = ((c['nexaId'] as String?) ?? '').toLowerCase();
       final qAlpha = q.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '');
       final idAlpha = id.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '');

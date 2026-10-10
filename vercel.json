@@ -12,6 +12,14 @@
   ],
   "routes": [
     {
+      "src": "/admin/admin-ui\\.css",
+      "dest": "public/admin/admin-ui.css"
+    },
+    {
+      "src": "/admin/admin-enhancements\\.js",
+      "dest": "public/admin/admin-enhancements.js"
+    },
+    {
       "src": "/admin",
       "dest": "public/admin/index.html"
     },

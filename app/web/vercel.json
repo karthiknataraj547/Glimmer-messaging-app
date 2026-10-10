@@ -1,6 +1,14 @@
 {
   "rewrites": [
     {
+      "source": "/admin/admin-ui.css",
+      "destination": "/admin-ui.css"
+    },
+    {
+      "source": "/admin/admin-enhancements.js",
+      "destination": "/admin-enhancements.js"
+    },
+    {
       "source": "/admin",
       "destination": "/admin/index.html"
     },

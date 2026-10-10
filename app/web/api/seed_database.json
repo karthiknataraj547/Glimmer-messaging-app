@@ -820,13 +820,13 @@
     }
   ],
   "app_version": {
-    "latest_version": "1.2.6",
-    "build_number": 10,
-    "release_date": "2026-10-09",
-    "release_notes": "Instant peer message reception after NEXA ID search, cloud message sync across serverless instances, and alphanumeric ID query resilience.",
+    "latest_version": "1.2.8",
+    "build_number": 12,
+    "release_date": "2026-10-10",
+    "release_notes": "Fix conversation flickering and disappearance in chats tab, seamless multi-channel sync for peer identity search and real-time messaging delivery.",
     "download_url": "https://glimmer-messaging-app-web.vercel.app/nexa-release.apk",
     "web_url": "https://glimmer-messaging-app-web.vercel.app/",
     "mandatory": false,
-    "published_at": 1791538999999
+    "published_at": 1791599955198
   }
 }
