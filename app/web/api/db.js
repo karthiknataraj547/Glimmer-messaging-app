@@ -27,10 +27,10 @@ let dbState = {
   user_locations: {},
   calls: {},
   app_version: {
-    latest_version: '1.2.8',
-    build_number: 12,
+    latest_version: '1.2.9',
+    build_number: 13,
     release_date: '2026-10-10',
-    release_notes: 'Fix conversation flickering and disappearance in chats tab, seamless multi-channel sync for peer identity search and real-time messaging delivery.',
+    release_notes: 'Release v1.2.9: Resilient multi-CDN APK update downloader with streaming failover, Android package installer permissions, real-time background chat synchronization, and zero-flicker conversation list.',
     download_url: 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk',
     web_url: 'https://glimmer-messaging-app-web.vercel.app/',
     mandatory: false,
@@ -1269,10 +1269,10 @@ const Database = {
   getAppVersion() {
     loadFromDisk();
     return dbState.app_version || {
-      latest_version: '1.2.7',
-      build_number: 11,
-      release_date: '2026-10-09',
-      release_notes: 'Production Bug-Fix Release: Canonical direct conversation deduplication, cursor pagination & flicker-free chat states, idempotent message delivery, real object storage media uploads, interactive location sharing, push token registry, and WebRTC audio/video call signaling relay.',
+      latest_version: '1.2.9',
+      build_number: 13,
+      release_date: '2026-10-10',
+      release_notes: 'Release v1.2.9: Resilient multi-CDN APK update downloader with streaming failover, Android package installer permissions, real-time background chat synchronization, and zero-flicker conversation list.',
       download_url: 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk',
       web_url: 'https://glimmer-messaging-app-web.vercel.app/',
       mandatory: false,
@@ -1283,10 +1283,10 @@ const Database = {
   setAppVersion(info) {
     loadFromDisk();
     dbState.app_version = {
-      latest_version: info.latest_version || '1.2.7',
-      build_number: Number(info.build_number) || 11,
+      latest_version: info.latest_version || '1.2.9',
+      build_number: Number(info.build_number) || 13,
       release_date: info.release_date || new Date().toISOString().split('T')[0],
-      release_notes: info.release_notes || 'Production Bug-Fix Release: Canonical direct conversation deduplication, cursor pagination & flicker-free chat states, idempotent message delivery, real object storage media uploads, interactive location sharing, push token registry, and WebRTC audio/video call signaling relay.',
+      release_notes: info.release_notes || 'Release v1.2.9: Resilient multi-CDN APK update downloader with streaming failover, Android package installer permissions, real-time background chat synchronization, and zero-flicker conversation list.',
       download_url: info.download_url || 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk',
       web_url: info.web_url || 'https://glimmer-messaging-app-web.vercel.app/',
       mandatory: Boolean(info.mandatory),

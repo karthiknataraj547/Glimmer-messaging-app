@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -64,16 +65,18 @@ class UpdateInfo {
 /// Features:
 /// 1. Query server release metadata on `/v1/app/check-update`.
 /// 2. Stream-download release APK directly inside the app with real-time byte counters and progress.
-/// 3. Invoke native Android PackageInstaller (`REQUEST_INSTALL_PACKAGES` + `FileProvider`).
-/// 4. Direct integration with dedicated `AppUpdateCenterScreen`.
-/// 5. Cross-platform support for Web cache-busting reload.
+/// 3. Multi-source CDN failover and auto-retries.
+/// 4. Invoke native Android PackageInstaller (`REQUEST_INSTALL_PACKAGES` + `FileProvider`).
+/// 5. Direct integration with dedicated `AppUpdateCenterScreen`.
+/// 6. Cross-platform support for Web cache-busting reload.
 class UpdateEngine {
   static final UpdateEngine instance = UpdateEngine._internal();
   UpdateEngine._internal();
 
-  static const String currentVersion = '1.2.8';
-  static const int currentBuildNumber = 12;
+  static const String currentVersion = '1.2.9';
+  static const int currentBuildNumber = 13;
   static const String defaultDownloadUrl = 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk';
+  static const String fallbackDownloadUrl = 'https://raw.githubusercontent.com/karthiknataraj547/Glimmer-messaging-app/master/public/nexa-release.apk';
   static const MethodChannel _channel = MethodChannel('com.nexa.media_picker');
 
   bool _isChecking = false;
@@ -106,7 +109,7 @@ class UpdateEngine {
     );
   }
 
-  /// Queries the server update manifest
+  /// Queries the server update manifest with multi-source fallback
   Future<UpdateInfo?> queryServerUpdate() async {
     try {
       final baseUrl = await AuthService.instance.getBaseUrl();
@@ -118,8 +121,40 @@ class UpdateEngine {
         return _lastUpdateInfo;
       }
     } catch (e) {
-      debugPrint('[UpdateEngine] queryServerUpdate error: $e');
+      debugPrint('[UpdateEngine] queryServerUpdate primary error: $e');
     }
+
+    // Direct fallback to Vercel production API
+    try {
+      final fallbackUri = Uri.parse('https://glimmer-messaging-app-web.vercel.app/v1/app/check-update');
+      final resp = await http.get(fallbackUri).timeout(const Duration(seconds: 5));
+      if (resp.statusCode == 200) {
+        final data = json.decode(resp.body) as Map<String, dynamic>;
+        if (data['success'] == true) {
+          _lastUpdateInfo = UpdateInfo.fromJson(data, currentBuildNumber, currentVersion);
+          return _lastUpdateInfo;
+        }
+      }
+    } catch (e) {
+      debugPrint('[UpdateEngine] queryServerUpdate direct fallback error: $e');
+    }
+
+    // Fallback to cloud bin
+    try {
+      final binUri = Uri.parse('https://extendsclass.com/api/json-storage/bin/eafefcc');
+      final resp = await http.get(binUri).timeout(const Duration(seconds: 5));
+      if (resp.statusCode == 200) {
+        final data = json.decode(resp.body) as Map<String, dynamic>;
+        if (data['app_version'] != null) {
+          final ver = data['app_version'] as Map<String, dynamic>;
+          _lastUpdateInfo = UpdateInfo.fromJson(ver, currentBuildNumber, currentVersion);
+          return _lastUpdateInfo;
+        }
+      }
+    } catch (e) {
+      debugPrint('[UpdateEngine] queryServerUpdate cloud bin error: $e');
+    }
+
     return null;
   }
 
@@ -146,7 +181,7 @@ class UpdateEngine {
     }
   }
 
-  /// In-App streaming downloader with real-time bytes progress callback
+  /// In-App streaming downloader with real-time bytes progress callback & multi-CDN failover
   Future<String> downloadApkWithProgress({
     required String url,
     required void Function(int receivedBytes, int totalBytes, String speed) onProgress,
@@ -168,70 +203,125 @@ class UpdateEngine {
       cacheDirPath = Directory.systemTemp.path;
     }
 
-    final targetFile = File('$cacheDirPath/nexa_update_v1_2_0.apk');
-    if (targetFile.existsSync()) {
-      try {
-        targetFile.deleteSync();
-      } catch (_) {}
-    }
-
-    // 2. Open HTTP stream
-    final client = http.Client();
-    final request = http.Request('GET', Uri.parse(url));
-    final response = await client.send(request);
-
-    if (response.statusCode != 200) {
-      client.close();
-      throw Exception('Server returned HTTP ${response.statusCode} for APK download.');
-    }
-
-    final totalBytes = response.contentLength ?? 0;
-    int receivedBytes = 0;
-    final sink = targetFile.openWrite();
-
-    final stopwatch = Stopwatch()..start();
-    int lastCheckTime = stopwatch.elapsedMilliseconds;
-    int lastBytes = 0;
-    String speedStr = 'Calculating...';
-
-    final completer = Completer<String>();
-
-    response.stream.listen(
-      (chunk) {
-        receivedBytes += chunk.length;
-        sink.add(chunk);
-
-        final now = stopwatch.elapsedMilliseconds;
-        if (now - lastCheckTime > 500) {
-          final diffBytes = receivedBytes - lastBytes;
-          final diffSec = (now - lastCheckTime) / 1000.0;
-          if (diffSec > 0) {
-            final bytesPerSec = diffBytes / diffSec;
-            final mbPerSec = (bytesPerSec / 1024 / 1024).toStringAsFixed(1);
-            speedStr = '$mbPerSec MB/s';
+    // Clean up older temporary update files to free device space
+    try {
+      final cacheDir = Directory(cacheDirPath);
+      if (cacheDir.existsSync()) {
+        for (final entity in cacheDir.listSync()) {
+          if (entity is File && (entity.path.contains('nexa_update') || entity.path.endsWith('.apk'))) {
+            try { entity.deleteSync(); } catch (_) {}
           }
-          lastCheckTime = now;
-          lastBytes = receivedBytes;
-          onProgress(receivedBytes, totalBytes, speedStr);
         }
-      },
-      onDone: () async {
-        await sink.flush();
-        await sink.close();
-        client.close();
-        stopwatch.stop();
-        onProgress(receivedBytes, totalBytes, 'Completed');
-        completer.complete(targetFile.path);
-      },
-      onError: (err) async {
-        await sink.close();
-        client.close();
-        completer.completeError(err);
-      },
-      cancelOnError: true,
-    );
+      }
+    } catch (_) {}
 
-    return completer.future;
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final targetFile = File('$cacheDirPath/nexa_update_v${currentBuildNumber}_$timestamp.apk');
+
+    // Ordered list of candidate download endpoints
+    final candidateUrls = <String>[];
+    if (url.trim().isNotEmpty) candidateUrls.add(url.trim());
+    if (!candidateUrls.contains(defaultDownloadUrl)) candidateUrls.add(defaultDownloadUrl);
+    if (!candidateUrls.contains(fallbackDownloadUrl)) candidateUrls.add(fallbackDownloadUrl);
+
+    Exception? lastException;
+
+    for (final candidateUrl in candidateUrls) {
+      http.Client? client;
+      IOSink? sink;
+      try {
+        debugPrint('[UpdateEngine] Attempting streaming download from: $candidateUrl');
+        onProgress(0, 0, 'Connecting...');
+
+        final uri = Uri.parse(candidateUrl).replace(queryParameters: {
+          't': '$timestamp',
+        });
+
+        client = http.Client();
+        final request = http.Request('GET', uri);
+        request.headers['User-Agent'] = 'NEXA-Updater/1.2.9';
+        request.headers['Accept-Encoding'] = 'identity';
+        request.headers['Cache-Control'] = 'no-cache';
+
+        final response = await client.send(request).timeout(const Duration(seconds: 20));
+
+        if (response.statusCode != 200 && response.statusCode != 206) {
+          throw Exception('HTTP ${response.statusCode} from $candidateUrl');
+        }
+
+        final totalBytes = response.contentLength ?? 0;
+        int receivedBytes = 0;
+
+        if (targetFile.existsSync()) {
+          try { targetFile.deleteSync(); } catch (_) {}
+        }
+        sink = targetFile.openWrite();
+
+        final stopwatch = Stopwatch()..start();
+        int lastCheckTime = stopwatch.elapsedMilliseconds;
+        int lastBytes = 0;
+        String speedStr = 'Connecting...';
+
+        final completer = Completer<String>();
+
+        response.stream.listen(
+          (chunk) {
+            receivedBytes += chunk.length;
+            sink?.add(chunk);
+
+            final now = stopwatch.elapsedMilliseconds;
+            if (now - lastCheckTime >= 400) {
+              final diffBytes = receivedBytes - lastBytes;
+              final diffSec = (now - lastCheckTime) / 1000.0;
+              if (diffSec > 0) {
+                final bytesPerSec = diffBytes / diffSec;
+                final mbPerSec = (bytesPerSec / 1024 / 1024).toStringAsFixed(1);
+                speedStr = '$mbPerSec MB/s';
+              }
+              lastCheckTime = now;
+              lastBytes = receivedBytes;
+              onProgress(receivedBytes, totalBytes, speedStr);
+            }
+          },
+          onDone: () async {
+            try {
+              await sink?.flush();
+              await sink?.close();
+            } catch (_) {}
+            client?.close();
+            stopwatch.stop();
+
+            // Sanity check file size (must be at least 1MB for a real APK)
+            if (targetFile.existsSync() && targetFile.lengthSync() > 1000000) {
+              onProgress(receivedBytes, totalBytes, 'Completed');
+              completer.complete(targetFile.path);
+            } else {
+              completer.completeError(Exception('Downloaded file is incomplete or corrupted (${targetFile.existsSync() ? targetFile.lengthSync() : 0} bytes).'));
+            }
+          },
+          onError: (err) async {
+            try { await sink?.close(); } catch (_) {}
+            client?.close();
+            completer.completeError(err);
+          },
+          cancelOnError: true,
+        );
+
+        final resultPath = await completer.future;
+        return resultPath;
+      } catch (e) {
+        debugPrint('[UpdateEngine] Download attempt failed on $candidateUrl: $e');
+        lastException = Exception('Failed from $candidateUrl: $e');
+        try { await sink?.close(); } catch (_) {}
+        client?.close();
+        if (targetFile.existsSync()) {
+          try { targetFile.deleteSync(); } catch (_) {}
+        }
+        // Try next candidate endpoint
+      }
+    }
+
+    throw lastException ?? Exception('All download sources failed.');
   }
 
   /// Triggers native Android package installer via FileProvider
@@ -245,6 +335,25 @@ class UpdateEngine {
       await openUrlInBrowser(defaultDownloadUrl);
       return false;
     }
+  }
+
+  /// Checks if Android allows installing unknown apps
+  Future<bool> canRequestPackageInstalls() async {
+    if (kIsWeb) return true;
+    try {
+      final res = await _channel.invokeMethod<bool>('canRequestPackageInstalls');
+      return res ?? true;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  /// Opens Android system settings to grant unknown app installation
+  Future<void> openInstallPermissionSettings() async {
+    if (kIsWeb) return;
+    try {
+      await _channel.invokeMethod('openInstallPermissionSettings');
+    } catch (_) {}
   }
 
   /// Opens URL via native browser intent

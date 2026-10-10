@@ -126,6 +126,18 @@ class MainActivity : FlutterActivity() {
                             result.error("FILE_NOT_FOUND", "APK file does not exist at $filePath", null)
                             return@setMethodCallHandler
                         }
+
+                        // On Android 8.0+ (Oreo), verify package install permission
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            if (!packageManager.canRequestPackageInstalls()) {
+                                val manageIntent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+                                    data = Uri.parse("package:$packageName")
+                                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                }
+                                startActivity(manageIntent)
+                            }
+                        }
+
                         val apkUri = androidx.core.content.FileProvider.getUriForFile(
                             applicationContext,
                             "${applicationContext.packageName}.fileprovider",
@@ -133,12 +145,40 @@ class MainActivity : FlutterActivity() {
                         )
                         val installIntent = Intent(Intent.ACTION_VIEW).apply {
                             setDataAndType(apkUri, "application/vnd.android.package-archive")
-                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                         }
                         startActivity(installIntent)
                         result.success(true)
                     } catch (e: Exception) {
                         result.error("INSTALL_ERROR", e.message, null)
+                    }
+                }
+                "canRequestPackageInstalls" -> {
+                    try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            result.success(packageManager.canRequestPackageInstalls())
+                        } else {
+                            result.success(true)
+                        }
+                    } catch (e: Exception) {
+                        result.success(true)
+                    }
+                }
+                "openInstallPermissionSettings" -> {
+                    try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            val manageIntent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+                                data = Uri.parse("package:$packageName")
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                            }
+                            startActivity(manageIntent)
+                            result.success(true)
+                        } else {
+                            result.success(true)
+                        }
+                    } catch (e: Exception) {
+                        result.error("ERROR", e.message, null)
                     }
                 }
                 "getCurrentLocation" -> {
