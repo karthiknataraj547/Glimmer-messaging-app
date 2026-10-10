@@ -41,6 +41,58 @@ class NexaColors {
   static const Color textPrimaryLight = textPrimary;
   static const Color textSecondaryLight = textSecondary;
   static const Color textMutedLight = textMuted;
+
+  // ==========================================================================
+  // MAXIMALIST CYBERPUNK TOKENS & GRADIENTS
+  // ==========================================================================
+  static const Color neonCyan = Color(0xFF00E5FF);
+  static const Color neonEmerald = Color(0xFF10B981);
+  static const Color neonViolet = Color(0xFF8B5CF6);
+  static const Color neonPink = Color(0xFFF43F5E);
+  static const Color neonAmber = Color(0xFFF59E0B);
+  static const Color cyberCardBg = Color(0xFF111726);
+
+  static const LinearGradient cyberGradient = LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [Color(0xFF00E5FF), Color(0xFF10B981)],
+  );
+
+  static const LinearGradient hologramGradient = LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [Color(0xFF8B5CF6), Color(0xFF00E5FF)],
+  );
+
+  static const LinearGradient plasmaGradient = LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [Color(0xFFF43F5E), Color(0xFF8B5CF6)],
+  );
+
+  static const LinearGradient bubbleOutgoingGradient = LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [Color(0xFF0284C7), Color(0xFF00E5FF), Color(0xFF10B981)],
+  );
+
+  static const LinearGradient cyberCardGradient = LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [Color(0xFF141C2E), Color(0xFF0D1220)],
+  );
+
+  static List<BoxShadow> get glowCyan => [
+    BoxShadow(color: const Color(0xFF00E5FF).withValues(alpha: 0.35), blurRadius: 14, spreadRadius: 0),
+  ];
+
+  static List<BoxShadow> get glowEmerald => [
+    BoxShadow(color: const Color(0xFF10B981).withValues(alpha: 0.35), blurRadius: 14, spreadRadius: 0),
+  ];
+
+  static List<BoxShadow> get glowViolet => [
+    BoxShadow(color: const Color(0xFF8B5CF6).withValues(alpha: 0.35), blurRadius: 14, spreadRadius: 0),
+  ];
 }
 
 class NexaTheme {

@@ -90,39 +90,67 @@ const activeUserSockets = new Map(); // canonical_user_id -> Set<WebSocket>
 
 function registerUserSocket(userIdent, ws) {
   if (!userIdent || !ws) return;
+  const rawClean = (typeof userIdent === 'string' ? userIdent.trim().replace(/^@+/, '') : '').toLowerCase();
   const cUser = (Database.resolveCanonicalUserId ? Database.resolveCanonicalUserId(userIdent) : userIdent).toLowerCase();
-  if (!cUser) return;
-  if (!activeUserSockets.has(cUser)) {
-    activeUserSockets.set(cUser, new Set());
-  }
-  activeUserSockets.get(cUser).add(ws);
+  const aliases = Database.getUserAliases ? Database.getUserAliases(userIdent) : new Set();
+  if (rawClean) aliases.add(rawClean);
+  if (cUser) aliases.add(cUser);
+
   if (!ws._userSet) ws._userSet = new Set();
-  ws._userSet.add(cUser);
+  for (const alias of aliases) {
+    const k = (alias || '').toLowerCase();
+    if (!k) continue;
+    if (!activeUserSockets.has(k)) {
+      activeUserSockets.set(k, new Set());
+    }
+    activeUserSockets.get(k).add(ws);
+    ws._userSet.add(k);
+  }
 }
 
 function unregisterUserSocket(userIdent, ws) {
   if (!userIdent) return;
+  const rawClean = (typeof userIdent === 'string' ? userIdent.trim().replace(/^@+/, '') : '').toLowerCase();
   const cUser = (Database.resolveCanonicalUserId ? Database.resolveCanonicalUserId(userIdent) : userIdent).toLowerCase();
-  if (activeUserSockets.has(cUser)) {
-    activeUserSockets.get(cUser).delete(ws);
-    if (activeUserSockets.get(cUser).size === 0) {
-      activeUserSockets.delete(cUser);
+  const aliases = Database.getUserAliases ? Database.getUserAliases(userIdent) : new Set();
+  if (rawClean) aliases.add(rawClean);
+  if (cUser) aliases.add(cUser);
+
+  for (const alias of aliases) {
+    const k = (alias || '').toLowerCase();
+    if (!k) continue;
+    if (activeUserSockets.has(k)) {
+      activeUserSockets.get(k).delete(ws);
+      if (activeUserSockets.get(k).size === 0) {
+        activeUserSockets.delete(k);
+      }
     }
   }
 }
 
 function sendToUser(userIdent, payload) {
   if (!userIdent) return 0;
+  const rawClean = (typeof userIdent === 'string' ? userIdent.trim().replace(/^@+/, '') : '').toLowerCase();
   const cUser = (Database.resolveCanonicalUserId ? Database.resolveCanonicalUserId(userIdent) : userIdent).toLowerCase();
-  const sockets = activeUserSockets.get(cUser);
+  const aliases = Database.getUserAliases ? Database.getUserAliases(userIdent) : new Set();
+  if (rawClean) aliases.add(rawClean);
+  if (cUser) aliases.add(cUser);
+
   let sent = 0;
-  if (sockets) {
-    for (const ws of sockets) {
-      if (ws.readyState === 1) {
-        try {
-          ws.send(JSON.stringify(payload));
-          sent++;
-        } catch (_) {}
+  const sentSockets = new Set();
+  for (const alias of aliases) {
+    const k = (alias || '').toLowerCase();
+    if (!k) continue;
+    const sockets = activeUserSockets.get(k);
+    if (sockets) {
+      for (const ws of sockets) {
+        if (ws.readyState === 1 && !sentSockets.has(ws)) {
+          sentSockets.add(ws);
+          try {
+            ws.send(JSON.stringify(payload));
+            sent++;
+          } catch (_) {}
+        }
       }
     }
   }
@@ -1411,9 +1439,12 @@ wss.on('connection', (ws, req) => {
       if (msg.action === 'BIND_DEVICE') {
         connectedDeviceId = msg.device_id;
         activeConnections.set(connectedDeviceId, ws);
-        if (msg.user || msg.user_id || msg.handle || msg.nexa_id) {
-          registerUserSocket(msg.user || msg.user_id || msg.handle || msg.nexa_id, ws);
+        const ident = msg.user || msg.user_id || msg.handle || msg.nexa_id;
+        if (ident) {
+          registerUserSocket(ident, ws);
         }
+        if (msg.nexa_id) registerUserSocket(msg.nexa_id, ws);
+        if (msg.handle) registerUserSocket(msg.handle, ws);
         ws.send(JSON.stringify({ event: 'BOUND', device_id: connectedDeviceId }));
 
         // Flush any pending mailbox envelopes

@@ -37,9 +37,9 @@ let dbState = {
   calls: {},
   app_version: {
     latest_version: '1.3.0',
-    build_number: 14,
+    build_number: 16,
     release_date: '2026-10-10',
-    release_notes: 'Release v1.3.0: High-performance local-first messaging architecture, instant cached chat opening (<100ms) with zero white screen, message delivery lifecycle states (pending, sending, sent, delivered, read, retry), and non-blocking background synchronization.',
+    release_notes: 'Release v1.3.0+16: Maximalist Cyberpunk mobile design with glowing neon holographic chips, cyberpunk message bubbles, and real-time first conversation delivery pipeline fixes for instant 0ms chat rendering.',
     download_url: 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk',
     web_url: 'https://glimmer-messaging-app-web.vercel.app/',
     mandatory: false,

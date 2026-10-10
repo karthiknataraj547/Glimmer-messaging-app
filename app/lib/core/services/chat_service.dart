@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
@@ -12,10 +13,125 @@ class ChatService {
 
   static const MethodChannel _channel = MethodChannel('com.nexa.media_picker');
 
+  // Broadcast stream for real-time incoming messages
+  final StreamController<Map<String, dynamic>> _incomingMessageStream = StreamController<Map<String, dynamic>>.broadcast();
+  Stream<Map<String, dynamic>> get onMessageReceived => _incomingMessageStream.stream;
+
   // In-memory message cache for instant 0ms UI render
   final Map<String, List<Map<String, dynamic>>> _memoryThreadCache = {};
   List<Map<String, dynamic>>? _cachedRecentChats;
   final Map<String, int> _memoryReadState = {};
+
+  /// Formats seconds to mm:ss
+  static String formatDuration(int seconds) {
+    final mins = seconds ~/ 60;
+    final secs = seconds % 60;
+    return '$mins:${secs.toString().padLeft(2, '0')}';
+  }
+
+  /// Converts a raw backend/socket message dictionary to a UI-ready message item
+  static Map<String, dynamic> formatMessageForUi(Map<String, dynamic> m) {
+    final myHandle = UserSession.instance.handle.replaceAll('@', '').toLowerCase();
+    final myNexaId = UserSession.instance.nexaId.toLowerCase();
+    final senderHandle = ((m['sender_handle'] ?? '').toString()).toLowerCase().replaceAll('@', '');
+    final senderNexaId = ((m['sender_nexa_id'] ?? '').toString()).toLowerCase();
+    final isMe = senderHandle == myHandle || (myNexaId.isNotEmpty && (senderHandle == myNexaId || senderNexaId == myNexaId));
+    final ts = (m['timestamp'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch;
+    final dt = DateTime.fromMillisecondsSinceEpoch(ts);
+    final timeStr = '${dt.hour > 12 ? dt.hour - 12 : (dt.hour == 0 ? 12 : dt.hour)}:${dt.minute.toString().padLeft(2, '0')} ${dt.hour >= 12 ? 'PM' : 'AM'}';
+    final msgId = (m['id'] ?? 'm_${ts}_${DateTime.now().microsecond}').toString();
+    final text = (m['text'] ?? '').toString();
+
+    final attId = (m['attachment_id'] ?? m['attachmentId'])?.toString();
+    final attUrl = (m['attachment_url'] ?? m['attachmentUrl'])?.toString();
+    final attType = (m['attachment_type'] ?? m['attachmentType'] ?? m['type'])?.toString();
+    final attName = (m['attachment_name'] ?? m['attachmentName'])?.toString();
+    final locData = m['location_data'] is Map
+        ? Map<String, dynamic>.from(m['location_data'] as Map)
+        : (m['extra'] is Map ? Map<String, dynamic>.from(m['extra'] as Map) : null);
+
+    String deliveryStatus = 'sent';
+    if (m['read'] == true || m['status'] == 'read') {
+      deliveryStatus = 'read';
+    } else if (m['delivered'] == true || m['status'] == 'delivered') {
+      deliveryStatus = 'delivered';
+    }
+
+    return {
+      'id': msgId,
+      'isMe': isMe,
+      'text': text,
+      'time': timeStr,
+      'timestamp': ts,
+      'status': deliveryStatus,
+      'isAudio': m['type'] == 'voice',
+      'attachmentId': attId,
+      'attachmentUrl': attUrl,
+      'attachmentName': attName,
+      'attachmentType': attType != null && attType != 'text' ? attType : null,
+      'extra': locData ?? m['extra'],
+      'audioDuration': m['audio_duration'] != null && (m['audio_duration'] as num) > 0
+          ? formatDuration((m['audio_duration'] as num).toInt())
+          : null,
+      'hasAction': false,
+      'actionAdded': false,
+      'actionDismissed': false,
+      'reactions': <String>[],
+    };
+  }
+
+  /// Processes live WebSocket incoming message, persists it locally, and broadcasts to listeners
+  void handleRealtimeIncomingMessage(Map<String, dynamic> rawMsg) {
+    try {
+      final uiMsg = formatMessageForUi(rawMsg);
+      final convId = rawMsg['conversation_id']?.toString();
+      final senderNexaId = (rawMsg['sender_nexa_id'] ?? '').toString();
+      final senderHandle = (rawMsg['sender_handle'] ?? '').toString();
+
+      final current = getCachedMessagesFast(
+        conversationId: convId,
+        peerNexaId: senderNexaId,
+        peerHandle: senderHandle,
+      );
+      final list = List<Map<String, dynamic>>.from(current);
+      final msgId = uiMsg['id']?.toString() ?? '';
+      final existingIdx = list.indexWhere((m) => m['id'] == msgId);
+      if (existingIdx >= 0) {
+        list[existingIdx] = uiMsg;
+      } else {
+        list.add(uiMsg);
+      }
+      list.sort((a, b) => ((a['timestamp'] as num?)?.toInt() ?? 0).compareTo((b['timestamp'] as num?)?.toInt() ?? 0));
+
+      saveLocalMessagesMulti(
+        conversationId: convId,
+        peerNexaId: senderNexaId,
+        peerHandle: senderHandle,
+        messages: list,
+      );
+
+      final isMe = uiMsg['isMe'] == true;
+      if (!isMe) {
+        updateRecentChat(
+          peerName: senderHandle.isNotEmpty ? '@$senderHandle' : senderNexaId,
+          peerNexaId: senderNexaId,
+          lastMessage: uiMsg['text']?.toString() ?? '',
+          timestamp: (uiMsg['timestamp'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch,
+          unread: 1,
+          conversationId: convId,
+        );
+      }
+
+      _incomingMessageStream.add({
+        'message': uiMsg,
+        'conversation_id': convId,
+        'sender_handle': senderHandle,
+        'sender_nexa_id': senderNexaId,
+      });
+    } catch (e) {
+      debugPrint('[ChatService] handleRealtimeIncomingMessage error: $e');
+    }
+  }
 
   /// Active backend base URL for resolving attachment downloads and media assets
   String get baseUrl => AuthService.instance.currentResolvedUrl ?? 'https://glimmer-messaging-app-web.vercel.app';

@@ -86,6 +86,7 @@ class _ChatScreenState extends State<ChatScreen> {
       : widget.contactName;
 
   bool _isBackgroundSyncing = false;
+  StreamSubscription? _realtimeMessageSub;
 
   @override
   void initState() {
@@ -125,11 +126,43 @@ class _ChatScreenState extends State<ChatScreen> {
     _pollingTimer = Timer.periodic(const Duration(milliseconds: 1500), (_) {
       if (mounted) _syncIncomingMessages();
     });
+
+    // 4. Instant WebSocket live incoming message listener
+    _realtimeMessageSub = ChatService.instance.onMessageReceived.listen((evt) {
+      if (!mounted) return;
+      final cId = evt['conversation_id']?.toString();
+      final sHandle = (evt['sender_handle'] ?? '').toString().toLowerCase().replaceAll('@', '');
+      final sNexaId = (evt['sender_nexa_id'] ?? '').toString().toLowerCase();
+      final targetHandle = widget.contactName.replaceAll('@', '').toLowerCase();
+      final targetNexaId = widget.nexaId.toLowerCase();
+
+      bool isForThisChat = false;
+      if (_activeConversationId != null && _activeConversationId!.isNotEmpty && cId == _activeConversationId) {
+        isForThisChat = true;
+      } else if ((targetHandle.isNotEmpty && sHandle == targetHandle) ||
+                 (targetNexaId.isNotEmpty && sNexaId == targetNexaId)) {
+        isForThisChat = true;
+      }
+
+      if (isForThisChat && evt['message'] is Map) {
+        final m = Map<String, dynamic>.from(evt['message'] as Map);
+        final msgId = (m['id'] ?? '').toString();
+        if (!_messages.any((x) => x['id'] == msgId)) {
+          setState(() {
+            _messages.add(m);
+            _messages.sort((a, b) => ((a['timestamp'] as num?)?.toInt() ?? 0).compareTo((b['timestamp'] as num?)?.toInt() ?? 0));
+            _chatState = ChatState.loaded;
+          });
+          _scrollToBottom();
+        }
+      }
+    });
   }
 
   @override
   void dispose() {
     _pollingTimer?.cancel();
+    _realtimeMessageSub?.cancel();
     _messageController.dispose();
     _scrollController.dispose();
     _recordingTimer?.cancel();
@@ -522,10 +555,24 @@ class _ChatScreenState extends State<ChatScreen> {
             if (serverMsg['id'] != null) {
               _messages[idx]['id'] = serverMsg['id'].toString();
             }
+            if (_activeConversationId == null || _activeConversationId!.isEmpty) {
+              final newConvId = serverMsg['conversation_id']?.toString();
+              if (newConvId != null && newConvId.isNotEmpty) {
+                _activeConversationId = newConvId;
+              }
+            }
           } else {
             _messages[idx]['status'] = 'failed';
           }
         });
+        ChatService.instance.updateRecentChat(
+          peerName: _displayName,
+          peerNexaId: widget.nexaId,
+          lastMessage: text,
+          timestamp: ts,
+          unread: 0,
+          conversationId: _activeConversationId,
+        );
         ChatService.instance.saveLocalMessagesMulti(
           conversationId: _activeConversationId,
           peerNexaId: widget.nexaId,
@@ -581,6 +628,12 @@ class _ChatScreenState extends State<ChatScreen> {
           msg['status'] = 'sent';
           if (serverMsg['id'] != null) {
             msg['id'] = serverMsg['id'].toString();
+          }
+          if (_activeConversationId == null || _activeConversationId!.isEmpty) {
+            final newConvId = serverMsg['conversation_id']?.toString();
+            if (newConvId != null && newConvId.isNotEmpty) {
+              _activeConversationId = newConvId;
+            }
           }
         } else {
           msg['status'] = 'failed';
@@ -919,10 +972,24 @@ class _ChatScreenState extends State<ChatScreen> {
             if (serverMsg['id'] != null) {
               _messages[idx]['id'] = serverMsg['id'].toString();
             }
+            if (_activeConversationId == null || _activeConversationId!.isEmpty) {
+              final newConvId = serverMsg['conversation_id']?.toString();
+              if (newConvId != null && newConvId.isNotEmpty) {
+                _activeConversationId = newConvId;
+              }
+            }
           } else {
             _messages[idx]['status'] = 'failed';
           }
         });
+        ChatService.instance.updateRecentChat(
+          peerName: _displayName,
+          peerNexaId: widget.nexaId,
+          lastMessage: 'Voice memo ($durationStr)',
+          timestamp: ts,
+          unread: 0,
+          conversationId: _activeConversationId,
+        );
         ChatService.instance.saveLocalMessagesMulti(
           conversationId: _activeConversationId,
           peerNexaId: widget.nexaId,
@@ -1584,10 +1651,24 @@ class _ChatScreenState extends State<ChatScreen> {
             if (serverMsg['id'] != null) {
               _messages[idx]['id'] = serverMsg['id'].toString();
             }
+            if (_activeConversationId == null || _activeConversationId!.isEmpty) {
+              final newConvId = serverMsg['conversation_id']?.toString();
+              if (newConvId != null && newConvId.isNotEmpty) {
+                _activeConversationId = newConvId;
+              }
+            }
           } else {
             _messages[idx]['status'] = 'failed';
           }
         });
+        ChatService.instance.updateRecentChat(
+          peerName: _displayName,
+          peerNexaId: widget.nexaId,
+          lastMessage: '$type: $title',
+          timestamp: ts,
+          unread: 0,
+          conversationId: _activeConversationId,
+        );
         ChatService.instance.saveLocalMessagesMulti(
           conversationId: _activeConversationId,
           peerNexaId: widget.nexaId,
@@ -2525,189 +2606,289 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF090D16),
-      appBar: AppBar(
-        titleSpacing: 0,
-        backgroundColor: const Color(0xFF090D16),
-        elevation: 0,
-        shape: const Border(bottom: BorderSide(color: Color(0x1AFFFFFF))),
-        title: InkWell(
-          onTap: () => _showPeerDetailsModal(context),
-          borderRadius: BorderRadius.circular(12),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
-            child: Row(
-              children: [
-                CircleAvatar(
-                  backgroundColor: const Color(0xFF00E5FF).withValues(alpha: 0.15),
-                  child: Text(
-                    _contactInitial,
-                    style: const TextStyle(color: Color(0xFF00E5FF), fontWeight: FontWeight.bold),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Flexible(
-                            child: Text(
-                              _displayName,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w700,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ),
-                          if (_isSafetyNumberVerified) ...[
-                            const SizedBox(width: 4),
-                            const Icon(Icons.verified, color: NexaColors.emeraldSecure, size: 14),
-                          ],
-                        ],
-                      ),
-                      Row(
-                        children: [
-                          const Icon(Icons.lock, color: NexaColors.emeraldSecure, size: 10),
-                          const SizedBox(width: 4),
-                          Text(
-                            widget.nexaId.trim().isNotEmpty ? widget.nexaId : 'E2E Encrypted',
-                            style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+      backgroundColor: const Color(0xFF070A12),
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(64),
+        child: Container(
+          decoration: BoxDecoration(
+            color: const Color(0xFF070A12),
+            border: const Border(
+              bottom: BorderSide(color: Color(0x3300E5FF), width: 1.2),
             ),
-          ),
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.phone_outlined, color: NexaColors.textSecondary),
-            tooltip: 'Encrypted Voice Call',
-            onPressed: () => CallService.instance.initiateCall(
-              context: context,
-              recipientHandle: widget.contactName,
-              recipientNexaId: widget.nexaId,
-              peerName: widget.contactName,
-              isVideo: false,
-            ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.videocam_outlined, color: NexaColors.textSecondary),
-            tooltip: 'Encrypted Video Call',
-            onPressed: () => CallService.instance.initiateCall(
-              context: context,
-              recipientHandle: widget.contactName,
-              recipientNexaId: widget.nexaId,
-              peerName: widget.contactName,
-              isVideo: true,
-            ),
-          ),
-          IconButton(
-            icon: Icon(
-              _isSafetyNumberVerified ? Icons.verified_user : Icons.shield_outlined,
-              color: NexaColors.emeraldSecure,
-              size: 20,
-            ),
-            tooltip: 'Safety Number',
-            onPressed: _showSafetyNumberModal,
-          ),
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert, color: NexaColors.textSecondary),
-            onSelected: (val) {
-              if (val == 'verify') {
-                _showSafetyNumberModal();
-              } else if (val == 'timer') {
-                _showDisappearingMessagesModal();
-              } else if (val == 'clear') {
-                setState(() => _messages.clear());
-                ChatService.instance.saveLocalMessages(_threadKey, _messages);
-                if (widget.contactName.isNotEmpty) {
-                  ChatService.instance.saveLocalMessages(widget.contactName, _messages);
-                }
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Chat messages cleared locally')),
-                );
-              } else if (val == 'export') {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Exporting zero-knowledge encrypted backup...')),
-                );
-              }
-            },
-            itemBuilder: (ctx) => [
-              const PopupMenuItem(
-                value: 'verify',
-                child: Row(
-                  children: [
-                    Icon(Icons.shield_outlined, size: 18, color: NexaColors.emeraldSecure),
-                    SizedBox(width: 10),
-                    Text('Verify Safety Number'),
-                  ],
-                ),
-              ),
-              PopupMenuItem(
-                value: 'timer',
-                child: Row(
-                  children: [
-                    const Icon(Icons.timer_outlined, size: 18),
-                    const SizedBox(width: 10),
-                    Text('Disappearing: $_disappearingTimer'),
-                  ],
-                ),
-              ),
-              const PopupMenuItem(
-                value: 'export',
-                child: Row(
-                  children: [
-                    Icon(Icons.download_outlined, size: 18),
-                    SizedBox(width: 10),
-                    Text('Export Encrypted Backup'),
-                  ],
-                ),
-              ),
-              const PopupMenuDivider(),
-              const PopupMenuItem(
-                value: 'clear',
-                child: Row(
-                  children: [
-                    Icon(Icons.delete_outline, size: 18, color: NexaColors.rubyDestructive),
-                    SizedBox(width: 10),
-                    Text('Clear Messages', style: TextStyle(color: NexaColors.rubyDestructive)),
-                  ],
-                ),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF00E5FF).withValues(alpha: 0.08),
+                blurRadius: 16,
+                offset: const Offset(0, 4),
               ),
             ],
           ),
-        ],
+          child: AppBar(
+            titleSpacing: 0,
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 20),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+            title: InkWell(
+              onTap: () => _showPeerDetailsModal(context),
+              borderRadius: BorderRadius.circular(12),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(2),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: NexaColors.hologramGradient,
+                        boxShadow: NexaColors.glowCyan,
+                      ),
+                      child: CircleAvatar(
+                        radius: 18,
+                        backgroundColor: const Color(0xFF090D16),
+                        child: Text(
+                          _contactInitial,
+                          style: const TextStyle(
+                            color: Color(0xFF00E5FF),
+                            fontWeight: FontWeight.w900,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  _displayName,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w800,
+                                    color: Colors.white,
+                                    letterSpacing: 0.3,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 5),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF00E5FF).withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(color: const Color(0xFF00E5FF).withValues(alpha: 0.4), width: 0.8),
+                                ),
+                                child: const Text(
+                                  'PEER',
+                                  style: TextStyle(
+                                    color: Color(0xFF00E5FF),
+                                    fontSize: 8,
+                                    fontWeight: FontWeight.w900,
+                                    letterSpacing: 0.5,
+                                  ),
+                                ),
+                              ),
+                              if (_isSafetyNumberVerified) ...[
+                                const SizedBox(width: 4),
+                                const Icon(Icons.verified, color: NexaColors.emeraldSecure, size: 14),
+                              ],
+                            ],
+                          ),
+                          const SizedBox(height: 1),
+                          Row(
+                            children: [
+                              Container(
+                                width: 6,
+                                height: 6,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF10B981),
+                                  shape: BoxShape.circle,
+                                  boxShadow: NexaColors.glowEmerald,
+                                ),
+                              ),
+                              const SizedBox(width: 5),
+                              Expanded(
+                                child: Text(
+                                  widget.nexaId.trim().isNotEmpty ? widget.nexaId : 'POINTYCASTLE 256-BIT RATCНET',
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 10,
+                                    color: Color(0xFF94A3B8),
+                                    fontWeight: FontWeight.w600,
+                                    fontFamily: 'JetBrains Mono',
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.phone_outlined, color: Color(0xFF00E5FF)),
+                tooltip: 'Encrypted Voice Call',
+                onPressed: () => CallService.instance.initiateCall(
+                  context: context,
+                  recipientHandle: widget.contactName,
+                  recipientNexaId: widget.nexaId,
+                  peerName: widget.contactName,
+                  isVideo: false,
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.videocam_outlined, color: Color(0xFF8B5CF6)),
+                tooltip: 'Encrypted Video Call',
+                onPressed: () => CallService.instance.initiateCall(
+                  context: context,
+                  recipientHandle: widget.contactName,
+                  recipientNexaId: widget.nexaId,
+                  peerName: widget.contactName,
+                  isVideo: true,
+                ),
+              ),
+              IconButton(
+                icon: Icon(
+                  _isSafetyNumberVerified ? Icons.verified_user : Icons.shield_outlined,
+                  color: NexaColors.emeraldSecure,
+                  size: 20,
+                ),
+                tooltip: 'Safety Number',
+                onPressed: _showSafetyNumberModal,
+              ),
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert, color: NexaColors.textSecondary),
+                onSelected: (val) {
+                  if (val == 'verify') {
+                    _showSafetyNumberModal();
+                  } else if (val == 'timer') {
+                    _showDisappearingMessagesModal();
+                  } else if (val == 'clear') {
+                    setState(() => _messages.clear());
+                    ChatService.instance.saveLocalMessages(_threadKey, _messages);
+                    if (widget.contactName.isNotEmpty) {
+                      ChatService.instance.saveLocalMessages(widget.contactName, _messages);
+                    }
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Chat messages cleared locally')),
+                    );
+                  } else if (val == 'export') {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Exporting zero-knowledge encrypted backup...')),
+                    );
+                  }
+                },
+                itemBuilder: (ctx) => [
+                  const PopupMenuItem(
+                    value: 'verify',
+                    child: Row(
+                      children: [
+                        Icon(Icons.shield_outlined, size: 18, color: NexaColors.emeraldSecure),
+                        SizedBox(width: 10),
+                        Text('Verify Safety Number'),
+                      ],
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'timer',
+                    child: Row(
+                      children: [
+                        const Icon(Icons.timer_outlined, size: 18),
+                        SizedBox(width: 10),
+                        Text('Disappearing: $_disappearingTimer'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'export',
+                    child: Row(
+                      children: [
+                        Icon(Icons.download_outlined, size: 18),
+                        SizedBox(width: 10),
+                        Text('Export Encrypted Backup'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuDivider(),
+                  const PopupMenuItem(
+                    value: 'clear',
+                    child: Row(
+                      children: [
+                        Icon(Icons.delete_outline, size: 18, color: NexaColors.rubyDestructive),
+                        SizedBox(width: 10),
+                        Text('Clear Messages', style: TextStyle(color: NexaColors.rubyDestructive)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
       body: Column(
         children: [
-          // E2E Minimalist Security Notice
+          // Maximalist Cyber Security Telemetry HUD
           Container(
             width: double.infinity,
-            margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            margin: const EdgeInsets.fromLTRB(16, 8, 16, 6),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
             decoration: BoxDecoration(
-              color: const Color(0xFF064E3B).withValues(alpha: 0.35),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFF059669).withValues(alpha: 0.4)),
+              gradient: LinearGradient(
+                colors: [
+                  const Color(0xFF064E3B).withValues(alpha: 0.4),
+                  const Color(0xFF0F172A).withValues(alpha: 0.6),
+                ],
+              ),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: const Color(0xFF10B981).withValues(alpha: 0.5),
+                width: 1,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF10B981).withValues(alpha: 0.08),
+                  blurRadius: 10,
+                ),
+              ],
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.shield_outlined, color: NexaColors.emeraldSecure, size: 14),
-                const SizedBox(width: 6),
-                Text(
-                  _disappearingTimer == 'Off'
-                      ? 'PointyCastle Double Ratchet 256-bit active. Zero-Knowledge.'
-                      : 'Messages disappear after $_disappearingTimer. Double Ratchet active.',
-                  style: const TextStyle(color: Color(0xFF6EE7B7), fontSize: 11, fontWeight: FontWeight.w500),
+                Container(
+                  padding: const EdgeInsets.all(3),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF10B981).withValues(alpha: 0.2),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.shield_rounded, color: Color(0xFF10B981), size: 12),
+                ),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    _disappearingTimer == 'Off'
+                        ? 'DOUBLE RATCHET 256-BIT • HARDWARE ISOLATED KEYS'
+                        : 'DISAPPEARING IN $_disappearingTimer • DOUBLE RATCHET 256-BIT',
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xFF6EE7B7),
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.6,
+                      fontFamily: 'JetBrains Mono',
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -2727,7 +2908,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   )
                 : _chatState == ChatState.loading
                     ? const Center(
-                        child: CircularProgressIndicator(),
+                        child: CircularProgressIndicator(color: Color(0xFF00E5FF)),
                       )
                     : _chatState == ChatState.error
                         ? Center(
@@ -2755,28 +2936,96 @@ class _ChatScreenState extends State<ChatScreen> {
                           )
                         : Center(
                             child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 32),
+                              padding: const EdgeInsets.symmetric(horizontal: 28),
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
+                                  // Maximalist Cyber Radar Handshake Visual
                                   Container(
-                                    padding: const EdgeInsets.all(16),
+                                    width: 84,
+                                    height: 84,
                                     decoration: BoxDecoration(
-                                      color: NexaColors.primary.withValues(alpha: 0.1),
                                       shape: BoxShape.circle,
+                                      gradient: RadialGradient(
+                                        colors: [
+                                          const Color(0xFF00E5FF).withValues(alpha: 0.18),
+                                          const Color(0xFF8B5CF6).withValues(alpha: 0.08),
+                                          Colors.transparent,
+                                        ],
+                                      ),
+                                      border: Border.all(
+                                        color: const Color(0xFF00E5FF).withValues(alpha: 0.4),
+                                        width: 1.5,
+                                      ),
+                                      boxShadow: NexaColors.glowCyan,
                                     ),
-                                    child: const Icon(Icons.lock_clock, color: NexaColors.primary, size: 36),
+                                    child: Center(
+                                      child: Container(
+                                        width: 50,
+                                        height: 50,
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          gradient: NexaColors.cyberGradient,
+                                          boxShadow: NexaColors.glowCyan,
+                                        ),
+                                        child: const Icon(
+                                          Icons.lock_rounded,
+                                          color: Colors.white,
+                                          size: 24,
+                                        ),
+                                      ),
+                                    ),
                                   ),
-                                  const SizedBox(height: 16),
-                                  const Text(
-                                    'No Messages Yet',
-                                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: NexaColors.textPrimary),
+                                  const SizedBox(height: 18),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF00E5FF).withValues(alpha: 0.12),
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(color: const Color(0xFF00E5FF).withValues(alpha: 0.35)),
+                                    ),
+                                    child: const Text(
+                                      'ZERO-KNOWLEDGE SECURE HANDSHAKE',
+                                      style: TextStyle(
+                                        color: Color(0xFF00E5FF),
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w900,
+                                        letterSpacing: 1.2,
+                                        fontFamily: 'JetBrains Mono',
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    'Encrypted Direct Session with $_displayName',
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 16,
+                                      color: Colors.white,
+                                      letterSpacing: 0.3,
+                                    ),
                                   ),
                                   const SizedBox(height: 8),
                                   Text(
-                                    'Messages and calls with $_displayName are end-to-end encrypted with Double Ratchet & hardware isolated keys. No one outside of this chat can read or listen to them.',
+                                    'Messages and calls are end-to-end encrypted with PointyCastle AES-256-GCM and ECDH Curve25519. Zero-knowledge local-first storage.',
                                     textAlign: TextAlign.center,
-                                    style: const TextStyle(fontSize: 13, color: NexaColors.textSecondary, height: 1.4),
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: Color(0xFF94A3B8),
+                                      height: 1.45,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 16),
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      _buildHandshakeTelemetryChip('AES-256-GCM', const Color(0xFF10B981)),
+                                      const SizedBox(width: 8),
+                                      _buildHandshakeTelemetryChip('CURVE25519', const Color(0xFF00E5FF)),
+                                      const SizedBox(width: 8),
+                                      _buildHandshakeTelemetryChip('P2P SIGNAL', const Color(0xFF8B5CF6)),
+                                    ],
                                   ),
                                 ],
                               ),
@@ -2787,6 +3036,27 @@ class _ChatScreenState extends State<ChatScreen> {
           // Chat Input Bar
           _buildInputBar(),
         ],
+      ),
+    );
+  }
+
+  Widget _buildHandshakeTelemetryChip(String label, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withValues(alpha: 0.4), width: 0.8),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 9,
+          fontWeight: FontWeight.w800,
+          fontFamily: 'JetBrains Mono',
+          letterSpacing: 0.5,
+        ),
       ),
     );
   }
@@ -2822,24 +3092,30 @@ class _ChatScreenState extends State<ChatScreen> {
             GestureDetector(
               onLongPress: () => _showMessageOptions(msg),
               child: Container(
-                constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.82),
+                padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 11),
                 decoration: BoxDecoration(
-                  color: isMe ? const Color(0xFF0284C7) : const Color(0xFF1E293B),
+                  gradient: isMe ? NexaColors.bubbleOutgoingGradient : null,
+                  color: isMe ? null : const Color(0xFF0E1526),
                   borderRadius: BorderRadius.only(
-                    topLeft: const Radius.circular(18),
-                    topRight: const Radius.circular(18),
-                    bottomLeft: Radius.circular(isMe ? 18 : 4),
-                    bottomRight: Radius.circular(isMe ? 4 : 18),
+                    topLeft: const Radius.circular(20),
+                    topRight: const Radius.circular(20),
+                    bottomLeft: Radius.circular(isMe ? 20 : 4),
+                    bottomRight: Radius.circular(isMe ? 4 : 20),
                   ),
                   border: Border.all(
-                    color: isMe ? const Color(0xFF0369A1) : const Color(0xFF26334A),
+                    color: isMe
+                        ? const Color(0xFF00E5FF).withValues(alpha: 0.5)
+                        : const Color(0xFF8B5CF6).withValues(alpha: 0.35),
+                    width: 1.2,
                   ),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.15),
-                      blurRadius: 4,
-                      offset: const Offset(0, 1),
+                      color: isMe
+                          ? const Color(0xFF00E5FF).withValues(alpha: 0.16)
+                          : const Color(0xFF8B5CF6).withValues(alpha: 0.1),
+                      blurRadius: 10,
+                      offset: const Offset(0, 3),
                     ),
                   ],
                 ),
@@ -3435,19 +3711,32 @@ class _ChatScreenState extends State<ChatScreen> {
           crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
           children: [
             Container(
-              constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.82),
+              padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 11),
               decoration: BoxDecoration(
-                color: isMe ? const Color(0xFF0284C7) : const Color(0xFF1E293B),
+                gradient: isMe ? NexaColors.bubbleOutgoingGradient : null,
+                color: isMe ? null : const Color(0xFF0E1526),
                 borderRadius: BorderRadius.only(
-                  topLeft: const Radius.circular(18),
-                  topRight: const Radius.circular(18),
-                  bottomLeft: Radius.circular(isMe ? 18 : 4),
-                  bottomRight: Radius.circular(isMe ? 4 : 18),
+                  topLeft: const Radius.circular(20),
+                  topRight: const Radius.circular(20),
+                  bottomLeft: Radius.circular(isMe ? 20 : 4),
+                  bottomRight: Radius.circular(isMe ? 4 : 20),
                 ),
                 border: Border.all(
-                  color: isMe ? const Color(0xFF0369A1) : const Color(0xFF26334A),
+                  color: isMe
+                      ? const Color(0xFF00E5FF).withValues(alpha: 0.5)
+                      : const Color(0xFF8B5CF6).withValues(alpha: 0.35),
+                  width: 1.2,
                 ),
+                boxShadow: [
+                  BoxShadow(
+                    color: isMe
+                        ? const Color(0xFF00E5FF).withValues(alpha: 0.16)
+                        : const Color(0xFF8B5CF6).withValues(alpha: 0.1),
+                    blurRadius: 10,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -3504,7 +3793,7 @@ class _ChatScreenState extends State<ChatScreen> {
               height: 10,
               child: CircularProgressIndicator(
                 strokeWidth: 1.5,
-                valueColor: AlwaysStoppedAnimation<Color>(Colors.white70),
+                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF00E5FF)),
               ),
             ),
           );
@@ -3531,7 +3820,7 @@ class _ChatScreenState extends State<ChatScreen> {
         case 'delivered':
           return const Padding(
             padding: EdgeInsets.only(left: 3),
-            child: Icon(Icons.done_all_rounded, size: 14, color: Colors.white70),
+            child: Icon(Icons.done_all_rounded, size: 14, color: Color(0xFF6EE7B7)),
           );
         case 'sent':
         default:
@@ -3552,9 +3841,15 @@ class _ChatScreenState extends State<ChatScreen> {
     if (_isRecordingVoice) {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: const BoxDecoration(
-          color: NexaColors.surfaceLight,
-          border: Border(top: BorderSide(color: NexaColors.borderLight)),
+        decoration: BoxDecoration(
+          color: const Color(0xFF070A12),
+          border: const Border(top: BorderSide(color: Color(0x33F43F5E), width: 1.2)),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFFF43F5E).withValues(alpha: 0.1),
+              blurRadius: 12,
+            ),
+          ],
         ),
         child: SafeArea(
           child: Row(
@@ -3563,8 +3858,9 @@ class _ChatScreenState extends State<ChatScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: NexaColors.rubyDestructive.withValues(alpha: 0.15),
+                  color: NexaColors.rubyDestructive.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: NexaColors.rubyDestructive.withValues(alpha: 0.4)),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -3587,7 +3883,7 @@ class _ChatScreenState extends State<ChatScreen> {
               // Dynamic Elapsed Timer
               Text(
                 _formatDuration(_recordingSeconds),
-                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15, fontFamily: 'Courier', color: NexaColors.textPrimary),
+                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15, fontFamily: 'JetBrains Mono', color: Colors.white),
               ),
               const SizedBox(width: 12),
 
@@ -3602,7 +3898,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         width: 3.5,
                         height: (26 * amp).clamp(4.0, 26.0),
                         decoration: BoxDecoration(
-                          color: NexaColors.primary,
+                          gradient: NexaColors.cyberGradient,
                           borderRadius: BorderRadius.circular(2),
                         ),
                       );
@@ -3622,14 +3918,14 @@ class _ChatScreenState extends State<ChatScreen> {
               // Send Voice Note
               ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: NexaColors.primary,
-                  foregroundColor: Colors.white,
+                  backgroundColor: const Color(0xFF00E5FF),
+                  foregroundColor: Colors.black,
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                   minimumSize: Size.zero,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                  elevation: 0,
+                  elevation: 4,
                 ),
-                icon: const Icon(Icons.send, size: 15),
+                icon: const Icon(Icons.send_rounded, size: 15),
                 label: const Text('Send', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
                 onPressed: _finishVoiceRecordingAndSend,
               ),
@@ -3641,61 +3937,84 @@ class _ChatScreenState extends State<ChatScreen> {
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: const BoxDecoration(
-        color: Color(0xFF090D16),
-        border: Border(top: BorderSide(color: Color(0x1AFFFFFF))),
+      decoration: BoxDecoration(
+        color: const Color(0xFF070A12),
+        border: const Border(
+          top: BorderSide(color: Color(0x3300E5FF), width: 1.2),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF00E5FF).withValues(alpha: 0.06),
+            blurRadius: 16,
+            offset: const Offset(0, -4),
+          ),
+        ],
       ),
       child: SafeArea(
         child: Row(
           children: [
-            IconButton(
-              icon: const Icon(Icons.add_circle_outline, color: Color(0xFF00E5FF), size: 24),
-              tooltip: 'Attach encrypted item',
-              onPressed: _showAttachmentPanel,
+            Container(
+              decoration: BoxDecoration(
+                color: const Color(0xFF00E5FF).withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+                border: Border.all(color: const Color(0xFF00E5FF).withValues(alpha: 0.35)),
+              ),
+              child: IconButton(
+                icon: const Icon(Icons.add_rounded, color: Color(0xFF00E5FF), size: 22),
+                tooltip: 'Attach encrypted item',
+                onPressed: _showAttachmentPanel,
+              ),
             ),
+            const SizedBox(width: 8),
             Expanded(
               child: TextField(
                 controller: _messageController,
                 style: const TextStyle(color: Colors.white, fontSize: 15),
                 decoration: InputDecoration(
                   hintText: 'End-to-end encrypted message...',
-                  hintStyle: const TextStyle(color: Color(0xFF64748B), fontSize: 14),
+                  hintStyle: const TextStyle(color: Color(0xFF64748B), fontSize: 13),
                   contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                   filled: true,
-                  fillColor: const Color(0xFF111827),
+                  fillColor: const Color(0xFF0F172A),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(24),
-                    borderSide: const BorderSide(color: Color(0xFF26334A)),
+                    borderSide: BorderSide(color: const Color(0xFF00E5FF).withValues(alpha: 0.2)),
                   ),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(24),
-                    borderSide: const BorderSide(color: Color(0xFF26334A)),
+                    borderSide: BorderSide(color: const Color(0xFF00E5FF).withValues(alpha: 0.2)),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(24),
-                    borderSide: const BorderSide(color: Color(0xFF00E5FF), width: 1.5),
+                    borderSide: const BorderSide(color: Color(0xFF00E5FF), width: 1.6),
                   ),
                 ),
                 onSubmitted: (_) => _sendMessage(),
               ),
             ),
-            const SizedBox(width: 6),
+            const SizedBox(width: 8),
             if (_isComposing) ...[
-              CircleAvatar(
-                backgroundColor: NexaColors.primary,
-                radius: 20,
+              Container(
+                decoration: BoxDecoration(
+                  gradient: NexaColors.cyberGradient,
+                  shape: BoxShape.circle,
+                  boxShadow: NexaColors.glowCyan,
+                ),
                 child: IconButton(
-                  icon: const Icon(Icons.arrow_upward, color: Colors.white, size: 20),
+                  icon: const Icon(Icons.arrow_upward_rounded, color: Colors.white, size: 20),
                   tooltip: 'Send message',
                   onPressed: _sendMessage,
                 ),
               ),
             ] else ...[
-              CircleAvatar(
-                backgroundColor: NexaColors.primary.withValues(alpha: 0.12),
-                radius: 20,
+              Container(
+                decoration: BoxDecoration(
+                  color: const Color(0xFF8B5CF6).withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: const Color(0xFF8B5CF6).withValues(alpha: 0.4)),
+                ),
                 child: IconButton(
-                  icon: const Icon(Icons.mic, color: NexaColors.primary, size: 20),
+                  icon: const Icon(Icons.mic_rounded, color: Color(0xFFA78BFA), size: 20),
                   tooltip: 'Press to record voice note',
                   onPressed: _startVoiceRecording,
                 ),

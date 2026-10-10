@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import '../crypto/nexa_envelope.dart';
+import '../services/chat_service.dart';
+import '../session/user_session.dart';
 
 /// Network event received from the NEXA Zero-Knowledge Relay.
 class NexaNetworkEvent {
@@ -47,10 +49,15 @@ class NexaNetworkService {
       _isConnected = true;
       _connectionStateController.add(true);
 
-      // Bind device identity to the connection
+      // Bind device identity and user credentials to the connection
+      final userHandle = UserSession.instance.handle;
+      final userNexaId = UserSession.instance.nexaId;
       _webSocket!.add(jsonEncode({
         'action': 'BIND_DEVICE',
         'device_id': deviceId,
+        if (userHandle.isNotEmpty) 'user': userHandle,
+        if (userHandle.isNotEmpty) 'handle': userHandle,
+        if (userNexaId.isNotEmpty) 'nexa_id': userNexaId,
       }));
 
       _webSocket!.listen(
@@ -78,6 +85,11 @@ class NexaNetworkService {
         for (final raw in envelopes) {
           final envelope = NexaEncryptedEnvelope.fromJson(raw as Map<String, dynamic>);
           _incomingEnvelopesController.add(envelope);
+        }
+      } else if (event == 'NEW_CHAT_MESSAGE') {
+        final rawMsg = json['message'];
+        if (rawMsg is Map) {
+          ChatService.instance.handleRealtimeIncomingMessage(Map<String, dynamic>.from(rawMsg));
         }
       }
     } catch (_) {

@@ -12,11 +12,11 @@
     hero.setAttribute('aria-labelledby', 'maximalistHeroTitle');
     hero.innerHTML = `
       <div>
-        <span class="maximalist-eyebrow">SYSTEM PULSE / ADMIN ONLY</span>
-        <h2 id="maximalistHeroTitle">Big picture, bright signals, precise control.</h2>
-        <p>Monitor the relay, protect accounts, and ship updates from one expressive command deck. Every action remains connected to the same live data controls below.</p>
+        <span class="maximalist-eyebrow">NODE OBSERVABILITY // ADMIN GATEWAY</span>
+        <h2 id="maximalistHeroTitle">Sovereign Relay Operations</h2>
+        <p>Real-time encrypted session monitoring, hardware token attestation, and distributed network controls.</p>
       </div>
-      <div class="maximalist-hero-art" aria-hidden="true">✦</div>
+      <div class="maximalist-hero-art" aria-hidden="true">⚡</div>
     `;
     main.insertBefore(hero, main.firstChild);
   }

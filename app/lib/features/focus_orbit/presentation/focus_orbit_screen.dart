@@ -8,6 +8,7 @@ import '../../../core/services/contacts_service.dart';
 import '../../../core/services/chat_service.dart';
 import '../../../core/services/call_service.dart';
 import '../../../core/services/update_engine.dart';
+import '../../../core/theme/nexa_theme.dart';
 import '../../auth/presentation/device_link_qr_screen.dart';
 import '../../auth/presentation/recovery_key_vault_screen.dart';
 import '../../chat/presentation/chat_screen.dart';
@@ -44,6 +45,7 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
 
   // Calls
   final List<Map<String, dynamic>> _callLogs = [];
+  StreamSubscription? _incomingMessageSub;
 
   @override
   void initState() {
@@ -57,7 +59,12 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
     _syncInbox();
     _inboxSyncTimer = Timer.periodic(const Duration(milliseconds: 1500), (_) => _syncInbox());
 
-    // 2. Start global real-time call invitation listener
+    // 2. Real-time incoming WebSocket message subscription
+    _incomingMessageSub = ChatService.instance.onMessageReceived.listen((_) {
+      if (mounted) _loadCachedChats();
+    });
+
+    // 3. Start global real-time call invitation listener
     WidgetsBinding.instance.addPostFrameCallback((_) {
       CallService.instance.startListening(context);
       UpdateEngine.instance.checkForUpdate(context);
@@ -69,6 +76,7 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
   void dispose() {
     _session.removeListener(_onSessionChanged);
     _inboxSyncTimer?.cancel();
+    _incomingMessageSub?.cancel();
     CallService.instance.stopListening();
     _chatSearchController.dispose();
     _contactsSearchController.dispose();
@@ -227,11 +235,21 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
         }
       }
 
-      // If chats were completely empty and server returned nothing, try loading local cache
-      if (_chats.isEmpty && serverConvs.isEmpty) {
-        final cached = await ChatService.instance.loadRecentChats();
-        if (cached.isNotEmpty) {
-          _chats.addAll(cached);
+      // Always merge local recent chats so locally created direct conversations are never lost
+      final cachedRecent = await ChatService.instance.loadRecentChats();
+      for (final c in cachedRecent) {
+        final cConvId = (c['conversationId'] as String?) ?? '';
+        final cName = ((c['name'] as String?) ?? '').toLowerCase().replaceAll('@', '');
+        final cNexaId = ((c['nexaId'] as String?) ?? '').toLowerCase();
+        final exists = _chats.any((existing) {
+          final exConvId = (existing['conversationId'] as String?) ?? '';
+          if (cConvId.isNotEmpty && exConvId.isNotEmpty && cConvId == exConvId) return true;
+          final exName = ((existing['name'] as String?) ?? '').toLowerCase().replaceAll('@', '');
+          final exNexaId = ((existing['nexaId'] as String?) ?? '').toLowerCase();
+          return (cName.isNotEmpty && exName == cName) || (cNexaId.isNotEmpty && exNexaId == cNexaId);
+        });
+        if (!exists) {
+          _chats.add(Map<String, dynamic>.from(c));
           changed = true;
         }
       }
@@ -267,6 +285,33 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
           final timeStr = _formatTimestamp(ts);
           final convId = lastMsg['conversation_id'] as String?;
 
+          final cleanSenderHandle = senderHandle.replaceAll('@', '');
+
+          // Immediately persist incoming messages to local thread storage for 0ms instantaneous chat rendering
+          final cachedThread = await ChatService.instance.loadLocalMessagesMulti(
+            conversationId: convId,
+            peerNexaId: senderNexaId,
+            peerHandle: cleanSenderHandle,
+          );
+          final Map<String, Map<String, dynamic>> threadMap = {};
+          for (final m in cachedThread) {
+            final id = (m['id'] ?? '').toString();
+            if (id.isNotEmpty) threadMap[id] = m;
+          }
+          for (final raw in peerMessages) {
+            final formatted = ChatService.formatMessageForUi(raw);
+            final id = (formatted['id'] ?? '').toString();
+            if (id.isNotEmpty) threadMap[id] = formatted;
+          }
+          final mergedThread = threadMap.values.toList();
+          mergedThread.sort((a, b) => ((a['timestamp'] as num?)?.toInt() ?? 0).compareTo((b['timestamp'] as num?)?.toInt() ?? 0));
+          ChatService.instance.saveLocalMessagesMulti(
+            conversationId: convId,
+            peerNexaId: senderNexaId,
+            peerHandle: cleanSenderHandle,
+            messages: mergedThread,
+          );
+
           final canonicalKey = ChatService.getCanonicalKey(senderNexaId.isNotEmpty ? senderNexaId : senderHandle);
           final readTs1 = await ChatService.instance.getReadTimestamp(canonicalKey);
           final readTs2 = await ChatService.instance.getReadTimestamp(ChatService.getCanonicalKey(senderHandle));
@@ -277,7 +322,6 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
             return mTs > lastReadTs;
           }).length;
 
-          final cleanSenderHandle = senderHandle.replaceAll('@', '');
           final idx = _chats.indexWhere((c) {
             final cId = (c['conversationId'] as String?) ?? '';
             if (convId != null && convId.isNotEmpty && cId.isNotEmpty && cId == convId) return true;
@@ -361,24 +405,47 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
   }
 
   void _openChat(String contactName, String nexaId, {String? conversationId}) {
-    // 1. Immediate optimistic UI unread reset
+    // 1. Immediate optimistic UI insertion or unread reset
+    final cleanContact = contactName.replaceAll('@', '');
+    final displayName = contactName.startsWith('@') ? contactName : (contactName.startsWith('NX-') ? contactName : '@$cleanContact');
+    final targetNexaId = nexaId.isNotEmpty ? nexaId : (cleanContact.isNotEmpty ? 'NX-${cleanContact.toUpperCase()}' : 'NX-PEER');
+
     final idx = _chats.indexWhere((c) {
       final n = ((c['name'] as String?) ?? '').toLowerCase().replaceAll('@', '');
       final id = ((c['nexaId'] as String?) ?? '').toLowerCase();
-      final targetN = contactName.toLowerCase().replaceAll('@', '');
-      final targetId = nexaId.toLowerCase();
+      final targetN = cleanContact.toLowerCase();
+      final targetId = targetNexaId.toLowerCase();
+      final cId = (c['conversationId'] as String?) ?? '';
       return (targetN.isNotEmpty && n == targetN) ||
-          (targetId.isNotEmpty && id == targetId);
+          (targetId.isNotEmpty && id == targetId) ||
+          (conversationId != null && conversationId.isNotEmpty && cId == conversationId);
     });
+
     if (idx >= 0 && mounted) {
       setState(() {
         _chats[idx]['unread'] = 0;
+        if (conversationId != null && conversationId.isNotEmpty) {
+          _chats[idx]['conversationId'] = conversationId;
+        }
+      });
+      ChatService.instance.saveRecentChats(_chats);
+    } else if (mounted) {
+      setState(() {
+        _chats.insert(0, {
+          if (conversationId != null && conversationId.isNotEmpty) 'conversationId': conversationId,
+          'name': displayName,
+          'nexaId': targetNexaId,
+          'message': 'Starting conversation...',
+          'time': 'Just now',
+          'timestamp': DateTime.now().millisecondsSinceEpoch,
+          'unread': 0,
+        });
       });
       ChatService.instance.saveRecentChats(_chats);
     }
 
     // 2. Asynchronously record read state without blocking screen transition
-    final canonicalKey = ChatService.getCanonicalKey(nexaId.isNotEmpty ? nexaId : contactName);
+    final canonicalKey = ChatService.getCanonicalKey(targetNexaId.isNotEmpty ? targetNexaId : contactName);
     final now = DateTime.now().millisecondsSinceEpoch;
     ChatService.instance.saveReadTimestamp(canonicalKey, now);
     if (contactName.isNotEmpty) {
@@ -453,8 +520,8 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            // Minimalist Top App Bar
-            _buildMinimalistTopBar(),
+            // Maximalist Cyber Top Bar
+            _buildMaximalistTopBar(),
 
             // Screen Content
             Expanded(
@@ -473,26 +540,41 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
       ),
       bottomNavigationBar: _buildModernBottomBar(),
       floatingActionButton: _activeNav == 0
-          ? FloatingActionButton(
-              backgroundColor: const Color(0xFF0284C7),
-              foregroundColor: Colors.white,
-              elevation: 4,
-              onPressed: _showNewChatDialog,
-              child: const Icon(Icons.add_comment_rounded, size: 24),
+          ? Container(
+              decoration: BoxDecoration(
+                gradient: NexaColors.cyberGradient,
+                borderRadius: BorderRadius.circular(18),
+                boxShadow: NexaColors.glowCyan,
+              ),
+              child: FloatingActionButton(
+                backgroundColor: Colors.transparent,
+                elevation: 0,
+                onPressed: _showNewChatDialog,
+                child: const Icon(Icons.add_comment_rounded, color: Colors.white, size: 24),
+              ),
             )
           : null,
     );
   }
 
   // =====================================================================
-  // 1. MINIMALIST TOP APP BAR
+  // 1. MAXIMALIST CYBER TOP APP BAR
   // =====================================================================
-  Widget _buildMinimalistTopBar() {
+  Widget _buildMaximalistTopBar() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-      decoration: const BoxDecoration(
-        color: Color(0xFF090D16),
-        border: Border(bottom: BorderSide(color: Color(0x1AFFFFFF))),
+      decoration: BoxDecoration(
+        color: const Color(0xFF070A12),
+        border: const Border(
+          bottom: BorderSide(color: Color(0x3300E5FF), width: 1.2),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF00E5FF).withValues(alpha: 0.08),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -506,30 +588,48 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                 onPressed: () => _scaffoldKey.currentState?.openDrawer(),
               ),
               const SizedBox(width: 14),
-              Row(
-                children: [
-                  Container(
-                    width: 10,
-                    height: 10,
-                    decoration: const BoxDecoration(
-                      color: Color(0xFF00E5FF),
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(color: Color(0xFF00E5FF), blurRadius: 8, spreadRadius: 1),
-                      ],
+              // Maximalist Holographic Brand Badge
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  gradient: NexaColors.hologramGradient,
+                  borderRadius: BorderRadius.circular(8),
+                  boxShadow: NexaColors.glowCyan,
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.shield_outlined, color: Colors.black, size: 14),
+                    SizedBox(width: 5),
+                    Text(
+                      'NEXA',
+                      style: TextStyle(
+                        color: Colors.black,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 1.8,
+                      ),
                     ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.35)),
+                ),
+                child: const Text(
+                  'E2EE 256-BIT',
+                  style: TextStyle(
+                    color: Color(0xFF10B981),
+                    fontSize: 9,
+                    fontWeight: FontWeight.bold,
+                    fontFamily: 'JetBrains Mono',
                   ),
-                  const SizedBox(width: 8),
-                  const Text(
-                    'NEXA',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 19,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 1.5,
-                    ),
-                  ),
-                ],
+                ),
               ),
             ],
           ),
@@ -544,18 +644,23 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                     margin: const EdgeInsets.only(right: 8),
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF00E5FF).withValues(alpha: 0.15),
+                      gradient: NexaColors.plasmaGradient,
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFF00E5FF).withValues(alpha: 0.5)),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFFF43F5E).withValues(alpha: 0.4),
+                          blurRadius: 8,
+                        ),
+                      ],
                     ),
                     child: const Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.system_update, color: Color(0xFF00E5FF), size: 12),
+                        Icon(Icons.system_update, color: Colors.white, size: 12),
                         SizedBox(width: 4),
                         Text(
                           'Update',
-                          style: TextStyle(color: Color(0xFF00E5FF), fontSize: 11, fontWeight: FontWeight.bold),
+                          style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
                         ),
                       ],
                     ),
@@ -566,28 +671,39 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF111827),
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF151C2E), Color(0xFF0F1424)],
+                  ),
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: const Color(0x26FFFFFF)),
+                  border: Border.all(color: const Color(0xFF00E5FF).withValues(alpha: 0.4)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF00E5FF).withValues(alpha: 0.1),
+                      blurRadius: 6,
+                    ),
+                  ],
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Container(
-                      width: 7,
-                      height: 7,
+                      width: 8,
+                      height: 8,
                       decoration: const BoxDecoration(
                         color: Color(0xFF10B981),
                         shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(color: Color(0xFF10B981), blurRadius: 6),
+                        ],
                       ),
                     ),
-                    const SizedBox(width: 6),
+                    const SizedBox(width: 7),
                     Text(
                       _session.handle.isNotEmpty ? _session.handle : '@user',
                       style: const TextStyle(
-                        color: Colors.white70,
+                        color: Colors.white,
                         fontSize: 12,
-                        fontWeight: FontWeight.w600,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
                   ],
@@ -735,10 +851,9 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                     ],
                   ),
                 )
-              : ListView.separated(
-                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+              : ListView.builder(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                   itemCount: filtered.length,
-                  separatorBuilder: (_, _) => const Divider(height: 1, color: Color(0x0FFFFFFF)),
                   itemBuilder: (context, i) {
                     final item = filtered[i];
                     final name = (item['name'] as String?) ?? 'Peer';
@@ -747,57 +862,209 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                     final unread = (item['unread'] as int?) ?? 0;
                     final nexaId = (item['nexaId'] as String?) ?? 'NX-PEER';
 
-                    return ListTile(
-                      contentPadding: const EdgeInsets.symmetric(vertical: 4),
-                      onTap: () => _openChat(name, nexaId, conversationId: item['conversationId'] as String?),
-                      leading: CircleAvatar(
-                        radius: 22,
-                        backgroundColor: const Color(0xFF1E293B),
-                        child: Text(
-                          name.isNotEmpty ? name.replaceAll('@', '').substring(0, 1).toUpperCase() : '?',
-                          style: const TextStyle(color: Color(0xFF00E5FF), fontWeight: FontWeight.bold, fontSize: 16),
+                    return Container(
+                      margin: const EdgeInsets.symmetric(vertical: 4),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            unread > 0 ? const Color(0xFF162035) : const Color(0xFF101524),
+                            const Color(0xFF090D18),
+                          ],
                         ),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: unread > 0
+                              ? const Color(0xFF00E5FF).withValues(alpha: 0.6)
+                              : const Color(0xFF00E5FF).withValues(alpha: 0.15),
+                          width: unread > 0 ? 1.5 : 0.8,
+                        ),
+                        boxShadow: unread > 0
+                            ? [
+                                BoxShadow(
+                                  color: const Color(0xFF00E5FF).withValues(alpha: 0.25),
+                                  blurRadius: 12,
+                                  spreadRadius: 0,
+                                ),
+                              ]
+                            : null,
                       ),
-                      title: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Flexible(
-                            child: Text(
-                              name,
-                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
-                              overflow: TextOverflow.ellipsis,
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(16),
+                          onTap: () => _openChat(name, nexaId, conversationId: item['conversationId'] as String?),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                            child: Row(
+                              children: [
+                                // Holographic Glowing Avatar Ring
+                                Stack(
+                                  alignment: Alignment.bottomRight,
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.all(2.5),
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        gradient: unread > 0
+                                            ? NexaColors.cyberGradient
+                                            : NexaColors.hologramGradient,
+                                        boxShadow: unread > 0
+                                            ? [
+                                                BoxShadow(
+                                                  color: const Color(0xFF00E5FF).withValues(alpha: 0.4),
+                                                  blurRadius: 8,
+                                                ),
+                                              ]
+                                            : null,
+                                      ),
+                                      child: CircleAvatar(
+                                        radius: 23,
+                                        backgroundColor: const Color(0xFF0D121F),
+                                        child: Text(
+                                          name.isNotEmpty ? name.replaceAll('@', '').substring(0, 1).toUpperCase() : '?',
+                                          style: TextStyle(
+                                            color: unread > 0 ? const Color(0xFF00E5FF) : Colors.white,
+                                            fontWeight: FontWeight.w900,
+                                            fontSize: 16,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    // Live Activity Status Dot
+                                    Container(
+                                      width: 10,
+                                      height: 10,
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF10B981),
+                                        shape: BoxShape.circle,
+                                        border: Border.all(color: const Color(0xFF090D18), width: 1.5),
+                                        boxShadow: const [
+                                          BoxShadow(color: Color(0xFF10B981), blurRadius: 4),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(width: 14),
+
+                                // Chat Metadata & Details
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      // Top Row: Peer Name & Time Chip
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Flexible(
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Flexible(
+                                                  child: Text(
+                                                    name,
+                                                    style: const TextStyle(
+                                                      color: Colors.white,
+                                                      fontWeight: FontWeight.bold,
+                                                      fontSize: 15,
+                                                      letterSpacing: -0.2,
+                                                    ),
+                                                    overflow: TextOverflow.ellipsis,
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 4),
+                                                const Icon(Icons.verified, color: Color(0xFF00E5FF), size: 13),
+                                              ],
+                                            ),
+                                          ),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                            decoration: BoxDecoration(
+                                              color: Colors.white.withValues(alpha: 0.05),
+                                              borderRadius: BorderRadius.circular(6),
+                                              border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+                                            ),
+                                            child: Text(
+                                              time,
+                                              style: TextStyle(
+                                                color: unread > 0 ? const Color(0xFF00E5FF) : const Color(0xFF94A3B8),
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 5),
+
+                                      // Bottom Row: Message Preview & Holographic Badges
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              msg,
+                                              style: TextStyle(
+                                                color: unread > 0 ? Colors.white : const Color(0xFF94A3B8),
+                                                fontSize: 12.5,
+                                                fontWeight: unread > 0 ? FontWeight.w600 : FontWeight.normal,
+                                              ),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                          if (unread > 0) ...[
+                                            const SizedBox(width: 8),
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                              decoration: BoxDecoration(
+                                                gradient: NexaColors.cyberGradient,
+                                                borderRadius: BorderRadius.circular(12),
+                                                boxShadow: [
+                                                  BoxShadow(
+                                                    color: const Color(0xFF00E5FF).withValues(alpha: 0.5),
+                                                    blurRadius: 8,
+                                                  ),
+                                                ],
+                                              ),
+                                              child: Text(
+                                                '$unread',
+                                                style: const TextStyle(
+                                                  color: Colors.black,
+                                                  fontSize: 10,
+                                                  fontWeight: FontWeight.w900,
+                                                ),
+                                              ),
+                                            ),
+                                          ] else ...[
+                                            const SizedBox(width: 8),
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                                              decoration: BoxDecoration(
+                                                color: const Color(0xFF10B981).withValues(alpha: 0.1),
+                                                borderRadius: BorderRadius.circular(4),
+                                                border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.3)),
+                                              ),
+                                              child: const Text(
+                                                'E2EE',
+                                                style: TextStyle(
+                                                  color: Color(0xFF10B981),
+                                                  fontSize: 9,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                          Text(time, style: const TextStyle(color: Color(0xFF64748B), fontSize: 11)),
-                        ],
-                      ),
-                      subtitle: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Flexible(
-                            child: Text(
-                              msg,
-                              style: TextStyle(
-                                color: unread > 0 ? Colors.white : const Color(0xFF94A3B8),
-                                fontSize: 12,
-                                fontWeight: unread > 0 ? FontWeight.w600 : FontWeight.normal,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          if (unread > 0)
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: const BoxDecoration(
-                                color: Color(0xFF00E5FF),
-                                shape: BoxShape.circle,
-                              ),
-                              child: Text(
-                                '$unread',
-                                style: const TextStyle(color: Colors.black, fontSize: 10, fontWeight: FontWeight.bold),
-                              ),
-                            ),
-                        ],
+                        ),
                       ),
                     );
                   },
@@ -1422,43 +1689,88 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
   // 6. MODERN BOTTOM NAVIGATION BAR
   // =====================================================================
   Widget _buildModernBottomBar() {
+    final navItems = [
+      {'icon': Icons.chat_bubble_outline_rounded, 'activeIcon': Icons.chat_bubble_rounded, 'label': 'Chats'},
+      {'icon': Icons.people_outline_rounded, 'activeIcon': Icons.people_rounded, 'label': 'Contacts'},
+      {'icon': Icons.phone_outlined, 'activeIcon': Icons.phone_rounded, 'label': 'Calls'},
+      {'icon': Icons.tune_outlined, 'activeIcon': Icons.tune_rounded, 'label': 'Vault'},
+    ];
+
     return Container(
-      decoration: const BoxDecoration(
-        color: Color(0xFF090D16),
-        border: Border(top: BorderSide(color: Color(0x1AFFFFFF))),
-      ),
-      child: BottomNavigationBar(
-        currentIndex: _activeNav,
-        onTap: (index) => setState(() => _activeNav = index),
-        backgroundColor: const Color(0xFF090D16),
-        selectedItemColor: const Color(0xFF00E5FF),
-        unselectedItemColor: const Color(0xFF64748B),
-        type: BottomNavigationBarType.fixed,
-        elevation: 0,
-        selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
-        unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.normal, fontSize: 11),
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.chat_bubble_outline),
-            activeIcon: Icon(Icons.chat_bubble),
-            label: 'Chats',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.people_outline),
-            activeIcon: Icon(Icons.people),
-            label: 'Contacts',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.phone_outlined),
-            activeIcon: Icon(Icons.phone),
-            label: 'Calls',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.tune_outlined),
-            activeIcon: Icon(Icons.tune),
-            label: 'Vault',
+      decoration: BoxDecoration(
+        color: const Color(0xFF070A12),
+        border: const Border(
+          top: BorderSide(color: Color(0x3300E5FF), width: 1.2),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF00E5FF).withValues(alpha: 0.06),
+            blurRadius: 16,
+            offset: const Offset(0, -4),
           ),
         ],
+      ),
+      child: SafeArea(
+        top: false,
+        child: Container(
+          height: 62,
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: List.generate(navItems.length, (index) {
+              final isSelected = _activeNav == index;
+              final item = navItems[index];
+              return InkWell(
+                onTap: () => setState(() => _activeNav = index),
+                borderRadius: BorderRadius.circular(14),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? const Color(0xFF00E5FF).withValues(alpha: 0.12)
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: isSelected
+                          ? const Color(0xFF00E5FF).withValues(alpha: 0.35)
+                          : Colors.transparent,
+                      width: 1,
+                    ),
+                    boxShadow: isSelected
+                        ? [
+                            BoxShadow(
+                              color: const Color(0xFF00E5FF).withValues(alpha: 0.15),
+                              blurRadius: 8,
+                            ),
+                          ]
+                        : null,
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        isSelected ? item['activeIcon'] as IconData : item['icon'] as IconData,
+                        color: isSelected ? const Color(0xFF00E5FF) : const Color(0xFF64748B),
+                        size: 21,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        item['label'] as String,
+                        style: TextStyle(
+                          color: isSelected ? const Color(0xFF00E5FF) : const Color(0xFF64748B),
+                          fontWeight: isSelected ? FontWeight.w800 : FontWeight.w500,
+                          fontSize: 10,
+                          letterSpacing: 0.3,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }),
+          ),
+        ),
       ),
     );
   }
