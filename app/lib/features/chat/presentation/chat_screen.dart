@@ -2606,17 +2606,17 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: NexaColors.cyberBgVoid,
+      backgroundColor: NexaColors.lightBgCanvas,
       appBar: PreferredSize(
         preferredSize: const Size.fromHeight(66),
         child: Container(
-          decoration: BoxDecoration(
-            color: NexaColors.cyberBgSurface,
+          decoration: const BoxDecoration(
+            color: Colors.white,
             border: Border(
-              bottom: BorderSide(color: NexaColors.cyberBorderSubtle, width: 1.0),
+              bottom: BorderSide(color: NexaColors.borderLight, width: 1.0),
             ),
-            boxShadow: const [
-              BoxShadow(color: Color(0x3300F0FF), blurRadius: 14, offset: Offset(0, 3)),
+            boxShadow: [
+              BoxShadow(color: Color(0x080F172A), blurRadius: 10, offset: Offset(0, 2)),
             ],
           ),
           child: AppBar(
@@ -2624,7 +2624,7 @@ class _ChatScreenState extends State<ChatScreen> {
             backgroundColor: Colors.transparent,
             elevation: 0,
             leading: IconButton(
-              icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 20),
+              icon: const Icon(Icons.arrow_back_ios_new_rounded, color: NexaColors.textPrimary, size: 20),
               onPressed: () => Navigator.of(context).pop(),
             ),
             title: InkWell(
@@ -2634,26 +2634,30 @@ class _ChatScreenState extends State<ChatScreen> {
                 padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
                 child: Row(
                   children: [
-                    // Maximalist Avatar with Cyber Gradient Ring
+                    // Maximalist Avatar with Electric Gradient Ring
                     Container(
                       width: 42,
                       height: 42,
                       padding: const EdgeInsets.all(2),
-                      decoration: BoxDecoration(
-                        gradient: NexaColors.cyberGradient,
+                      decoration: const BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [Color(0xFF4F46E5), Color(0xFF7C3AED)],
+                        ),
                         shape: BoxShape.circle,
-                        boxShadow: NexaColors.glowCyan,
+                        boxShadow: [
+                          BoxShadow(color: Color(0x264F46E5), blurRadius: 6, offset: Offset(0, 2)),
+                        ],
                       ),
                       child: Container(
                         decoration: const BoxDecoration(
-                          color: NexaColors.cyberBgElevated,
+                          color: Colors.white,
                           shape: BoxShape.circle,
                         ),
                         child: Center(
                           child: Text(
                             _contactInitial,
                             style: const TextStyle(
-                              color: NexaColors.neonCyan,
+                              color: NexaColors.electricIndigo,
                               fontWeight: FontWeight.w800,
                               fontSize: 18,
                             ),
@@ -2675,14 +2679,14 @@ class _ChatScreenState extends State<ChatScreen> {
                                   style: const TextStyle(
                                     fontSize: 16,
                                     fontWeight: FontWeight.w800,
-                                    color: Colors.white,
+                                    color: NexaColors.textPrimary,
                                     letterSpacing: -0.3,
                                   ),
                                 ),
                               ),
                               if (_isSafetyNumberVerified) ...[
                                 const SizedBox(width: 4),
-                                const Icon(Icons.verified, color: NexaColors.neonEmerald, size: 15),
+                                const Icon(Icons.verified, color: NexaColors.mintEmerald, size: 15),
                               ],
                             ],
                           ),
@@ -2692,10 +2696,12 @@ class _ChatScreenState extends State<ChatScreen> {
                               Container(
                                 width: 7,
                                 height: 7,
-                                decoration: BoxDecoration(
-                                  color: NexaColors.neonEmerald,
+                                decoration: const BoxDecoration(
+                                  color: NexaColors.mintEmerald,
                                   shape: BoxShape.circle,
-                                  boxShadow: NexaColors.glowEmerald,
+                                  boxShadow: [
+                                    BoxShadow(color: Color(0x33059669), blurRadius: 4),
+                                  ],
                                 ),
                               ),
                               const SizedBox(width: 6),
@@ -2707,8 +2713,8 @@ class _ChatScreenState extends State<ChatScreen> {
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
                                     fontSize: 10.5,
-                                    color: NexaColors.neonEmerald,
-                                    fontWeight: FontWeight.w600,
+                                    color: NexaColors.mintEmerald,
+                                    fontWeight: FontWeight.w700,
                                     letterSpacing: 0.2,
                                   ),
                                 ),
@@ -2724,7 +2730,7 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
             actions: [
               IconButton(
-                icon: const Icon(Icons.phone_rounded, color: NexaColors.neonCyan, size: 21),
+                icon: const Icon(Icons.phone_rounded, color: NexaColors.electricIndigo, size: 21),
                 tooltip: 'Encrypted Voice Call',
                 onPressed: () => CallService.instance.initiateCall(
                   context: context,
@@ -2735,7 +2741,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
               ),
               IconButton(
-                icon: const Icon(Icons.videocam_rounded, color: NexaColors.neonViolet, size: 23),
+                icon: const Icon(Icons.videocam_rounded, color: NexaColors.laserViolet, size: 23),
                 tooltip: 'Encrypted Video Call',
                 onPressed: () => CallService.instance.initiateCall(
                   context: context,
@@ -2746,7 +2752,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
               ),
               PopupMenuButton<String>(
-                icon: const Icon(Icons.more_vert_rounded, color: NexaColors.cyberTextDim, size: 21),
+                icon: const Icon(Icons.more_vert_rounded, color: NexaColors.textPrimary, size: 21),
                 onSelected: (val) {
                   if (val == 'verify') {
                     _showSafetyNumberModal();
@@ -2772,7 +2778,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     value: 'verify',
                     child: Row(
                       children: [
-                        Icon(Icons.shield_outlined, size: 18, color: NexaColors.neonEmerald),
+                        Icon(Icons.shield_outlined, size: 18, color: NexaColors.mintEmerald),
                         SizedBox(width: 10),
                         Text('Verify Safety Number'),
                       ],
@@ -2782,7 +2788,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     value: 'timer',
                     child: Row(
                       children: [
-                        const Icon(Icons.timer_outlined, size: 18, color: NexaColors.neonAmber),
+                        const Icon(Icons.timer_outlined, size: 18, color: NexaColors.sunfireAmber),
                         const SizedBox(width: 10),
                         Text('Disappearing: $_disappearingTimer'),
                       ],
@@ -2792,7 +2798,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     value: 'export',
                     child: Row(
                       children: [
-                        Icon(Icons.download_outlined, size: 18, color: NexaColors.neonCyan),
+                        Icon(Icons.download_outlined, size: 18, color: NexaColors.electricIndigo),
                         SizedBox(width: 10),
                         Text('Export Encrypted Backup'),
                       ],
@@ -2803,9 +2809,9 @@ class _ChatScreenState extends State<ChatScreen> {
                     value: 'clear',
                     child: Row(
                       children: [
-                        Icon(Icons.delete_outline, size: 18, color: NexaColors.neonPink),
+                        Icon(Icons.delete_outline, size: 18, color: Color(0xFFDC2626)),
                         SizedBox(width: 10),
-                        Text('Clear Messages', style: TextStyle(color: NexaColors.neonPink)),
+                        Text('Clear Messages', style: TextStyle(color: Color(0xFFDC2626))),
                       ],
                     ),
                   ),
@@ -2817,24 +2823,20 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
       body: Column(
         children: [
-          // Cyberpunk Holographic Telemetry Security Bar
+          // Holographic Telemetry Security Bar
           Container(
             width: double.infinity,
             margin: const EdgeInsets.fromLTRB(16, 10, 16, 6),
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
             decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Color(0x2600F0FF), Color(0x268B5CF6)],
-                begin: Alignment.centerLeft,
-                end: Alignment.centerRight,
-              ),
+              color: const Color(0xFFEEF2FF),
               borderRadius: BorderRadius.circular(20),
               border: Border.all(
-                color: NexaColors.cyberBorderGlow,
+                color: const Color(0xFFC7D2FE),
                 width: 1.0,
               ),
               boxShadow: const [
-                BoxShadow(color: Color(0x1A00F0FF), blurRadius: 10, offset: Offset(0, 2)),
+                BoxShadow(color: Color(0x0A4F46E5), blurRadius: 6, offset: Offset(0, 2)),
               ],
             ),
             child: Row(
@@ -2843,10 +2845,12 @@ class _ChatScreenState extends State<ChatScreen> {
                 Container(
                   width: 7,
                   height: 7,
-                  decoration: BoxDecoration(
-                    color: NexaColors.neonEmerald,
+                  decoration: const BoxDecoration(
+                    color: NexaColors.mintEmerald,
                     shape: BoxShape.circle,
-                    boxShadow: NexaColors.glowEmerald,
+                    boxShadow: [
+                      BoxShadow(color: Color(0x33059669), blurRadius: 4),
+                    ],
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -2857,8 +2861,8 @@ class _ChatScreenState extends State<ChatScreen> {
                         : '⏳ DISAPPEARING IN $_disappearingTimer • 256-BIT',
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                      color: NexaColors.neonCyan,
-                      fontSize: 10,
+                      color: NexaColors.electricIndigo,
+                      fontSize: 10.5,
                       fontWeight: FontWeight.w700,
                       letterSpacing: 0.6,
                       fontFamily: 'monospace',
@@ -2920,10 +2924,12 @@ class _ChatScreenState extends State<ChatScreen> {
                               child: Container(
                                 padding: const EdgeInsets.all(20),
                                 decoration: BoxDecoration(
-                                  color: NexaColors.cyberBgSurface,
+                                  color: Colors.white,
                                   borderRadius: BorderRadius.circular(18),
-                                  border: Border.all(color: NexaColors.cyberBorderGlow, width: 1.2),
-                                  boxShadow: NexaColors.glowCyan,
+                                  border: Border.all(color: NexaColors.borderLight, width: 1.2),
+                                  boxShadow: const [
+                                    BoxShadow(color: Color(0x0A0F172A), blurRadius: 10, offset: Offset(0, 2)),
+                                  ],
                                 ),
                                 child: Column(
                                   mainAxisSize: MainAxisSize.min,
@@ -2935,9 +2941,11 @@ class _ChatScreenState extends State<ChatScreen> {
                                           width: 44,
                                           height: 44,
                                           decoration: BoxDecoration(
-                                            gradient: NexaColors.cyberGradient,
+                                            gradient: const LinearGradient(
+                                              colors: [Color(0xFF4F46E5), Color(0xFF7C3AED)],
+                                            ),
                                             borderRadius: BorderRadius.circular(12),
-                                            boxShadow: NexaColors.glowCyan,
+                                            boxShadow: NexaColors.glowIndigo,
                                           ),
                                           child: const Center(
                                             child: Icon(Icons.security_rounded, color: Colors.white, size: 22),
@@ -2951,7 +2959,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                               Text(
                                                 'QUANTUM SECURE RELAY',
                                                 style: TextStyle(
-                                                  color: Colors.white,
+                                                  color: NexaColors.textPrimary,
                                                   fontWeight: FontWeight.w800,
                                                   fontSize: 14,
                                                   letterSpacing: 0.5,
@@ -2961,7 +2969,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                               Text(
                                                 'PEER-TO-PEER ENCLAVE VERIFIED',
                                                 style: TextStyle(
-                                                  color: NexaColors.neonEmerald,
+                                                  color: NexaColors.mintEmerald,
                                                   fontSize: 10,
                                                   fontWeight: FontWeight.w700,
                                                   fontFamily: 'monospace',
@@ -2974,7 +2982,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                       ],
                                     ),
                                     const SizedBox(height: 16),
-                                    Divider(color: NexaColors.cyberBorderSubtle, height: 1),
+                                    const Divider(color: NexaColors.borderLight, height: 1),
                                     const SizedBox(height: 14),
 
                                     _buildDiagnosticRow('PEER IDENTITY', widget.nexaId.isNotEmpty ? widget.nexaId : 'NX-PEER'),
@@ -2989,7 +2997,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                     Text(
                                       'Direct end-to-end encrypted session with $_displayName. Zero server-side plaintext logs are retained.',
                                       style: const TextStyle(
-                                        color: NexaColors.cyberTextDim,
+                                        color: NexaColors.textSecondary,
                                         fontSize: 12,
                                         height: 1.4,
                                       ),
@@ -3002,18 +3010,18 @@ class _ChatScreenState extends State<ChatScreen> {
                                       runSpacing: 8,
                                       children: [
                                         ActionChip(
-                                          backgroundColor: NexaColors.cyberBgElevated,
-                                          side: BorderSide(color: NexaColors.cyberBorderSubtle),
-                                          label: const Text('👋 Say Hello', style: TextStyle(color: NexaColors.neonCyan, fontSize: 12, fontWeight: FontWeight.w700)),
+                                          backgroundColor: const Color(0xFFF1F5F9),
+                                          side: const BorderSide(color: NexaColors.borderLight),
+                                          label: const Text('👋 Say Hello', style: TextStyle(color: NexaColors.electricIndigo, fontSize: 12, fontWeight: FontWeight.w700)),
                                           onPressed: () {
                                             _messageController.text = 'Hello! 👋';
                                             _sendMessage();
                                           },
                                         ),
                                         ActionChip(
-                                          backgroundColor: NexaColors.cyberBgElevated,
-                                          side: BorderSide(color: NexaColors.cyberBorderSubtle),
-                                          label: const Text('🔐 Verify Keys', style: TextStyle(color: NexaColors.neonEmerald, fontSize: 12, fontWeight: FontWeight.w700)),
+                                          backgroundColor: const Color(0xFFF1F5F9),
+                                          side: const BorderSide(color: NexaColors.borderLight),
+                                          label: const Text('🔐 Verify Keys', style: TextStyle(color: NexaColors.mintEmerald, fontSize: 12, fontWeight: FontWeight.w700)),
                                           onPressed: _showSafetyNumberModal,
                                         ),
                                       ],
@@ -3039,7 +3047,7 @@ class _ChatScreenState extends State<ChatScreen> {
         Text(
           key,
           style: const TextStyle(
-            color: NexaColors.cyberTextMuted,
+            color: NexaColors.textMuted,
             fontSize: 10,
             fontFamily: 'monospace',
             fontWeight: FontWeight.w600,
@@ -3051,7 +3059,7 @@ class _ChatScreenState extends State<ChatScreen> {
             textAlign: TextAlign.right,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
-              color: NexaColors.neonCyan,
+              color: NexaColors.electricIndigo,
               fontSize: 10,
               fontFamily: 'monospace',
               fontWeight: FontWeight.w700,
@@ -3097,7 +3105,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
                 decoration: BoxDecoration(
                   gradient: isMe ? NexaColors.bubbleOutgoingGradient : null,
-                  color: isMe ? null : NexaColors.cyberBgElevated,
+                  color: isMe ? null : Colors.white,
                   borderRadius: BorderRadius.only(
                     topLeft: const Radius.circular(16),
                     topRight: const Radius.circular(16),
@@ -3106,15 +3114,17 @@ class _ChatScreenState extends State<ChatScreen> {
                   ),
                   border: Border.all(
                     color: isMe
-                        ? const Color(0x6600F0FF)
-                        : NexaColors.cyberBorderSubtle,
+                        ? Colors.transparent
+                        : NexaColors.borderLight,
                     width: 1.0,
                   ),
                   boxShadow: isMe
                       ? const [
-                          BoxShadow(color: Color(0x1F00F0FF), blurRadius: 10, offset: Offset(0, 2)),
+                          BoxShadow(color: Color(0x264F46E5), blurRadius: 8, offset: Offset(0, 2)),
                         ]
-                      : null,
+                      : const [
+                          BoxShadow(color: Color(0x0A0F172A), blurRadius: 6, offset: Offset(0, 1)),
+                        ],
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -3553,7 +3563,12 @@ class _ChatScreenState extends State<ChatScreen> {
                     ] else ...[
                       Text(
                         text,
-                        style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.35),
+                        style: TextStyle(
+                          color: isMe ? Colors.white : NexaColors.textPrimary,
+                          fontSize: 15,
+                          height: 1.35,
+                          fontWeight: isMe ? FontWeight.w500 : FontWeight.w600,
+                        ),
                       ),
                     ],
                     const SizedBox(height: 4),
@@ -3565,8 +3580,9 @@ class _ChatScreenState extends State<ChatScreen> {
                           Text(
                             time,
                             style: TextStyle(
-                              color: isMe ? Colors.white70 : const Color(0xFF94A3B8),
+                              color: isMe ? Colors.white.withValues(alpha: 0.8) : NexaColors.textMuted,
                               fontSize: 11,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
                           if (isMe) ...[
@@ -3835,10 +3851,10 @@ class _ChatScreenState extends State<ChatScreen> {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
-          color: NexaColors.cyberBgSurface,
-          border: Border(top: BorderSide(color: NexaColors.neonPink.withValues(alpha: 0.5), width: 1.2)),
+          color: Colors.white,
+          border: Border(top: BorderSide(color: NexaColors.coralPink.withValues(alpha: 0.5), width: 1.2)),
           boxShadow: const [
-            BoxShadow(color: Color(0x33EC4899), blurRadius: 10, offset: Offset(0, -2)),
+            BoxShadow(color: Color(0x14E11D48), blurRadius: 10, offset: Offset(0, -2)),
           ],
         ),
         child: SafeArea(
@@ -3848,9 +3864,9 @@ class _ChatScreenState extends State<ChatScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
-                  color: NexaColors.neonPink.withValues(alpha: 0.15),
+                  color: NexaColors.coralPink.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: NexaColors.neonPink.withValues(alpha: 0.6)),
+                  border: Border.all(color: NexaColors.coralPink.withValues(alpha: 0.5)),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -3859,15 +3875,15 @@ class _ChatScreenState extends State<ChatScreen> {
                       width: 8,
                       height: 8,
                       decoration: const BoxDecoration(
-                        color: NexaColors.neonPink,
+                        color: NexaColors.coralPink,
                         shape: BoxShape.circle,
                         boxShadow: [
-                          BoxShadow(color: NexaColors.neonPink, blurRadius: 6),
+                          BoxShadow(color: NexaColors.coralPink, blurRadius: 6),
                         ],
                       ),
                     ),
                     const SizedBox(width: 6),
-                    const Text('REC', style: TextStyle(color: NexaColors.neonPink, fontSize: 10, fontFamily: 'monospace', fontWeight: FontWeight.w800)),
+                    const Text('REC', style: TextStyle(color: NexaColors.coralPink, fontSize: 10, fontFamily: 'monospace', fontWeight: FontWeight.w800)),
                   ],
                 ),
               ),
@@ -3876,7 +3892,7 @@ class _ChatScreenState extends State<ChatScreen> {
               // Dynamic Elapsed Timer
               Text(
                 _formatDuration(_recordingSeconds),
-                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14, fontFamily: 'monospace', color: Colors.white),
+                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14, fontFamily: 'monospace', color: NexaColors.textPrimary),
               ),
               const SizedBox(width: 14),
 
@@ -3903,7 +3919,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
               // Discard Voice Recording
               IconButton(
-                icon: const Icon(Icons.delete_outline_rounded, color: NexaColors.neonPink, size: 22),
+                icon: const Icon(Icons.delete_outline_rounded, color: NexaColors.rubyDestructive, size: 22),
                 tooltip: 'Discard voice note',
                 onPressed: _cancelVoiceRecording,
               ),
@@ -3913,7 +3929,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 decoration: BoxDecoration(
                   gradient: NexaColors.cyberGradient,
                   borderRadius: BorderRadius.circular(10),
-                  boxShadow: NexaColors.glowCyan,
+                  boxShadow: NexaColors.glowIndigo,
                 ),
                 child: Material(
                   color: Colors.transparent,
@@ -3942,13 +3958,13 @@ class _ChatScreenState extends State<ChatScreen> {
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: NexaColors.cyberBgSurface,
+      decoration: const BoxDecoration(
+        color: Colors.white,
         border: Border(
-          top: BorderSide(color: NexaColors.cyberBorderSubtle, width: 1.0),
+          top: BorderSide(color: NexaColors.borderLight, width: 1.0),
         ),
-        boxShadow: const [
-          BoxShadow(color: Color(0x33000000), blurRadius: 10, offset: Offset(0, -3)),
+        boxShadow: [
+          BoxShadow(color: Color(0x0A0F172A), blurRadius: 10, offset: Offset(0, -3)),
         ],
       ),
       child: SafeArea(
@@ -3959,13 +3975,13 @@ class _ChatScreenState extends State<ChatScreen> {
               width: 42,
               height: 42,
               decoration: BoxDecoration(
-                color: NexaColors.cyberBgElevated,
+                color: const Color(0xFFEEF2FF),
                 shape: BoxShape.circle,
-                border: Border.all(color: NexaColors.cyberBorderSubtle),
+                border: Border.all(color: const Color(0xFFC7D2FE)),
               ),
               child: IconButton(
                 padding: EdgeInsets.zero,
-                icon: const Icon(Icons.add_rounded, color: NexaColors.neonCyan, size: 22),
+                icon: const Icon(Icons.add_rounded, color: NexaColors.electricIndigo, size: 22),
                 tooltip: 'Attach encrypted item',
                 onPressed: _showAttachmentPanel,
               ),
@@ -3975,24 +3991,24 @@ class _ChatScreenState extends State<ChatScreen> {
             Expanded(
               child: TextField(
                 controller: _messageController,
-                style: const TextStyle(color: Colors.white, fontSize: 14.5),
+                style: const TextStyle(color: NexaColors.textPrimary, fontSize: 14.5, fontWeight: FontWeight.w500),
                 decoration: InputDecoration(
                   hintText: 'Direct encrypted message or command...',
-                  hintStyle: const TextStyle(color: NexaColors.cyberTextMuted, fontSize: 13),
+                  hintStyle: const TextStyle(color: NexaColors.textMuted, fontSize: 13),
                   contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                   filled: true,
-                  fillColor: NexaColors.cyberBgElevated,
+                  fillColor: const Color(0xFFF8FAFC),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(24),
-                    borderSide: BorderSide(color: NexaColors.cyberBorderSubtle),
+                    borderSide: const BorderSide(color: NexaColors.borderLight),
                   ),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(24),
-                    borderSide: BorderSide(color: NexaColors.cyberBorderSubtle),
+                    borderSide: const BorderSide(color: NexaColors.borderLight),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(24),
-                    borderSide: const BorderSide(color: NexaColors.neonCyan, width: 1.5),
+                    borderSide: const BorderSide(color: NexaColors.electricIndigo, width: 1.5),
                   ),
                 ),
                 onSubmitted: (_) => _sendMessage(),
@@ -4007,7 +4023,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 decoration: BoxDecoration(
                   gradient: NexaColors.cyberGradient,
                   shape: BoxShape.circle,
-                  boxShadow: NexaColors.glowCyan,
+                  boxShadow: NexaColors.glowIndigo,
                 ),
                 child: IconButton(
                   padding: EdgeInsets.zero,
@@ -4023,7 +4039,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 decoration: BoxDecoration(
                   gradient: NexaColors.cyberGradient,
                   shape: BoxShape.circle,
-                  boxShadow: NexaColors.glowCyan,
+                  boxShadow: NexaColors.glowIndigo,
                 ),
                 child: IconButton(
                   padding: EdgeInsets.zero,

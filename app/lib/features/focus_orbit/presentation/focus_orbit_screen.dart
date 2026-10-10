@@ -566,18 +566,21 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
   Widget _buildMaximalistTopBar() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: const BoxDecoration(
-        color: NexaColors.cyberBgSurface,
+      decoration: BoxDecoration(
+        color: Colors.white,
         border: Border(
-          bottom: BorderSide(color: Color(0x3300F0FF), width: 1.0),
+          bottom: BorderSide(color: NexaColors.borderLight, width: 1.0),
         ),
+        boxShadow: const [
+          BoxShadow(color: Color(0x08000000), blurRadius: 8, offset: Offset(0, 2)),
+        ],
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Row(
             children: [
-              // Glowing Neon Menu Button
+              // Light Maximalist Menu Button
               InkWell(
                 onTap: () => _scaffoldKey.currentState?.openDrawer(),
                 borderRadius: BorderRadius.circular(12),
@@ -585,18 +588,18 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                   width: 40,
                   height: 40,
                   decoration: BoxDecoration(
-                    color: const Color(0xFF161F38),
+                    color: Colors.white,
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: const Color(0x4000F0FF), width: 1.2),
-                    boxShadow: [
-                      BoxShadow(color: const Color(0xFF00F0FF).withValues(alpha: 0.15), blurRadius: 8),
+                    border: Border.all(color: NexaColors.borderLight, width: 1.2),
+                    boxShadow: const [
+                      BoxShadow(color: Color(0x0A000000), blurRadius: 6, offset: Offset(0, 2)),
                     ],
                   ),
-                  child: const Icon(Icons.menu_rounded, color: NexaColors.neonCyan, size: 22),
+                  child: const Icon(Icons.menu_rounded, color: NexaColors.primary, size: 22),
                 ),
               ),
               const SizedBox(width: 12),
-              // Brand Icon Shield with Cyber Gradient
+              // Brand Icon Shield with Vibrant Gradient
               Container(
                 width: 40,
                 height: 40,
@@ -621,7 +624,7 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                       const Text(
                         'NEXA',
                         style: TextStyle(
-                          color: Colors.white,
+                          color: NexaColors.textPrimary,
                           fontSize: 17,
                           fontWeight: FontWeight.w900,
                           letterSpacing: 1.2,
@@ -631,15 +634,13 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
-                          gradient: const LinearGradient(
-                            colors: [Color(0xFF00FFA3), Color(0xFF00E5FF)],
-                          ),
+                          gradient: NexaColors.cyberGradient,
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: const Text(
                           'E2EE 256-BIT',
                           style: TextStyle(
-                            color: Colors.black,
+                            color: Colors.white,
                             fontSize: 8,
                             fontWeight: FontWeight.w900,
                             letterSpacing: 0.5,
@@ -654,7 +655,7 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                       Text(
                         'QUANTUM SECURE RELAY',
                         style: TextStyle(
-                          color: NexaColors.neonCyan,
+                          color: NexaColors.primary,
                           fontSize: 9.5,
                           fontWeight: FontWeight.w700,
                           letterSpacing: 0.6,
@@ -705,11 +706,11 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                 decoration: BoxDecoration(
-                  color: const Color(0x1F00FFA3),
+                  color: const Color(0xFFECFDF5),
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: const Color(0x6600FFA3), width: 1.2),
-                  boxShadow: [
-                    BoxShadow(color: const Color(0xFF00FFA3).withValues(alpha: 0.15), blurRadius: 6),
+                  border: Border.all(color: const Color(0xFFA7F3D0), width: 1.2),
+                  boxShadow: const [
+                    BoxShadow(color: Color(0x0A059669), blurRadius: 6, offset: Offset(0, 2)),
                   ],
                 ),
                 child: Row(
@@ -722,7 +723,7 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                         color: NexaColors.neonEmerald,
                         shape: BoxShape.circle,
                         boxShadow: [
-                          BoxShadow(color: Color(0xFF00FFA3), blurRadius: 6),
+                          BoxShadow(color: Color(0x4D059669), blurRadius: 4),
                         ],
                       ),
                     ),
@@ -775,33 +776,32 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
 
     return Column(
       children: [
-        // Maximalist Cyber Search Field
+        // Maximalist Light Search Field
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
           child: Container(
             decoration: BoxDecoration(
-              color: NexaColors.cyberBgSurface,
+              color: Colors.white,
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
-                color: _chatSearchQuery.isNotEmpty ? NexaColors.neonCyan : const Color(0x3300F0FF),
+                color: _chatSearchQuery.isNotEmpty ? NexaColors.primary : NexaColors.borderLight,
                 width: 1.2,
               ),
-              boxShadow: [
-                if (_chatSearchQuery.isNotEmpty)
-                  BoxShadow(color: const Color(0xFF00F0FF).withValues(alpha: 0.15), blurRadius: 10),
+              boxShadow: const [
+                BoxShadow(color: Color(0x0A000000), blurRadius: 8, offset: Offset(0, 2)),
               ],
             ),
             child: TextField(
               controller: _chatSearchController,
               onChanged: (val) => setState(() => _chatSearchQuery = val),
-              style: const TextStyle(color: Colors.white, fontSize: 14),
+              style: const TextStyle(color: NexaColors.textPrimary, fontSize: 14),
               decoration: InputDecoration(
                 hintText: 'Search encrypted conversations & peers...',
-                hintStyle: const TextStyle(color: Color(0xFF64748B), fontSize: 13),
-                prefixIcon: const Icon(Icons.search_rounded, color: NexaColors.neonCyan, size: 20),
+                hintStyle: const TextStyle(color: NexaColors.textMuted, fontSize: 13),
+                prefixIcon: const Icon(Icons.search_rounded, color: NexaColors.primary, size: 20),
                 suffixIcon: _chatSearchQuery.isNotEmpty
                     ? IconButton(
-                        icon: const Icon(Icons.close_rounded, color: Color(0xFF94A3B8), size: 18),
+                        icon: const Icon(Icons.close_rounded, color: NexaColors.textMuted, size: 18),
                         onPressed: () {
                           _chatSearchController.clear();
                           setState(() => _chatSearchQuery = '');
@@ -924,19 +924,23 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
         decoration: BoxDecoration(
           gradient: isSelected ? NexaColors.cyberGradient : null,
-          color: isSelected ? null : const Color(0xFF141C33),
+          color: isSelected ? null : Colors.white,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: isSelected ? Colors.transparent : const Color(0x3300F0FF),
+            color: isSelected ? Colors.transparent : NexaColors.borderLight,
             width: 1.0,
           ),
-          boxShadow: isSelected ? NexaColors.glowCyan : null,
+          boxShadow: isSelected
+              ? NexaColors.glowIndigo
+              : const [
+                  BoxShadow(color: Color(0x0A0F172A), blurRadius: 4, offset: Offset(0, 1)),
+                ],
         ),
         child: Center(
           child: Text(
             label,
             style: TextStyle(
-              color: isSelected ? Colors.white : const Color(0xFF94A3B8),
+              color: isSelected ? Colors.white : NexaColors.textSecondary,
               fontSize: 12,
               fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
             ),
@@ -970,20 +974,20 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                       height: 54,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color: const Color(0xFF161F38),
-                        border: Border.all(color: const Color(0x4000F0FF), width: 1.5),
-                        boxShadow: [
-                          BoxShadow(color: const Color(0xFF00F0FF).withValues(alpha: 0.15), blurRadius: 6),
+                        color: Colors.white,
+                        border: Border.all(color: const Color(0xFFC7D2FE), width: 1.5),
+                        boxShadow: const [
+                          BoxShadow(color: Color(0x104F46E5), blurRadius: 6, offset: Offset(0, 2)),
                         ],
                       ),
                       child: const Center(
-                        child: Icon(Icons.add_rounded, color: NexaColors.neonCyan, size: 28),
+                        child: Icon(Icons.add_rounded, color: NexaColors.electricIndigo, size: 28),
                       ),
                     ),
                     const SizedBox(height: 6),
                     const Text(
                       'New Peer',
-                      style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11, fontWeight: FontWeight.w600),
+                      style: TextStyle(color: NexaColors.textPrimary, fontSize: 11, fontWeight: FontWeight.w700),
                     ),
                   ],
                 ),
@@ -1013,22 +1017,22 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
                           gradient: const LinearGradient(
-                            colors: [Color(0xFF00F0FF), Color(0xFF8B5CF6)],
+                            colors: [Color(0xFF4F46E5), Color(0xFF7C3AED)],
                           ),
-                          boxShadow: [
-                            BoxShadow(color: const Color(0xFF00F0FF).withValues(alpha: 0.25), blurRadius: 8),
+                          boxShadow: const [
+                            BoxShadow(color: Color(0x264F46E5), blurRadius: 8, offset: Offset(0, 2)),
                           ],
                         ),
                         child: Container(
                           decoration: const BoxDecoration(
                             shape: BoxShape.circle,
-                            color: Color(0xFF0F1527),
+                            color: Colors.white,
                           ),
                           child: Center(
                             child: Text(
                               initial,
                               style: const TextStyle(
-                                color: Colors.white,
+                                color: NexaColors.electricIndigo,
                                 fontWeight: FontWeight.w900,
                                 fontSize: 18,
                               ),
@@ -1040,11 +1044,11 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                         width: 13,
                         height: 13,
                         decoration: BoxDecoration(
-                          color: NexaColors.neonEmerald,
+                          color: NexaColors.mintEmerald,
                           shape: BoxShape.circle,
-                          border: Border.all(color: const Color(0xFF070913), width: 2),
+                          border: Border.all(color: Colors.white, width: 2),
                           boxShadow: const [
-                            BoxShadow(color: Color(0xFF00FFA3), blurRadius: 4),
+                            BoxShadow(color: Color(0x33059669), blurRadius: 4),
                           ],
                         ),
                       ),
@@ -1058,7 +1062,7 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                       textAlign: TextAlign.center,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
+                      style: const TextStyle(color: NexaColors.textPrimary, fontSize: 11, fontWeight: FontWeight.w700),
                     ),
                   ),
                 ],
@@ -1083,17 +1087,17 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 4),
       decoration: BoxDecoration(
-        color: isUnread ? const Color(0xFF141C33) : NexaColors.cyberBgSurface,
+        color: isUnread ? const Color(0xFFEEF2FF) : Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isUnread ? const Color(0x9900F0FF) : const Color(0x3300F0FF),
+          color: isUnread ? const Color(0xFF818CF8) : NexaColors.borderLight,
           width: isUnread ? 1.5 : 1.0,
         ),
         boxShadow: [
           if (isUnread)
-            BoxShadow(color: const Color(0xFF00F0FF).withValues(alpha: 0.15), blurRadius: 10)
+            const BoxShadow(color: Color(0x1F4F46E5), blurRadius: 10, offset: Offset(0, 2))
           else
-            const BoxShadow(color: Color(0x1A000000), blurRadius: 6, offset: Offset(0, 2)),
+            const BoxShadow(color: Color(0x0A0F172A), blurRadius: 8, offset: Offset(0, 2)),
         ],
       ),
       child: Material(
@@ -1117,24 +1121,24 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                         shape: BoxShape.circle,
                         gradient: LinearGradient(
                           colors: isUnread
-                              ? [const Color(0xFF00F0FF), const Color(0xFF8B5CF6)]
-                              : [const Color(0x8000F0FF), const Color(0x808B5CF6)],
+                              ? [const Color(0xFF4F46E5), const Color(0xFF7C3AED)]
+                              : [const Color(0xFF818CF8), const Color(0xFFA78BFA)],
                         ),
                         boxShadow: [
                           if (isUnread)
-                            BoxShadow(color: const Color(0xFF00F0FF).withValues(alpha: 0.3), blurRadius: 8),
+                            const BoxShadow(color: Color(0x334F46E5), blurRadius: 8, offset: Offset(0, 2)),
                         ],
                       ),
                       child: Container(
                         decoration: const BoxDecoration(
                           shape: BoxShape.circle,
-                          color: Color(0xFF10172A),
+                          color: Colors.white,
                         ),
                         child: Center(
                           child: Text(
                             initial,
-                            style: const TextStyle(
-                              color: NexaColors.neonCyan,
+                            style: TextStyle(
+                              color: isUnread ? NexaColors.electricIndigo : NexaColors.laserViolet,
                               fontWeight: FontWeight.w900,
                               fontSize: 18,
                             ),
@@ -1146,11 +1150,11 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                       width: 12,
                       height: 12,
                       decoration: BoxDecoration(
-                        color: NexaColors.neonEmerald,
+                        color: NexaColors.mintEmerald,
                         shape: BoxShape.circle,
-                        border: Border.all(color: const Color(0xFF0F1527), width: 2),
+                        border: Border.all(color: Colors.white, width: 2),
                         boxShadow: const [
-                          BoxShadow(color: Color(0xFF00FFA3), blurRadius: 4),
+                          BoxShadow(color: Color(0x33059669), blurRadius: 4),
                         ],
                       ),
                     ),
@@ -1174,7 +1178,7 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                                   child: Text(
                                     name,
                                     style: const TextStyle(
-                                      color: Colors.white,
+                                      color: NexaColors.textPrimary,
                                       fontWeight: FontWeight.w800,
                                       fontSize: 15.5,
                                       letterSpacing: -0.2,
@@ -1183,21 +1187,21 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                                   ),
                                 ),
                                 const SizedBox(width: 5),
-                                const Icon(Icons.verified_rounded, color: NexaColors.neonCyan, size: 15),
+                                const Icon(Icons.verified_rounded, color: NexaColors.electricIndigo, size: 15),
                               ],
                             ),
                           ),
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF161F38),
+                              color: isUnread ? const Color(0xFFE0E7FF) : const Color(0xFFF1F5F9),
                               borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: const Color(0x2600F0FF)),
+                              border: Border.all(color: isUnread ? const Color(0xFFC7D2FE) : NexaColors.borderLight),
                             ),
                             child: Text(
                               time,
                               style: TextStyle(
-                                color: isUnread ? NexaColors.neonCyan : const Color(0xFF94A3B8),
+                                color: isUnread ? NexaColors.electricIndigo : NexaColors.textMuted,
                                 fontSize: 10.5,
                                 fontWeight: isUnread ? FontWeight.bold : FontWeight.w600,
                               ),
@@ -1213,7 +1217,7 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                             child: Text(
                               msg,
                               style: TextStyle(
-                                color: isUnread ? Colors.white : const Color(0xFF94A3B8),
+                                color: isUnread ? NexaColors.textPrimary : NexaColors.textSecondary,
                                 fontSize: 13,
                                 fontWeight: isUnread ? FontWeight.w600 : FontWeight.normal,
                               ),
@@ -1228,7 +1232,7 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                               decoration: BoxDecoration(
                                 gradient: NexaColors.cyberGradient,
                                 borderRadius: BorderRadius.circular(10),
-                                boxShadow: NexaColors.glowCyan,
+                                boxShadow: NexaColors.glowIndigo,
                               ),
                               child: Text(
                                 '$unread',
@@ -1244,14 +1248,14 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                               decoration: BoxDecoration(
-                                color: const Color(0x1F00FFA3),
+                                color: const Color(0xFFECFDF5),
                                 borderRadius: BorderRadius.circular(6),
-                                border: Border.all(color: const Color(0x4D00FFA3)),
+                                border: Border.all(color: const Color(0xFFA7F3D0)),
                               ),
                               child: const Text(
                                 'E2EE',
                                 style: TextStyle(
-                                  color: NexaColors.neonEmerald,
+                                  color: NexaColors.mintEmerald,
                                   fontSize: 9,
                                   fontWeight: FontWeight.w800,
                                 ),
@@ -1283,9 +1287,12 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
           child: Container(
             padding: const EdgeInsets.all(4),
             decoration: BoxDecoration(
-              color: const Color(0xFF111827),
+              color: Colors.white,
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: const Color(0x1AFFFFFF)),
+              border: Border.all(color: NexaColors.borderLight),
+              boxShadow: const [
+                BoxShadow(color: Color(0x080F172A), blurRadius: 4, offset: Offset(0, 1)),
+              ],
             ),
             child: Row(
               children: [
@@ -1306,23 +1313,25 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                 child: TextField(
                   controller: _contactsSearchController,
                   onChanged: (val) => setState(() => _contactsSearchQuery = val),
-                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                  style: const TextStyle(color: NexaColors.textPrimary, fontSize: 13),
                   decoration: InputDecoration(
                     hintText: _activeContactsTab == 2 ? 'Search by NEXA ID or @handle...' : 'Filter contacts...',
-                    hintStyle: const TextStyle(color: Color(0xFF64748B), fontSize: 12),
-                    prefixIcon: const Icon(Icons.search, color: Color(0xFF64748B), size: 16),
+                    hintStyle: const TextStyle(color: NexaColors.textMuted, fontSize: 12),
+                    prefixIcon: const Icon(Icons.search, color: NexaColors.electricIndigo, size: 18),
                     filled: true,
-                    fillColor: const Color(0xFF111827),
+                    fillColor: Colors.white,
                     contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: NexaColors.borderLight)),
+                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: NexaColors.borderLight)),
+                    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: NexaColors.electricIndigo, width: 1.5)),
                   ),
                 ),
               ),
               const SizedBox(width: 8),
               IconButton(
                 icon: _isLoadingContacts
-                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF00E5FF)))
-                    : const Icon(Icons.sync, color: Color(0xFF00E5FF), size: 22),
+                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: NexaColors.electricIndigo))
+                    : const Icon(Icons.sync, color: NexaColors.electricIndigo, size: 22),
                 tooltip: 'Sync Device Contacts',
                 onPressed: _isLoadingContacts ? null : _loadContacts,
               ),
@@ -1337,9 +1346,9 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF00E5FF)),
+                      CircularProgressIndicator(strokeWidth: 2, color: NexaColors.electricIndigo),
                       SizedBox(height: 12),
-                      Text('Accessing device contacts...', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12)),
+                      Text('Accessing device contacts...', style: TextStyle(color: NexaColors.textSecondary, fontSize: 12)),
                     ],
                   ),
                 )
@@ -1360,18 +1369,18 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
           padding: const EdgeInsets.symmetric(vertical: 8),
           decoration: BoxDecoration(
             gradient: isSelected ? NexaColors.cyberGradient : null,
-            color: isSelected ? null : const Color(0xFF141C33),
+            color: isSelected ? null : const Color(0xFFF1F5F9),
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
-              color: isSelected ? Colors.transparent : const Color(0x3300F0FF),
+              color: isSelected ? Colors.transparent : NexaColors.borderLight,
               width: 1.0,
             ),
-            boxShadow: isSelected ? NexaColors.glowCyan : null,
+            boxShadow: isSelected ? NexaColors.glowIndigo : null,
           ),
           child: Text(
             label,
             style: TextStyle(
-              color: isSelected ? Colors.white : const Color(0xFF94A3B8),
+              color: isSelected ? Colors.white : NexaColors.textSecondary,
               fontSize: 12,
               fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
             ),
@@ -1408,14 +1417,14 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.group_outlined, color: Color(0xFF64748B), size: 36),
+              const Icon(Icons.group_outlined, color: NexaColors.textMuted, size: 36),
               const SizedBox(height: 12),
-              const Text('No NEXA peers found in address book', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
+              const Text('No NEXA peers found in address book', style: TextStyle(color: NexaColors.textPrimary, fontSize: 14, fontWeight: FontWeight.bold)),
               const SizedBox(height: 6),
-              const Text('Switch to "Device Contacts" or "Directory" to find users.', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12)),
+              const Text('Switch to "Device Contacts" or "Directory" to find users.', style: TextStyle(color: NexaColors.textSecondary, fontSize: 12)),
               const SizedBox(height: 14),
               ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF111827)),
+                style: ElevatedButton.styleFrom(backgroundColor: NexaColors.electricIndigo, foregroundColor: Colors.white),
                 onPressed: () => setState(() => _activeContactsTab = 2),
                 child: const Text('Browse Directory'),
               ),
@@ -1427,7 +1436,7 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
       return ListView.separated(
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
         itemCount: onNexa.length,
-        separatorBuilder: (_, _) => const Divider(height: 1, color: Color(0x0FFFFFFF)),
+        separatorBuilder: (_, _) => const Divider(height: 1, color: NexaColors.borderLight),
         itemBuilder: (context, i) {
           final item = onNexa[i];
           final name = (item['name'] ?? 'Peer').toString();
@@ -1438,29 +1447,29 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
             contentPadding: const EdgeInsets.symmetric(vertical: 4),
             leading: CircleAvatar(
               radius: 20,
-              backgroundColor: const Color(0xFF10B981).withValues(alpha: 0.15),
+              backgroundColor: const Color(0xFFECFDF5),
               child: Text(
                 name.isNotEmpty ? name.substring(0, 1).toUpperCase() : '?',
-                style: const TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold),
+                style: const TextStyle(color: NexaColors.mintEmerald, fontWeight: FontWeight.bold),
               ),
             ),
-            title: Text(name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
-            subtitle: Text('$handle • $nexaId', style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
+            title: Text(name, style: const TextStyle(color: NexaColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 14)),
+            subtitle: Text('$handle • $nexaId', style: const TextStyle(color: NexaColors.textSecondary, fontSize: 11)),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 IconButton(
-                  icon: const Icon(Icons.chat_bubble_outline, color: Color(0xFF00E5FF), size: 20),
+                  icon: const Icon(Icons.chat_bubble_outline, color: NexaColors.electricIndigo, size: 20),
                   tooltip: 'Chat',
                   onPressed: () => _openChat(handle, nexaId),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.phone_outlined, color: Color(0xFF10B981), size: 20),
+                  icon: const Icon(Icons.phone_outlined, color: NexaColors.mintEmerald, size: 20),
                   tooltip: 'Voice Call',
                   onPressed: () => _startCall(contactName: name, nexaId: nexaId, isVideo: false),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.videocam_outlined, color: Color(0xFF00E5FF), size: 20),
+                  icon: const Icon(Icons.videocam_outlined, color: NexaColors.laserViolet, size: 20),
                   tooltip: 'Video Call',
                   onPressed: () => _startCall(contactName: name, nexaId: nexaId, isVideo: true),
                 ),
@@ -1483,11 +1492,11 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.contact_phone_outlined, color: Color(0xFF64748B), size: 36),
+              const Icon(Icons.contact_phone_outlined, color: NexaColors.textMuted, size: 36),
               const SizedBox(height: 12),
               Text(
                 kIsWeb ? 'Device Address Book on Mobile Devices' : 'No Contacts Detected',
-                style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+                style: const TextStyle(color: NexaColors.textPrimary, fontSize: 14, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 6),
               Padding(
@@ -1497,7 +1506,7 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                       ? 'Native contacts are fetched on mobile devices. Use Directory search to find peers.'
                       : 'Ensure address book permission is granted in Android system settings.',
                   textAlign: TextAlign.center,
-                  style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                  style: const TextStyle(color: NexaColors.textSecondary, fontSize: 12),
                 ),
               ),
               const SizedBox(height: 14),
@@ -1514,7 +1523,7 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
       return ListView.separated(
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
         itemCount: list.length,
-        separatorBuilder: (_, _) => const Divider(height: 1, color: Color(0x0FFFFFFF)),
+        separatorBuilder: (_, _) => const Divider(height: 1, color: NexaColors.borderLight),
         itemBuilder: (context, i) {
           final item = list[i];
           final name = (item['name'] ?? 'Contact').toString();
@@ -1528,16 +1537,16 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
             onTap: () => _openChat(targetHandle, targetNexaId),
             leading: CircleAvatar(
               radius: 18,
-              backgroundColor: isOnNexa ? const Color(0xFF10B981).withValues(alpha: 0.2) : const Color(0xFF1E293B),
+              backgroundColor: isOnNexa ? const Color(0xFFECFDF5) : const Color(0xFFEEF2FF),
               child: Text(
                 name.isNotEmpty ? name.substring(0, 1).toUpperCase() : '?',
-                style: TextStyle(color: isOnNexa ? const Color(0xFF10B981) : Colors.white60, fontWeight: FontWeight.bold),
+                style: TextStyle(color: isOnNexa ? NexaColors.mintEmerald : NexaColors.electricIndigo, fontWeight: FontWeight.bold),
               ),
             ),
-            title: Text(name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13)),
+            title: Text(name, style: const TextStyle(color: NexaColors.textPrimary, fontWeight: FontWeight.w600, fontSize: 13)),
             subtitle: Text(
               isOnNexa ? '$phone • $targetHandle' : phone,
-              style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+              style: const TextStyle(color: NexaColors.textSecondary, fontSize: 11),
             ),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
@@ -1547,24 +1556,25 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                     padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                     margin: const EdgeInsets.only(right: 4),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                      color: const Color(0xFFECFDF5),
                       borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFFA7F3D0)),
                     ),
-                    child: const Text('ON NEXA', style: TextStyle(color: Color(0xFF10B981), fontSize: 9, fontWeight: FontWeight.bold)),
+                    child: const Text('ON NEXA', style: TextStyle(color: NexaColors.mintEmerald, fontSize: 9, fontWeight: FontWeight.bold)),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.chat_bubble_outline, color: Color(0xFF00E5FF), size: 18),
+                    icon: const Icon(Icons.chat_bubble_outline, color: NexaColors.electricIndigo, size: 18),
                     tooltip: 'Start Chat',
                     onPressed: () => _openChat(targetHandle, targetNexaId),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.phone_outlined, color: Color(0xFF10B981), size: 18),
+                    icon: const Icon(Icons.phone_outlined, color: NexaColors.mintEmerald, size: 18),
                     tooltip: 'Voice Call',
                     onPressed: () => _startCall(contactName: name, nexaId: targetNexaId, isVideo: false),
                   ),
                 ] else ...[
                   IconButton(
-                    icon: const Icon(Icons.chat_bubble_outline, color: Color(0xFF00E5FF), size: 18),
+                    icon: const Icon(Icons.chat_bubble_outline, color: NexaColors.electricIndigo, size: 18),
                     tooltip: 'Start Chat',
                     onPressed: () => _openChat(targetHandle, targetNexaId),
                   ),
@@ -1604,7 +1614,7 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
       return ListView.separated(
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
         itemCount: list.length,
-        separatorBuilder: (_, _) => const Divider(height: 1, color: Color(0x0FFFFFFF)),
+        separatorBuilder: (_, _) => const Divider(height: 1, color: NexaColors.borderLight),
         itemBuilder: (context, i) {
           final u = list[i];
           final un = (u['username'] ?? '').toString();
@@ -1615,27 +1625,27 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
             contentPadding: const EdgeInsets.symmetric(vertical: 4),
             leading: CircleAvatar(
               radius: 18,
-              backgroundColor: const Color(0xFF00E5FF).withValues(alpha: 0.15),
+              backgroundColor: const Color(0xFFEEF2FF),
               child: Text(
                 fn.isNotEmpty ? fn.substring(0, 1).toUpperCase() : '?',
-                style: const TextStyle(color: Color(0xFF00E5FF), fontWeight: FontWeight.bold),
+                style: const TextStyle(color: NexaColors.electricIndigo, fontWeight: FontWeight.bold),
               ),
             ),
-            title: Text(fn, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
-            subtitle: Text('@$un • $nid', style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
+            title: Text(fn, style: const TextStyle(color: NexaColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 13)),
+            subtitle: Text('@$un • $nid', style: const TextStyle(color: NexaColors.textSecondary, fontSize: 11)),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 IconButton(
-                  icon: const Icon(Icons.chat_bubble_outline, color: Color(0xFF00E5FF), size: 18),
+                  icon: const Icon(Icons.chat_bubble_outline, color: NexaColors.electricIndigo, size: 18),
                   onPressed: () => _openChat('@$un', nid),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.phone_outlined, color: Color(0xFF10B981), size: 18),
+                  icon: const Icon(Icons.phone_outlined, color: NexaColors.mintEmerald, size: 18),
                   onPressed: () => _startCall(contactName: fn, nexaId: nid, isVideo: false),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.videocam_outlined, color: Color(0xFF00E5FF), size: 18),
+                  icon: const Icon(Icons.videocam_outlined, color: NexaColors.laserViolet, size: 18),
                   onPressed: () => _startCall(contactName: fn, nexaId: nid, isVideo: true),
                 ),
               ],
@@ -1658,21 +1668,24 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: const Color(0xFF111827),
+                color: Colors.white,
                 shape: BoxShape.circle,
-                border: Border.all(color: const Color(0x1AFFFFFF)),
+                border: Border.all(color: NexaColors.borderLight),
+                boxShadow: const [
+                  BoxShadow(color: Color(0x0A0F172A), blurRadius: 10, offset: Offset(0, 2)),
+                ],
               ),
-              child: const Icon(Icons.phone_in_talk_rounded, color: Color(0xFF10B981), size: 36),
+              child: const Icon(Icons.phone_in_talk_rounded, color: NexaColors.mintEmerald, size: 36),
             ),
             const SizedBox(height: 16),
             const Text(
               'No Call History',
-              style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+              style: TextStyle(color: NexaColors.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 6),
             const Text(
               'Start end-to-end encrypted voice and video calls with any peer.',
-              style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+              style: TextStyle(color: NexaColors.textSecondary, fontSize: 12),
             ),
           ],
         ),
@@ -1682,7 +1695,7 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
     return ListView.separated(
       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
       itemCount: _callLogs.length,
-      separatorBuilder: (_, _) => const Divider(height: 1, color: Color(0x0FFFFFFF)),
+      separatorBuilder: (_, _) => const Divider(height: 1, color: NexaColors.borderLight),
       itemBuilder: (context, i) {
         final log = _callLogs[i];
         final name = (log['name'] ?? 'Peer').toString();
@@ -1694,28 +1707,28 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
           contentPadding: const EdgeInsets.symmetric(vertical: 4),
           leading: CircleAvatar(
             radius: 20,
-            backgroundColor: const Color(0xFF1E293B),
+            backgroundColor: const Color(0xFFEEF2FF),
             child: Icon(
               isVideo ? Icons.videocam : Icons.call,
-              color: isVideo ? const Color(0xFF00E5FF) : const Color(0xFF10B981),
+              color: isVideo ? NexaColors.laserViolet : NexaColors.mintEmerald,
               size: 20,
             ),
           ),
-          title: Text(name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+          title: Text(name, style: const TextStyle(color: NexaColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 14)),
           subtitle: Row(
             children: [
-              const Icon(Icons.call_made, color: Color(0xFF10B981), size: 12),
+              const Icon(Icons.call_made, color: NexaColors.mintEmerald, size: 12),
               const SizedBox(width: 4),
               Text(
                 '${isVideo ? 'Video' : 'Voice'} Call • $time',
-                style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+                style: const TextStyle(color: NexaColors.textSecondary, fontSize: 11),
               ),
             ],
           ),
           trailing: IconButton(
             icon: Icon(
               isVideo ? Icons.videocam : Icons.call,
-              color: isVideo ? const Color(0xFF00E5FF) : const Color(0xFF10B981),
+              color: isVideo ? NexaColors.laserViolet : NexaColors.mintEmerald,
             ),
             tooltip: 'Call back',
             onPressed: () => _startCall(contactName: name, nexaId: nexaId, isVideo: isVideo),
@@ -1736,18 +1749,21 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: const Color(0xFF111827),
+            color: Colors.white,
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: const Color(0x1AFFFFFF)),
+            border: Border.all(color: NexaColors.borderLight),
+            boxShadow: const [
+              BoxShadow(color: Color(0x0A0F172A), blurRadius: 10, offset: Offset(0, 2)),
+            ],
           ),
           child: Row(
             children: [
               CircleAvatar(
                 radius: 30,
-                backgroundColor: const Color(0xFF00E5FF).withValues(alpha: 0.15),
+                backgroundColor: const Color(0xFFEEF2FF),
                 child: Text(
                   _session.username.isNotEmpty ? _session.username.substring(0, 1).toUpperCase() : '?',
-                  style: const TextStyle(color: Color(0xFF00E5FF), fontSize: 24, fontWeight: FontWeight.bold),
+                  style: const TextStyle(color: NexaColors.electricIndigo, fontSize: 24, fontWeight: FontWeight.bold),
                 ),
               ),
               const SizedBox(width: 14),
@@ -1757,17 +1773,17 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                   children: [
                     Text(
                       _session.fullName.isNotEmpty ? _session.fullName : _session.username,
-                      style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                      style: const TextStyle(color: NexaColors.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       _session.handle,
-                      style: const TextStyle(color: Color(0xFF00E5FF), fontSize: 12, fontWeight: FontWeight.w600),
+                      style: const TextStyle(color: NexaColors.electricIndigo, fontSize: 12, fontWeight: FontWeight.w600),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       _session.nexaId,
-                      style: const TextStyle(color: Color(0xFF64748B), fontSize: 11, fontFamily: 'Courier'),
+                      style: const TextStyle(color: NexaColors.textMuted, fontSize: 11, fontFamily: 'Courier'),
                     ),
                   ],
                 ),
@@ -1781,9 +1797,12 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: const Color(0xFF111827),
+            color: Colors.white,
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: const Color(0xFF00E5FF).withValues(alpha: 0.3)),
+            border: Border.all(color: const Color(0xFFC7D2FE)),
+            boxShadow: const [
+              BoxShadow(color: Color(0x0A0F172A), blurRadius: 10, offset: Offset(0, 2)),
+            ],
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1793,26 +1812,26 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                 children: [
                   Row(
                     children: [
-                      Icon(Icons.system_update_alt, color: Color(0xFF00E5FF), size: 20),
+                      Icon(Icons.system_update_alt, color: NexaColors.electricIndigo, size: 20),
                       SizedBox(width: 10),
                       Text(
                         'Application Update Engine',
-                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                        style: TextStyle(color: NexaColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 14),
                       ),
                     ],
                   ),
-                  Text('v${UpdateEngine.currentVersion} (Build ${UpdateEngine.currentBuildNumber})', style: TextStyle(color: Color(0xFF00E5FF), fontSize: 11, fontWeight: FontWeight.bold)),
+                  Text('v${UpdateEngine.currentVersion} (Build ${UpdateEngine.currentBuildNumber})', style: TextStyle(color: NexaColors.electricIndigo, fontSize: 11, fontWeight: FontWeight.bold)),
                 ],
               ),
               const SizedBox(height: 8),
               const Text(
                 'NEXA autonomously checks for server releases, security patches, and calling engine updates.',
-                style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                style: TextStyle(color: NexaColors.textSecondary, fontSize: 12),
               ),
               const SizedBox(height: 12),
               ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF0284C7),
+                  backgroundColor: NexaColors.electricIndigo,
                   foregroundColor: Colors.white,
                   minimumSize: const Size(double.infinity, 38),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -1828,35 +1847,35 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
 
         // Security & Vault Settings
         Material(
-          color: const Color(0xFF111827),
+          color: Colors.white,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
-            side: const BorderSide(color: Color(0x1AFFFFFF)),
+            side: const BorderSide(color: NexaColors.borderLight),
           ),
           clipBehavior: Clip.antiAlias,
           child: Column(
             children: [
               ListTile(
-                leading: const Icon(Icons.security, color: Color(0xFF10B981)),
-                title: const Text('Zero-Knowledge Security', style: TextStyle(color: Colors.white, fontSize: 14)),
-                subtitle: const Text('Double Ratchet • X3DH • AES-256-GCM', style: TextStyle(color: Color(0xFF64748B), fontSize: 11)),
-                trailing: const Icon(Icons.chevron_right, color: Color(0xFF64748B), size: 18),
+                leading: const Icon(Icons.security, color: NexaColors.mintEmerald),
+                title: const Text('Zero-Knowledge Security', style: TextStyle(color: NexaColors.textPrimary, fontSize: 14)),
+                subtitle: const Text('Double Ratchet • X3DH • AES-256-GCM', style: TextStyle(color: NexaColors.textSecondary, fontSize: 11)),
+                trailing: const Icon(Icons.chevron_right, color: NexaColors.textMuted, size: 18),
                 onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PrivacyCenterScreen())),
               ),
-              const Divider(height: 1, color: Color(0x0FFFFFFF)),
+              const Divider(height: 1, color: NexaColors.borderLight),
               ListTile(
-                leading: const Icon(Icons.vpn_key_outlined, color: Color(0xFFF59E0B)),
-                title: const Text('Recovery Key Vault', style: TextStyle(color: Colors.white, fontSize: 14)),
-                subtitle: const Text('24-word self-sovereign seed', style: TextStyle(color: Color(0xFF64748B), fontSize: 11)),
-                trailing: const Icon(Icons.chevron_right, color: Color(0xFF64748B), size: 18),
+                leading: const Icon(Icons.vpn_key_outlined, color: NexaColors.sunfireAmber),
+                title: const Text('Recovery Key Vault', style: TextStyle(color: NexaColors.textPrimary, fontSize: 14)),
+                subtitle: const Text('24-word self-sovereign seed', style: TextStyle(color: NexaColors.textSecondary, fontSize: 11)),
+                trailing: const Icon(Icons.chevron_right, color: NexaColors.textMuted, size: 18),
                 onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RecoveryKeyVaultScreen())),
               ),
-              const Divider(height: 1, color: Color(0x0FFFFFFF)),
+              const Divider(height: 1, color: NexaColors.borderLight),
               ListTile(
-                leading: const Icon(Icons.devices, color: Color(0xFF00E5FF)),
-                title: const Text('Linked Devices', style: TextStyle(color: Colors.white, fontSize: 14)),
-                subtitle: const Text('Authorize secondary devices', style: TextStyle(color: Color(0xFF64748B), fontSize: 11)),
-                trailing: const Icon(Icons.chevron_right, color: Color(0xFF64748B), size: 18),
+                leading: const Icon(Icons.devices, color: NexaColors.vividAzure),
+                title: const Text('Linked Devices', style: TextStyle(color: NexaColors.textPrimary, fontSize: 14)),
+                subtitle: const Text('Authorize secondary devices', style: TextStyle(color: NexaColors.textSecondary, fontSize: 11)),
+                trailing: const Icon(Icons.chevron_right, color: NexaColors.textMuted, size: 18),
                 onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DeviceLinkQrScreen())),
               ),
             ],
@@ -1867,8 +1886,8 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
         // Logout Button
         ElevatedButton.icon(
           style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF1E293B),
-            foregroundColor: const Color(0xFFEF4444),
+            backgroundColor: const Color(0xFFFEE2E2),
+            foregroundColor: const Color(0xFFDC2626),
             minimumSize: const Size(double.infinity, 44),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
@@ -1900,10 +1919,13 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
 
     return Container(
       decoration: const BoxDecoration(
-        color: NexaColors.cyberBgSurface,
+        color: Colors.white,
         border: Border(
-          top: BorderSide(color: Color(0x3300F0FF), width: 1.0),
+          top: BorderSide(color: NexaColors.borderLight, width: 1.0),
         ),
+        boxShadow: [
+          BoxShadow(color: Color(0x0A0F172A), blurRadius: 10, offset: Offset(0, -2)),
+        ],
       ),
       child: SafeArea(
         top: false,
@@ -1924,21 +1946,21 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                   decoration: BoxDecoration(
                     gradient: isSelected ? NexaColors.cyberGradient : null,
                     borderRadius: BorderRadius.circular(16),
-                    boxShadow: isSelected ? NexaColors.glowCyan : null,
+                    boxShadow: isSelected ? NexaColors.glowIndigo : null,
                   ),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(
                         isSelected ? item['activeIcon'] as IconData : item['icon'] as IconData,
-                        color: isSelected ? Colors.white : const Color(0xFF94A3B8),
+                        color: isSelected ? Colors.white : NexaColors.textMuted,
                         size: 22,
                       ),
                       const SizedBox(height: 3),
                       Text(
                         item['label'] as String,
                         style: TextStyle(
-                          color: isSelected ? Colors.white : const Color(0xFF94A3B8),
+                          color: isSelected ? Colors.white : NexaColors.textMuted,
                           fontWeight: isSelected ? FontWeight.w900 : FontWeight.w600,
                           fontSize: 10,
                           letterSpacing: 0.5,
@@ -1985,15 +2007,15 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
 
   Widget _buildModernDrawer() {
     return Drawer(
-      backgroundColor: NexaColors.cyberBgVoid,
+      backgroundColor: Colors.white,
       child: SafeArea(
         child: Column(
           children: [
             Container(
               padding: const EdgeInsets.all(20),
               decoration: const BoxDecoration(
-                color: NexaColors.cyberBgSurface,
-                border: Border(bottom: BorderSide(color: Color(0x3300F0FF), width: 1.0)),
+                color: Color(0xFFF8FAFC),
+                border: Border(bottom: BorderSide(color: NexaColors.borderLight, width: 1.0)),
               ),
               child: Row(
                 children: [
@@ -2004,17 +2026,17 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       gradient: NexaColors.cyberGradient,
-                      boxShadow: NexaColors.glowCyan,
+                      boxShadow: NexaColors.glowIndigo,
                     ),
                     child: Container(
                       decoration: const BoxDecoration(
                         shape: BoxShape.circle,
-                        color: Color(0xFF0F1527),
+                        color: Colors.white,
                       ),
                       child: Center(
                         child: Text(
                           _session.username.isNotEmpty ? _session.username.substring(0, 1).toUpperCase() : '?',
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 20),
+                          style: const TextStyle(color: NexaColors.electricIndigo, fontWeight: FontWeight.w900, fontSize: 20),
                         ),
                       ),
                     ),
@@ -2026,13 +2048,13 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
                       children: [
                         Text(
                           _session.fullName.isNotEmpty ? _session.fullName : _session.username,
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16),
+                          style: const TextStyle(color: NexaColors.textPrimary, fontWeight: FontWeight.w800, fontSize: 16),
                         ),
                         const SizedBox(height: 3),
                         Text(
                           _session.handle,
                           style: const TextStyle(
-                            color: NexaColors.neonCyan,
+                            color: NexaColors.electricIndigo,
                             fontSize: 12,
                             fontWeight: FontWeight.bold,
                           ),
@@ -2045,34 +2067,34 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
             ),
             const SizedBox(height: 10),
             ListTile(
-              leading: const Icon(Icons.verified_user_rounded, color: NexaColors.neonEmerald, size: 22),
-              title: const Text('Privacy Center', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+              leading: const Icon(Icons.verified_user_rounded, color: NexaColors.mintEmerald, size: 22),
+              title: const Text('Privacy Center', style: TextStyle(color: NexaColors.textPrimary, fontSize: 14, fontWeight: FontWeight.w600)),
               onTap: () {
                 Navigator.pop(context);
                 Navigator.push(context, MaterialPageRoute(builder: (_) => const PrivacyCenterScreen()));
               },
             ),
             ListTile(
-              leading: const Icon(Icons.devices_rounded, color: NexaColors.neonCyan, size: 22),
-              title: const Text('Linked Devices', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+              leading: const Icon(Icons.devices_rounded, color: NexaColors.vividAzure, size: 22),
+              title: const Text('Linked Devices', style: TextStyle(color: NexaColors.textPrimary, fontSize: 14, fontWeight: FontWeight.w600)),
               onTap: () {
                 Navigator.pop(context);
                 Navigator.push(context, MaterialPageRoute(builder: (_) => const DeviceLinkQrScreen()));
               },
             ),
             ListTile(
-              leading: const Icon(Icons.system_update_rounded, color: NexaColors.neonAmber, size: 22),
-              title: const Text('App Update Engine', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+              leading: const Icon(Icons.system_update_rounded, color: NexaColors.sunfireAmber, size: 22),
+              title: const Text('App Update Engine', style: TextStyle(color: NexaColors.textPrimary, fontSize: 14, fontWeight: FontWeight.w600)),
               onTap: () {
                 Navigator.pop(context);
                 UpdateEngine.instance.openUpdateCenter(context);
               },
             ),
             const Spacer(),
-            const Divider(color: Color(0x3300F0FF), height: 1),
+            const Divider(color: NexaColors.borderLight, height: 1),
             ListTile(
-              leading: const Icon(Icons.logout_rounded, color: NexaColors.rubyDestructive, size: 22),
-              title: const Text('Lock Vault', style: TextStyle(color: NexaColors.rubyDestructive, fontWeight: FontWeight.w800, fontSize: 14)),
+              leading: const Icon(Icons.logout_rounded, color: Color(0xFFDC2626), size: 22),
+              title: const Text('Lock Vault', style: TextStyle(color: Color(0xFFDC2626), fontWeight: FontWeight.w800, fontSize: 14)),
               onTap: () {
                 Navigator.pop(context);
                 _session.logout();
@@ -2252,12 +2274,12 @@ class _NewChatSheetState extends State<_NewChatSheet> {
 
     return Container(
       height: MediaQuery.of(context).size.height * 0.88,
-      decoration: BoxDecoration(
-        color: NexaColors.cyberBgSurface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-        border: Border(top: BorderSide(color: NexaColors.cyberBorderSubtle, width: 1.0)),
-        boxShadow: const [
-          BoxShadow(color: Color(0x3300F0FF), blurRadius: 20, spreadRadius: -5),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        border: Border(top: BorderSide(color: NexaColors.borderLight, width: 1.0)),
+        boxShadow: [
+          BoxShadow(color: Color(0x140F172A), blurRadius: 20, spreadRadius: -5),
         ],
       ),
       child: Column(
@@ -2288,7 +2310,7 @@ class _NewChatSheetState extends State<_NewChatSheet> {
                         decoration: BoxDecoration(
                           gradient: NexaColors.cyberGradient,
                           borderRadius: BorderRadius.circular(12),
-                          boxShadow: NexaColors.glowCyan,
+                          boxShadow: NexaColors.glowIndigo,
                         ),
                         child: const Center(
                           child: Icon(Icons.add_comment_rounded, color: Colors.white, size: 20),
@@ -2301,12 +2323,12 @@ class _NewChatSheetState extends State<_NewChatSheet> {
                           children: const [
                             Text(
                               'Start Conversation',
-                              style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800, letterSpacing: -0.3),
+                              style: TextStyle(color: NexaColors.textPrimary, fontSize: 16, fontWeight: FontWeight.w800, letterSpacing: -0.3),
                               overflow: TextOverflow.ellipsis,
                             ),
                             Text(
                               'PEER DISCOVERY // ZERO-KNOWLEDGE E2EE',
-                              style: TextStyle(color: NexaColors.neonCyan, fontSize: 9.5, fontWeight: FontWeight.w600, letterSpacing: 0.8),
+                              style: TextStyle(color: NexaColors.electricIndigo, fontSize: 9.5, fontWeight: FontWeight.w700, letterSpacing: 0.8),
                               overflow: TextOverflow.ellipsis,
                             ),
                           ],
@@ -2316,7 +2338,7 @@ class _NewChatSheetState extends State<_NewChatSheet> {
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.close_rounded, color: NexaColors.cyberTextMuted),
+                  icon: const Icon(Icons.close_rounded, color: NexaColors.textMuted),
                   onPressed: () => Navigator.pop(context),
                 ),
               ],
@@ -2329,14 +2351,14 @@ class _NewChatSheetState extends State<_NewChatSheet> {
             child: TextField(
               controller: _searchController,
               onChanged: _onSearchChanged,
-              style: const TextStyle(color: Colors.white, fontSize: 13.5),
+              style: const TextStyle(color: NexaColors.textPrimary, fontSize: 13.5),
               decoration: InputDecoration(
                 hintText: 'Search registered NEXA ID (NX-...), @handle...',
-                hintStyle: const TextStyle(color: NexaColors.cyberTextMuted, fontSize: 12.5),
-                prefixIcon: const Icon(Icons.search_rounded, color: NexaColors.neonCyan, size: 20),
+                hintStyle: const TextStyle(color: NexaColors.textMuted, fontSize: 12.5),
+                prefixIcon: const Icon(Icons.search_rounded, color: NexaColors.electricIndigo, size: 20),
                 suffixIcon: _searchQuery.isNotEmpty
                     ? IconButton(
-                        icon: const Icon(Icons.clear, color: NexaColors.cyberTextMuted, size: 18),
+                        icon: const Icon(Icons.clear, color: NexaColors.textMuted, size: 18),
                         onPressed: () {
                           _searchController.clear();
                           _onSearchChanged('');
@@ -2344,19 +2366,19 @@ class _NewChatSheetState extends State<_NewChatSheet> {
                       )
                     : null,
                 filled: true,
-                fillColor: NexaColors.cyberBgElevated,
+                fillColor: const Color(0xFFF8FAFC),
                 contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: NexaColors.cyberBorderSubtle),
+                  borderSide: const BorderSide(color: NexaColors.borderLight),
                 ),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: NexaColors.cyberBorderSubtle),
+                  borderSide: const BorderSide(color: NexaColors.borderLight),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: NexaColors.neonCyan, width: 1.5),
+                  borderSide: const BorderSide(color: NexaColors.electricIndigo, width: 1.5),
                 ),
               ),
             ),
@@ -2393,30 +2415,30 @@ class _NewChatSheetState extends State<_NewChatSheet> {
               margin: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
-                color: const Color(0xFF1E293B).withValues(alpha: 0.6),
+                color: const Color(0xFFEEF2FF),
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: const Color(0x26FFFFFF)),
+                border: Border.all(color: const Color(0xFFC7D2FE)),
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.perm_contact_calendar_outlined, color: Color(0xFF00E5FF), size: 22),
+                  const Icon(Icons.perm_contact_calendar_outlined, color: NexaColors.electricIndigo, size: 22),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
                       kIsWeb
                           ? 'Native address book is available on mobile.'
                           : 'Load address book to find phone contacts on NEXA.',
-                      style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+                      style: const TextStyle(color: NexaColors.textSecondary, fontSize: 11),
                     ),
                   ),
                   TextButton.icon(
                     style: TextButton.styleFrom(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                      backgroundColor: const Color(0xFF0284C7).withValues(alpha: 0.2),
-                      foregroundColor: const Color(0xFF00E5FF),
+                      backgroundColor: NexaColors.electricIndigo,
+                      foregroundColor: Colors.white,
                     ),
                     icon: _isSyncing
-                        ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF00E5FF)))
+                        ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                         : const Icon(Icons.sync, size: 14),
                     label: Text(_isSyncing ? 'Syncing...' : 'Sync Contacts', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
                     onPressed: _isSyncing ? null : () async {
@@ -2438,14 +2460,14 @@ class _NewChatSheetState extends State<_NewChatSheet> {
                       children: [
                         Icon(
                           _searchQuery.isNotEmpty ? Icons.person_off_rounded : Icons.person_search_outlined,
-                          color: _searchQuery.isNotEmpty ? const Color(0xFFEF4444) : const Color(0xFF64748B),
+                          color: _searchQuery.isNotEmpty ? const Color(0xFFEF4444) : NexaColors.textMuted,
                           size: 40,
                         ),
                         const SizedBox(height: 12),
                         Text(
                           _searchQuery.isNotEmpty ? 'No account found' : 'No peers or contacts found',
                           style: TextStyle(
-                            color: _searchQuery.isNotEmpty ? const Color(0xFFFCA5A5) : Colors.white,
+                            color: _searchQuery.isNotEmpty ? const Color(0xFFDC2626) : NexaColors.textPrimary,
                             fontSize: 14,
                             fontWeight: FontWeight.bold,
                           ),
@@ -2455,7 +2477,7 @@ class _NewChatSheetState extends State<_NewChatSheet> {
                           _searchQuery.isNotEmpty
                               ? 'No registered NEXA account matches "$_searchQuery".'
                               : 'Sync device contacts or search registered users above.',
-                          style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                          style: const TextStyle(color: NexaColors.textSecondary, fontSize: 12),
                         ),
                       ],
                     ),
@@ -2463,7 +2485,7 @@ class _NewChatSheetState extends State<_NewChatSheet> {
                 : ListView.separated(
                     padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
                     itemCount: displayedItems.length,
-                    separatorBuilder: (_, _) => const Divider(height: 1, color: Color(0x0FFFFFFF)),
+                    separatorBuilder: (_, _) => const Divider(height: 1, color: NexaColors.borderLight),
                     itemBuilder: (ctx, idx) {
                       final item = displayedItems[idx];
                       if (item['type'] == 'device') {
@@ -2526,12 +2548,12 @@ class _NewChatSheetState extends State<_NewChatSheet> {
         margin: const EdgeInsets.fromLTRB(18, 0, 18, 10),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: const Color(0xFF0C1929),
+          color: const Color(0xFFECFDF5),
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.6)),
-          boxShadow: [
+          border: Border.all(color: const Color(0xFF86EFAC)),
+          boxShadow: const [
             BoxShadow(
-              color: const Color(0xFF10B981).withValues(alpha: 0.1),
+              color: Color(0x14059669),
               blurRadius: 10,
               spreadRadius: 1,
             ),
@@ -2542,7 +2564,7 @@ class _NewChatSheetState extends State<_NewChatSheet> {
             Container(
               padding: const EdgeInsets.all(10),
               decoration: const BoxDecoration(
-                color: Color(0xFF10B981),
+                color: NexaColors.mintEmerald,
                 shape: BoxShape.circle,
               ),
               child: const Icon(Icons.verified_user_rounded, color: Colors.white, size: 18),
@@ -2558,7 +2580,7 @@ class _NewChatSheetState extends State<_NewChatSheet> {
                       Flexible(
                         child: Text(
                           matchedName,
-                          style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                          style: const TextStyle(color: NexaColors.textPrimary, fontSize: 13, fontWeight: FontWeight.bold),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
@@ -2566,17 +2588,17 @@ class _NewChatSheetState extends State<_NewChatSheet> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF10B981).withValues(alpha: 0.2),
+                          color: const Color(0xFFD1FAE5),
                           borderRadius: BorderRadius.circular(6),
                         ),
-                        child: const Text('REGISTERED', style: TextStyle(color: Color(0xFF10B981), fontSize: 8, fontWeight: FontWeight.bold)),
+                        child: const Text('REGISTERED', style: TextStyle(color: NexaColors.mintEmerald, fontSize: 8, fontWeight: FontWeight.bold)),
                       ),
                     ],
                   ),
                   const SizedBox(height: 2),
                   Text(
                     '$matchedHandle • $matchedNexaId',
-                    style: const TextStyle(color: Color(0xFF00E5FF), fontSize: 11, fontWeight: FontWeight.w600),
+                    style: const TextStyle(color: NexaColors.electricIndigo, fontSize: 11, fontWeight: FontWeight.w600),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ],
@@ -2585,8 +2607,8 @@ class _NewChatSheetState extends State<_NewChatSheet> {
             const SizedBox(width: 8),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF00E5FF),
-                foregroundColor: Colors.black,
+                backgroundColor: NexaColors.electricIndigo,
+                foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
@@ -2604,18 +2626,18 @@ class _NewChatSheetState extends State<_NewChatSheet> {
         margin: const EdgeInsets.fromLTRB(18, 0, 18, 10),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: const Color(0xFF111827),
+          color: const Color(0xFFF8FAFC),
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: const Color(0x26FFFFFF)),
+          border: Border.all(color: NexaColors.borderLight),
         ),
         child: Row(
           children: [
-            const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF00E5FF))),
+            const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: NexaColors.electricIndigo)),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
                 'Searching server directory for "$cleanInput"...',
-                style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                style: const TextStyle(color: NexaColors.textSecondary, fontSize: 12),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
@@ -2629,20 +2651,20 @@ class _NewChatSheetState extends State<_NewChatSheet> {
       margin: const EdgeInsets.fromLTRB(18, 0, 18, 10),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFF1A1311),
+        color: const Color(0xFFFEF2F2),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFEF4444).withValues(alpha: 0.4)),
+        border: Border.all(color: const Color(0xFFFECACA)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Container(
             padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: const Color(0xFFEF4444).withValues(alpha: 0.15),
+            decoration: const BoxDecoration(
+              color: Color(0xFFFEE2E2),
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.person_off_rounded, color: Color(0xFFEF4444), size: 18),
+            child: const Icon(Icons.person_off_rounded, color: Color(0xFFDC2626), size: 18),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -2652,12 +2674,12 @@ class _NewChatSheetState extends State<_NewChatSheet> {
               children: [
                 const Text(
                   'No account found',
-                  style: TextStyle(color: Color(0xFFFCA5A5), fontSize: 13, fontWeight: FontWeight.bold),
+                  style: TextStyle(color: Color(0xFF991B1B), fontSize: 13, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 1),
                 Text(
                   'No registered account matches "$cleanInput". You can only text registered accounts.',
-                  style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+                  style: const TextStyle(color: Color(0xFFB91C1C), fontSize: 11),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -2676,10 +2698,10 @@ class _NewChatSheetState extends State<_NewChatSheet> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFF00E5FF).withValues(alpha: 0.15) : const Color(0xFF111827),
+          color: isSelected ? const Color(0xFFEEF2FF) : const Color(0xFFF1F5F9),
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: isSelected ? const Color(0xFF00E5FF) : const Color(0x1AFFFFFF),
+            color: isSelected ? NexaColors.electricIndigo : NexaColors.borderLight,
             width: isSelected ? 1.4 : 1,
           ),
         ),
@@ -2689,22 +2711,22 @@ class _NewChatSheetState extends State<_NewChatSheet> {
             Text(
               label,
               style: TextStyle(
-                color: isSelected ? const Color(0xFF00E5FF) : Colors.white70,
+                color: isSelected ? NexaColors.electricIndigo : NexaColors.textSecondary,
                 fontSize: 12,
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
               ),
             ),
             const SizedBox(width: 5),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
               decoration: BoxDecoration(
-                color: isSelected ? const Color(0xFF00E5FF) : const Color(0xFF1E293B),
+                color: isSelected ? NexaColors.electricIndigo : const Color(0xFFE2E8F0),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Text(
                 '$count',
                 style: TextStyle(
-                  color: isSelected ? Colors.black : const Color(0xFF94A3B8),
+                  color: isSelected ? Colors.white : NexaColors.textSecondary,
                   fontSize: 10,
                   fontWeight: FontWeight.bold,
                 ),
@@ -2728,11 +2750,11 @@ class _NewChatSheetState extends State<_NewChatSheet> {
       onTap: isOnNexa ? () => widget.onSelectPeer(targetHandle, targetNexaId) : null,
       leading: CircleAvatar(
         radius: 20,
-        backgroundColor: isOnNexa ? const Color(0xFF10B981).withValues(alpha: 0.2) : const Color(0xFF1E293B),
+        backgroundColor: isOnNexa ? const Color(0xFFECFDF5) : const Color(0xFFEEF2FF),
         child: Text(
           name.isNotEmpty ? name.substring(0, 1).toUpperCase() : '?',
           style: TextStyle(
-            color: isOnNexa ? const Color(0xFF10B981) : Colors.white70,
+            color: isOnNexa ? NexaColors.mintEmerald : NexaColors.electricIndigo,
             fontWeight: FontWeight.bold,
             fontSize: 15,
           ),
@@ -2743,7 +2765,7 @@ class _NewChatSheetState extends State<_NewChatSheet> {
           Expanded(
             child: Text(
               name,
-              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14),
+              style: const TextStyle(color: NexaColors.textPrimary, fontWeight: FontWeight.w600, fontSize: 14),
               overflow: TextOverflow.ellipsis,
             ),
           ),
@@ -2751,28 +2773,29 @@ class _NewChatSheetState extends State<_NewChatSheet> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
               decoration: BoxDecoration(
-                color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                color: const Color(0xFFECFDF5),
                 borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFA7F3D0)),
               ),
-              child: const Text('ON NEXA', style: TextStyle(color: Color(0xFF10B981), fontSize: 9, fontWeight: FontWeight.bold)),
+              child: const Text('ON NEXA', style: TextStyle(color: NexaColors.mintEmerald, fontSize: 9, fontWeight: FontWeight.bold)),
             ),
         ],
       ),
       subtitle: Text(
         isOnNexa ? '$phone • $targetHandle' : (phone.isNotEmpty ? phone : 'Mobile Contact'),
-        style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+        style: const TextStyle(color: NexaColors.textSecondary, fontSize: 11),
       ),
       trailing: isOnNexa
           ? Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 IconButton(
-                  icon: const Icon(Icons.chat_bubble_rounded, color: Color(0xFF00E5FF), size: 20),
+                  icon: const Icon(Icons.chat_bubble_rounded, color: NexaColors.electricIndigo, size: 20),
                   tooltip: 'Start Chat',
                   onPressed: () => widget.onSelectPeer(targetHandle, targetNexaId),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.phone_rounded, color: Color(0xFF10B981), size: 20),
+                  icon: const Icon(Icons.phone_rounded, color: NexaColors.mintEmerald, size: 20),
                   tooltip: 'Voice Call',
                   onPressed: () => widget.onStartCall(name, targetNexaId, false),
                 ),
@@ -2781,11 +2804,11 @@ class _NewChatSheetState extends State<_NewChatSheet> {
           : Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
-                color: const Color(0xFF1E293B),
+                color: const Color(0xFFF1F5F9),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0x1AFFFFFF)),
+                border: Border.all(color: NexaColors.borderLight),
               ),
-              child: const Text('Not on NEXA', style: TextStyle(color: Color(0xFF64748B), fontSize: 10, fontWeight: FontWeight.w600)),
+              child: const Text('Not on NEXA', style: TextStyle(color: NexaColors.textMuted, fontSize: 10, fontWeight: FontWeight.w600)),
             ),
     );
   }
@@ -2801,10 +2824,10 @@ class _NewChatSheetState extends State<_NewChatSheet> {
       onTap: () => widget.onSelectPeer(targetHandle, nid),
       leading: CircleAvatar(
         radius: 20,
-        backgroundColor: const Color(0xFF00E5FF).withValues(alpha: 0.15),
+        backgroundColor: const Color(0xFFEEF2FF),
         child: Text(
           fn.isNotEmpty ? fn.substring(0, 1).toUpperCase() : '?',
-          style: const TextStyle(color: Color(0xFF00E5FF), fontWeight: FontWeight.bold, fontSize: 15),
+          style: const TextStyle(color: NexaColors.electricIndigo, fontWeight: FontWeight.bold, fontSize: 15),
         ),
       ),
       title: Row(
@@ -2812,34 +2835,35 @@ class _NewChatSheetState extends State<_NewChatSheet> {
           Expanded(
             child: Text(
               fn,
-              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14),
+              style: const TextStyle(color: NexaColors.textPrimary, fontWeight: FontWeight.w600, fontSize: 14),
               overflow: TextOverflow.ellipsis,
             ),
           ),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
             decoration: BoxDecoration(
-              color: const Color(0xFF00E5FF).withValues(alpha: 0.15),
+              color: const Color(0xFFECFDF5),
               borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFFA7F3D0)),
             ),
-            child: const Text('VERIFIED PEER', style: TextStyle(color: Color(0xFF00E5FF), fontSize: 9, fontWeight: FontWeight.bold)),
+            child: const Text('VERIFIED PEER', style: TextStyle(color: NexaColors.mintEmerald, fontSize: 9, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
       subtitle: Text(
         '$targetHandle • $nid',
-        style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+        style: const TextStyle(color: NexaColors.textSecondary, fontSize: 11),
       ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           IconButton(
-            icon: const Icon(Icons.chat_bubble_rounded, color: Color(0xFF00E5FF), size: 20),
+            icon: const Icon(Icons.chat_bubble_rounded, color: NexaColors.electricIndigo, size: 20),
             tooltip: 'Start Chat',
             onPressed: () => widget.onSelectPeer(targetHandle, nid),
           ),
           IconButton(
-            icon: const Icon(Icons.phone_rounded, color: Color(0xFF10B981), size: 20),
+            icon: const Icon(Icons.phone_rounded, color: NexaColors.mintEmerald, size: 20),
             tooltip: 'Voice Call',
             onPressed: () => widget.onStartCall(fn, nid, false),
           ),

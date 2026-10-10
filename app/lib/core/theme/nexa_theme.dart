@@ -1,133 +1,158 @@
 import 'package:flutter/material.dart';
 
-/// Modern Minimalist Design Tokens for NEXA.
+/// Light Themed Maximalism Design System for NEXA.
+/// High contrast, vibrant multi-color gradients, snow-white cards, and joyful ergonomic UX.
 class NexaColors {
   // ==========================================================================
-  // MAXIMALIST CYBERPUNK DESIGN SYSTEM TOKENS (Rich, Vibrant & User-Friendly)
+  // LIGHT THEMED MAXIMALISM SURFACES & PALETTE
   // ==========================================================================
-  static const Color cyberBgVoid = Color(0xFF070913);        // Deep Cosmic Void
-  static const Color cyberBgSurface = Color(0xFF0F1527);     // Cyber Glass Card Surface
-  static const Color cyberBgElevated = Color(0xFF161F38);    // Elevated Interactive Surface
-  static const Color cyberBorderSubtle = Color(0x3300F0FF);  // Glowing 20% Cyan Border
-  static const Color cyberBorderGlow = Color(0x6600F0FF);    // 40% Glowing Cyan Border
-  static const Color cyberBorderViolet = Color(0x408B5CF6);  // 25% Glowing Violet Border
+  static const Color lightBgCanvas = Color(0xFFF4F6FB);     // Radiant porcelain canvas
+  static const Color lightBgSurface = Color(0xFFFFFFFF);    // Snow white card surface
+  static const Color lightBgElevated = Color(0xFFF8FAFC);   // Soft pearl layer
+  static const Color lightBgSubtle = Color(0xFFEEF2F6);     // Subtle pill/tag fill
+  static const Color lightBorderSubtle = Color(0xFFE2E8F0); // Hairline slate border
+  static const Color lightBorderGlow = Color(0x334F46E5);   // Radiant indigo accent border
 
-  // Vibrant Neon Palette
-  static const Color neonCyan = Color(0xFF00F0FF);          // Hyper Cyan
-  static const Color neonViolet = Color(0xFF8B5CF6);        // Electric Violet
-  static const Color neonEmerald = Color(0xFF00FFA3);       // Cyber Emerald
-  static const Color neonPink = Color(0xFFEC4899);          // Laser Pink / Magenta
-  static const Color neonAmber = Color(0xFFF59E0B);         // Radiant Amber
-  static const Color neonBlue = Color(0xFF3B82F6);          // Electric Blue
+  // Seamless alias mapping for all app components
+  static const Color cyberBgVoid = lightBgCanvas;
+  static const Color cyberBgSurface = lightBgSurface;
+  static const Color cyberBgElevated = lightBgElevated;
+  static const Color cyberBorderSubtle = lightBorderSubtle;
+  static const Color cyberBorderGlow = lightBorderGlow;
+  static const Color cyberBorderViolet = Color(0x267C3AED);
 
-  // Canonical App Surface Tokens
-  static const Color canvasDark = cyberBgVoid;
-  static const Color surfaceDark = cyberBgSurface;
-  static const Color elevatedDark = cyberBgElevated;
-  static const Color borderDark = cyberBorderSubtle;
-  static const Color borderSubtleDark = cyberBorderSubtle;
+  // Vibrant Maximalist Accents (Optimized for maximum pop on light background)
+  static const Color primary = Color(0xFF4F46E5);           // Electric Indigo
+  static const Color electricIndigo = Color(0xFF4F46E5);    // Electric Indigo
+  static const Color laserViolet = Color(0xFF7C3AED);       // Laser Violet
+  static const Color mintEmerald = Color(0xFF059669);       // Mint Emerald
+  static const Color coralPink = Color(0xFFE11D48);         // Hot Coral Pink
+  static const Color radiantAmber = Color(0xFFD97706);      // Radiant Amber
+  static const Color sunfireAmber = Color(0xFFD97706);      // Sunfire Amber
+  static const Color vividAzure = Color(0xFF0284C7);        // Vivid Azure / Sky
 
-  // Re-map Light tokens to Dark tokens for consistent dark mode
-  static const Color canvasLight = canvasDark;
-  static const Color surfaceLight = surfaceDark;
-  static const Color elevatedLight = elevatedDark;
-  static const Color borderLight = borderDark;
-  static const Color borderStrongLight = cyberBorderGlow;
-  static const Color backgroundLight = canvasDark;
+  static const Color neonCyan = Color(0xFF0284C7);          // Vivid Azure / Sky
+  static const Color neonViolet = Color(0xFF7C3AED);        // Laser Violet
+  static const Color neonEmerald = Color(0xFF059669);       // Mint Emerald
+  static const Color neonPink = Color(0xFFE11D48);          // Hot Coral Pink
+  static const Color neonAmber = Color(0xFFD97706);         // Radiant Amber
+  static const Color neonBlue = Color(0xFF2563EB);          // Electric Royal Blue
 
-  // Active Defaults
-  static const Color canvas = canvasDark;
-  static const Color surface = surfaceDark;
-  static const Color elevated = elevatedDark;
-  static const Color border = borderDark;
-
-  // Accents & Signals
-  static const Color primary = neonCyan;
   static const Color cyanAccent = neonCyan;
-  static const Color emeraldSecure = neonEmerald;
-  static const Color amberAttention = neonAmber;
-  static const Color rubyDestructive = Color(0xFFF43F5E);
+  static const Color emeraldSecure = mintEmerald;
+  static const Color amberAttention = radiantAmber;
+  static const Color rubyDestructive = Color(0xFFE11D48);
   static const Color error = rubyDestructive;
   static const Color amberWarning = amberAttention;
 
-  // Typography Tokens (High Contrast & User Friendly)
-  static const Color textPrimary = Color(0xFFFFFFFF);
-  static const Color textSecondary = Color(0xFF94A3B8);
-  static const Color textMuted = Color(0xFF64748B);
+  // Canonical App Surface Tokens
+  static const Color canvasLight = lightBgCanvas;
+  static const Color surfaceLight = lightBgSurface;
+  static const Color elevatedLight = lightBgElevated;
+  static const Color borderLight = lightBorderSubtle;
+  static const Color borderStrongLight = Color(0xFFCBD5E1);
+  static const Color backgroundLight = lightBgCanvas;
 
-  static const Color cyberTextMain = Color(0xFFFFFFFF);
-  static const Color cyberTextDim = Color(0xFF94A3B8);
+  static const Color canvasDark = canvasLight;
+  static const Color surfaceDark = surfaceLight;
+  static const Color elevatedDark = elevatedLight;
+  static const Color borderDark = borderLight;
+  static const Color borderSubtleDark = borderLight;
+
+  static const Color canvas = canvasLight;
+  static const Color surface = surfaceLight;
+  static const Color elevated = elevatedLight;
+  static const Color border = borderLight;
+
+  // High-Contrast Light Theme Typography Tokens (Deep charcoal slate)
+  static const Color textPrimary = Color(0xFF0F172A);       // 100% Crisp Legibility
+  static const Color textSecondary = Color(0xFF475569);     // Medium Slate
+  static const Color textMuted = Color(0xFF64748B);         // Cool Slate
+
+  static const Color cyberTextMain = Color(0xFF0F172A);
+  static const Color cyberTextDim = Color(0xFF475569);
   static const Color cyberTextMuted = Color(0xFF64748B);
 
   static const Color textPrimaryLight = textPrimary;
   static const Color textSecondaryLight = textSecondary;
   static const Color textMutedLight = textMuted;
 
-  static const Color cyberCardBg = cyberBgSurface;
+  static const Color cyberCardBg = lightBgSurface;
 
-  // Maximalist Cyber Gradients
+  // Maximalist Light Gradients (Vibrant, Saturated, Joyful)
   static const LinearGradient cyberGradient = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
-    colors: [Color(0xFF00E5FF), Color(0xFF7C3AED)],
+    colors: [Color(0xFF4F46E5), Color(0xFF7C3AED), Color(0xFFEC4899)],
   );
 
   static const LinearGradient hologramGradient = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
-    colors: [Color(0xFF00FFA3), Color(0xFF00E5FF)],
+    colors: [Color(0xFF059669), Color(0xFF0284C7)],
   );
 
   static const LinearGradient plasmaGradient = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
-    colors: [Color(0xFF8B5CF6), Color(0xFFEC4899)],
+    colors: [Color(0xFFE11D48), Color(0xFFF97316)],
   );
 
   static const LinearGradient bubbleOutgoingGradient = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
-    colors: [Color(0xFF1E1B4B), Color(0xFF0F3E5E)],
+    colors: [Color(0xFF4F46E5), Color(0xFF7C3AED)],
   );
 
   static const LinearGradient bubbleIncomingGradient = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
-    colors: [Color(0xFF111728), Color(0xFF172038)],
+    colors: [Color(0xFFFFFFFF), Color(0xFFFFFFFF)],
   );
 
   static const LinearGradient cyberCardGradient = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
-    colors: [Color(0xFF0F1527), Color(0xFF141C33)],
+    colors: [Color(0xFFFFFFFF), Color(0xFFF8FAFC)],
   );
 
-  // High-Impact Ambient BoxShadow Glows
-  static List<BoxShadow> get glowCyan => [
-    BoxShadow(color: const Color(0xFF00F0FF).withValues(alpha: 0.35), blurRadius: 16, spreadRadius: 0),
+  // Soft Layered Colored Ambient Shadows for Light Theme
+  static List<BoxShadow> get glowIndigo => [
+    BoxShadow(color: const Color(0xFF4F46E5).withValues(alpha: 0.25), blurRadius: 16, offset: const Offset(0, 6)),
   ];
 
+  static List<BoxShadow> get glowCyan => glowIndigo;
+
   static List<BoxShadow> get glowEmerald => [
-    BoxShadow(color: const Color(0xFF00FFA3).withValues(alpha: 0.35), blurRadius: 16, spreadRadius: 0),
+    BoxShadow(color: const Color(0xFF059669).withValues(alpha: 0.22), blurRadius: 14, offset: const Offset(0, 4)),
   ];
 
   static List<BoxShadow> get glowViolet => [
-    BoxShadow(color: const Color(0xFF8B5CF6).withValues(alpha: 0.35), blurRadius: 16, spreadRadius: 0),
+    BoxShadow(color: const Color(0xFF7C3AED).withValues(alpha: 0.25), blurRadius: 16, offset: const Offset(0, 6)),
+  ];
+
+  static List<BoxShadow> get glowPink => [
+    BoxShadow(color: const Color(0xFFE11D48).withValues(alpha: 0.22), blurRadius: 14, offset: const Offset(0, 4)),
+  ];
+
+  static List<BoxShadow> get cardShadow => [
+    const BoxShadow(color: Color(0x0A000000), blurRadius: 10, offset: Offset(0, 3)),
+    const BoxShadow(color: Color(0x064F46E5), blurRadius: 18, offset: Offset(0, 8)),
   ];
 }
 
 class NexaTheme {
-  static ThemeData get darkTheme {
+  static ThemeData get lightTheme {
     return ThemeData(
-      brightness: Brightness.dark,
-      scaffoldBackgroundColor: NexaColors.canvasDark,
-      primaryColor: NexaColors.cyanAccent,
-      cardColor: NexaColors.surfaceDark,
-      dividerColor: NexaColors.borderDark,
-      colorScheme: const ColorScheme.dark(
-        primary: NexaColors.cyanAccent,
-        secondary: NexaColors.emeraldSecure,
-        surface: NexaColors.surfaceDark,
+      brightness: Brightness.light,
+      scaffoldBackgroundColor: NexaColors.canvasLight,
+      primaryColor: NexaColors.primary,
+      cardColor: NexaColors.surfaceLight,
+      dividerColor: NexaColors.borderLight,
+      colorScheme: const ColorScheme.light(
+        primary: NexaColors.primary,
+        secondary: NexaColors.neonViolet,
+        surface: NexaColors.surfaceLight,
         error: NexaColors.rubyDestructive,
       ),
       textTheme: const TextTheme(
@@ -135,13 +160,13 @@ class NexaTheme {
         bodyMedium: TextStyle(color: NexaColors.textPrimary, fontSize: 14),
         bodySmall: TextStyle(color: NexaColors.textSecondary, fontSize: 12),
         titleLarge: TextStyle(color: NexaColors.textPrimary, fontSize: 20, fontWeight: FontWeight.bold),
-        titleMedium: TextStyle(color: NexaColors.textPrimary, fontSize: 16, fontWeight: FontWeight.w600),
+        titleMedium: TextStyle(color: NexaColors.textPrimary, fontSize: 16, fontWeight: FontWeight.w700),
         titleSmall: TextStyle(color: NexaColors.textSecondary, fontSize: 14, fontWeight: FontWeight.w600),
-        labelLarge: TextStyle(color: NexaColors.textPrimary, fontSize: 14, fontWeight: FontWeight.w600),
+        labelLarge: TextStyle(color: NexaColors.textPrimary, fontSize: 14, fontWeight: FontWeight.w700),
         labelMedium: TextStyle(color: NexaColors.textSecondary, fontSize: 12),
       ),
       appBarTheme: const AppBarTheme(
-        backgroundColor: NexaColors.canvasDark,
+        backgroundColor: NexaColors.surfaceLight,
         elevation: 0,
         scrolledUnderElevation: 0,
         centerTitle: false,
@@ -149,53 +174,54 @@ class NexaTheme {
         titleTextStyle: TextStyle(
           color: NexaColors.textPrimary,
           fontSize: 18,
-          fontWeight: FontWeight.w700,
+          fontWeight: FontWeight.w800,
           letterSpacing: -0.3,
         ),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: NexaColors.surfaceDark,
+        fillColor: NexaColors.surfaceLight,
         hintStyle: const TextStyle(color: NexaColors.textMuted, fontSize: 14),
         labelStyle: const TextStyle(color: NexaColors.textSecondary, fontSize: 14),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: NexaColors.borderDark),
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: NexaColors.borderLight),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: NexaColors.borderDark),
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: NexaColors.borderLight),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: NexaColors.cyanAccent, width: 1.5),
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: NexaColors.primary, width: 1.5),
         ),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
           backgroundColor: NexaColors.primary,
           foregroundColor: Colors.white,
-          elevation: 0,
+          elevation: 2,
+          shadowColor: const Color(0x334F46E5),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(16),
           ),
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
           textStyle: const TextStyle(
-            fontWeight: FontWeight.w600,
+            fontWeight: FontWeight.w700,
             fontSize: 14,
           ),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          foregroundColor: NexaColors.textPrimary,
-          side: const BorderSide(color: NexaColors.borderDark),
+          foregroundColor: NexaColors.primary,
+          side: const BorderSide(color: NexaColors.borderLight),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(16),
           ),
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
           textStyle: const TextStyle(
-            fontWeight: FontWeight.w600,
+            fontWeight: FontWeight.w700,
             fontSize: 14,
           ),
         ),
@@ -203,5 +229,5 @@ class NexaTheme {
     );
   }
 
-  static ThemeData get lightTheme => darkTheme;
+  static ThemeData get darkTheme => lightTheme;
 }
