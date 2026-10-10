@@ -685,6 +685,39 @@ class MainActivity : FlutterActivity() {
             }
         }
 
+        // Auto-optimize and compress mobile gallery/camera photos for instant cloud delivery (<400KB)
+        val mimeType = contentResolver.getType(uri) ?: "image/jpeg"
+        if (prefix.contains("gallery") || prefix.contains("camera") || fallbackExt == "jpg" || mimeType.startsWith("image/")) {
+            try {
+                val bitmap = android.graphics.BitmapFactory.decodeFile(cacheFile.absolutePath)
+                if (bitmap != null) {
+                    val maxDim = 1280
+                    val width = bitmap.width
+                    val height = bitmap.height
+                    var newWidth = width
+                    var newHeight = height
+                    if (width > maxDim || height > maxDim) {
+                        if (width > height) {
+                            newWidth = maxDim
+                            newHeight = (height * (maxDim.toFloat() / width)).toInt()
+                        } else {
+                            newHeight = maxDim
+                            newWidth = (width * (maxDim.toFloat() / height)).toInt()
+                        }
+                    }
+                    val scaled = Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
+                    FileOutputStream(cacheFile).use { out ->
+                        scaled.compress(Bitmap.CompressFormat.JPEG, 82, out)
+                    }
+                    if (scaled != bitmap) {
+                        scaled.recycle()
+                    }
+                    bitmap.recycle()
+                    fileSize = cacheFile.length()
+                }
+            } catch (_: Exception) {}
+        }
+
         if (fileSize == 0L) {
             fileSize = cacheFile.length()
         }

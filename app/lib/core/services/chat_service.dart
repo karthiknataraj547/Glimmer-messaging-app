@@ -112,10 +112,34 @@ class ChatService {
 
       final isMe = uiMsg['isMe'] == true;
       if (!isMe) {
+        final aType = (uiMsg['attachmentType'] ?? '').toString().toLowerCase();
+        String snippet = uiMsg['text']?.toString() ?? '';
+        if (snippet.isEmpty || snippet == 'Photo' || snippet == 'Image') {
+          if (aType == 'photo' || aType == 'image') {
+            snippet = '📷 Photo';
+          } else if (aType == 'voice') {
+            snippet = '🎤 Voice Note';
+          } else if (aType == 'document') {
+            snippet = '📄 Document';
+          } else if (aType == 'location') {
+            snippet = '📍 Location';
+          } else {
+            snippet = 'Encrypted Message';
+          }
+        } else if ((aType == 'photo' || aType == 'image') && !snippet.startsWith('📷')) {
+          snippet = '📷 $snippet';
+        } else if (aType == 'voice' && !snippet.startsWith('🎤')) {
+          snippet = '🎤 Voice Note';
+        } else if (aType == 'document' && !snippet.startsWith('📄')) {
+          snippet = '📄 $snippet';
+        } else if (aType == 'location' && !snippet.startsWith('📍')) {
+          snippet = '📍 Location';
+        }
+
         updateRecentChat(
           peerName: senderHandle.isNotEmpty ? '@$senderHandle' : senderNexaId,
           peerNexaId: senderNexaId,
-          lastMessage: uiMsg['text']?.toString() ?? '',
+          lastMessage: snippet,
           timestamp: (uiMsg['timestamp'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch,
           unread: 1,
           conversationId: convId,

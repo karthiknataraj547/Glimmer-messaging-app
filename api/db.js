@@ -1181,8 +1181,21 @@ const Database = {
 
   getAttachment(attId) {
     loadFromDisk();
-    if (!dbState.attachments) return null;
-    return dbState.attachments[attId] || null;
+    if (!dbState.attachments) dbState.attachments = {};
+    if (dbState.attachments[attId]) return dbState.attachments[attId];
+    if (dbState.messages) {
+      const found = dbState.messages.find(m => m.attachment_id === attId);
+      if (found && found.location_data && found.location_data.data_base64) {
+        return {
+          id: attId,
+          media_type: found.attachment_type || 'image/jpeg',
+          data_base64: found.location_data.data_base64,
+          name: found.attachment_name || 'attachment',
+          size_bytes: found.attachment_size || 0
+        };
+      }
+    }
+    return null;
   },
 
   /**

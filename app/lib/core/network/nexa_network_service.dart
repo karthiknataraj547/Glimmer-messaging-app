@@ -4,6 +4,7 @@ import 'dart:io';
 import '../crypto/nexa_envelope.dart';
 import '../services/chat_service.dart';
 import '../session/user_session.dart';
+import 'auth_service.dart';
 
 /// Network event received from the NEXA Zero-Knowledge Relay.
 class NexaNetworkEvent {
@@ -18,6 +19,12 @@ class NexaNetworkEvent {
 /// - HTTP REST requests with automatic JSON serialization
 /// - Persistent WebSocket with auto-reconnect and device binding
 class NexaNetworkService {
+  static final NexaNetworkService instance = NexaNetworkService._internal();
+  NexaNetworkService._internal()
+      : baseUrl = '',
+        wsUrl = '',
+        deviceId = 'device_${Platform.operatingSystem}';
+
   final String baseUrl;
   final String wsUrl;
   final String deviceId;
@@ -41,11 +48,19 @@ class NexaNetworkService {
   Stream<bool> get connectionState => _connectionStateController.stream;
 
   /// Establishes persistent WebSocket connection and binds device ID.
-  Future<void> connectRealtime() async {
+  Future<void> connectRealtime({String? customWsUrl}) async {
     if (_isConnected) return;
 
     try {
-      _webSocket = await WebSocket.connect(wsUrl);
+      String resolvedWs = customWsUrl ?? wsUrl;
+      if (resolvedWs.isEmpty) {
+        final httpBase = await AuthService.instance.getBaseUrl();
+        resolvedWs = httpBase.replaceFirst('https://', 'wss://').replaceFirst('http://', 'ws://');
+        if (resolvedWs.endsWith('/')) resolvedWs = resolvedWs.substring(0, resolvedWs.length - 1);
+        resolvedWs += '/v1/realtime';
+      }
+
+      _webSocket = await WebSocket.connect(resolvedWs).timeout(const Duration(seconds: 4));
       _isConnected = true;
       _connectionStateController.add(true);
 

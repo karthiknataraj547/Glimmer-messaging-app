@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../core/services/chat_service.dart';
 import '../../../core/services/call_service.dart';
+import '../../../core/network/nexa_network_service.dart';
 import '../../../core/session/user_session.dart';
 import '../../../core/theme/nexa_theme.dart';
 
@@ -66,6 +67,140 @@ class _ChatScreenState extends State<ChatScreen> {
   double _playbackSpeed = 1.0;
   Timer? _pollingTimer;
 
+  // Media Download & Upload State
+  final Map<String, String> _downloadedMediaFiles = {};
+  final Set<String> _activeDownloadingMsgIds = {};
+
+  String _formatBytes(dynamic bytes) {
+    if (bytes == null) return 'Media';
+    if (bytes is String) {
+      if (bytes.contains('KB') || bytes.contains('MB')) return bytes;
+      final parsed = int.tryParse(bytes);
+      if (parsed == null) return bytes;
+      bytes = parsed;
+    }
+    final num b = bytes is num ? bytes : 0;
+    if (b < 1024) return '$b B';
+    if (b < 1024 * 1024) return '${(b / 1024).toStringAsFixed(1)} KB';
+    return '${(b / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
+  File? _getDownloadedMediaFile(String? attId, String? attName, {String? msgId, String? extraPath}) {
+    if (extraPath != null && extraPath.isNotEmpty) {
+      final ef = File(extraPath);
+      if (ef.existsSync()) return ef;
+    }
+    if (attId != null && attId.isNotEmpty && _downloadedMediaFiles.containsKey(attId)) {
+      final f = File(_downloadedMediaFiles[attId]!);
+      if (f.existsSync()) return f;
+    }
+    if (msgId != null && msgId.isNotEmpty && _downloadedMediaFiles.containsKey(msgId)) {
+      final f = File(_downloadedMediaFiles[msgId]!);
+      if (f.existsSync()) return f;
+    }
+    try {
+      final tempDir = Directory.systemTemp.path;
+      if (attId != null && attId.isNotEmpty) {
+        final safeName = (attName ?? 'media_$attId.jpg').replaceAll(RegExp(r'[^a-zA-Z0-9_\.]'), '_');
+        final targetFile = File('$tempDir/nexa_cache_${attId}_$safeName');
+        if (targetFile.existsSync() && targetFile.lengthSync() > 0) {
+          _downloadedMediaFiles[attId] = targetFile.path;
+          return targetFile;
+        }
+      }
+      if (msgId != null && msgId.isNotEmpty) {
+        final safeName = (attName ?? 'media_$msgId.jpg').replaceAll(RegExp(r'[^a-zA-Z0-9_\.]'), '_');
+        final targetFile = File('$tempDir/nexa_cache_${msgId}_$safeName');
+        if (targetFile.existsSync() && targetFile.lengthSync() > 0) {
+          _downloadedMediaFiles[msgId] = targetFile.path;
+          return targetFile;
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  Future<void> _downloadAttachmentForReceiver(Map<String, dynamic> msg) async {
+    final msgId = (msg['id'] ?? '').toString();
+    final attId = (msg['attachmentId'] ?? msg['attachment_id'] ?? (msg['extra'] is Map ? msg['extra']['attachment_id'] ?? msg['extra']['attachmentId'] : null))?.toString();
+    final rawUrl = (msg['attachmentUrl'] ?? msg['attachment_url'] ?? (msg['extra'] is Map ? msg['extra']['attachment_url'] ?? msg['extra']['url'] : null))?.toString();
+    final attName = (msg['attachmentName'] ?? msg['attachment_name'] ?? (msg['extra'] is Map ? msg['extra']['attachment_name'] ?? msg['extra']['name'] : null))?.toString();
+
+    if (attId == null && (rawUrl == null || rawUrl.isEmpty) && (msg['extra']?['data_base64'] == null && msg['data_base64'] == null)) return;
+    if (_activeDownloadingMsgIds.contains(msgId)) return;
+
+    setState(() {
+      _activeDownloadingMsgIds.add(msgId);
+    });
+
+    try {
+      final b64 = (msg['extra'] is Map ? (msg['extra']['data_base64'] ?? msg['extra']['dataBase64']) : null) ?? msg['data_base64'] ?? msg['dataBase64'];
+      if (b64 is String && b64.isNotEmpty) {
+        final tempDir = Directory.systemTemp.path;
+        final safeName = (attName ?? 'media_${attId ?? msgId}.jpg').replaceAll(RegExp(r'[^a-zA-Z0-9_\.]'), '_');
+        final file = File('$tempDir/nexa_cache_${attId ?? msgId}_$safeName');
+        await file.writeAsBytes(base64Decode(b64), flush: true);
+
+        if (mounted) {
+          setState(() {
+            if (attId != null) _downloadedMediaFiles[attId] = file.path;
+            _downloadedMediaFiles[msgId] = file.path;
+            if (msg['extra'] is Map) {
+              msg['extra']['local_cache_path'] = file.path;
+            } else {
+              msg['extra'] = {'local_cache_path': file.path};
+            }
+          });
+          ChatService.instance.saveLocalMessagesMulti(
+            conversationId: _activeConversationId,
+            peerNexaId: widget.nexaId,
+            peerHandle: widget.contactName,
+            messages: _messages,
+          );
+        }
+        return;
+      }
+
+      final downloadUrl = (rawUrl != null && rawUrl.isNotEmpty)
+          ? (rawUrl.startsWith('http') ? rawUrl : (rawUrl.contains('?') ? '${ChatService.instance.baseUrl}$rawUrl' : '${ChatService.instance.baseUrl}$rawUrl?raw=1'))
+          : '${ChatService.instance.baseUrl}/v1/attachments/$attId?raw=1';
+
+      final res = await http.get(Uri.parse(downloadUrl)).timeout(const Duration(seconds: 15));
+      if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
+        final tempDir = Directory.systemTemp.path;
+        final safeName = (attName ?? 'media_${attId ?? msgId}.jpg').replaceAll(RegExp(r'[^a-zA-Z0-9_\.]'), '_');
+        final file = File('$tempDir/nexa_cache_${attId ?? msgId}_$safeName');
+        await file.writeAsBytes(res.bodyBytes, flush: true);
+
+        if (mounted) {
+          setState(() {
+            if (attId != null) _downloadedMediaFiles[attId] = file.path;
+            _downloadedMediaFiles[msgId] = file.path;
+            if (msg['extra'] is Map) {
+              msg['extra']['local_cache_path'] = file.path;
+            } else {
+              msg['extra'] = {'local_cache_path': file.path};
+            }
+          });
+          ChatService.instance.saveLocalMessagesMulti(
+            conversationId: _activeConversationId,
+            peerNexaId: widget.nexaId,
+            peerHandle: widget.contactName,
+            messages: _messages,
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('[ChatScreen] Media download error: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _activeDownloadingMsgIds.remove(msgId);
+        });
+      }
+    }
+  }
+
   // Message list (Starts empty with zero mock accounts or fake messages)
   final List<Map<String, dynamic>> _messages = [];
 
@@ -122,8 +257,9 @@ class _ChatScreenState extends State<ChatScreen> {
     // 2. Non-blocking background sync with server
     _startBackgroundSync();
 
-    // 3. High-speed periodic background sync (1500ms) for real-time live message delivery
-    _pollingTimer = Timer.periodic(const Duration(milliseconds: 1500), (_) {
+    // 3. High-speed periodic background sync (500ms) for real-time instantaneous message delivery
+    NexaNetworkService.instance.connectRealtime();
+    _pollingTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
       if (mounted) _syncIncomingMessages();
     });
 
@@ -625,11 +761,14 @@ class _ChatScreenState extends State<ChatScreen> {
       }
     });
 
-    // Delivery confirmation background polls
-    Future.delayed(const Duration(milliseconds: 300), () {
+    // Rapid delivery confirmation background burst polls
+    Future.delayed(const Duration(milliseconds: 60), () {
       if (mounted) _syncIncomingMessages();
     });
-    Future.delayed(const Duration(milliseconds: 800), () {
+    Future.delayed(const Duration(milliseconds: 200), () {
+      if (mounted) _syncIncomingMessages();
+    });
+    Future.delayed(const Duration(milliseconds: 500), () {
       if (mounted) _syncIncomingMessages();
     });
   }
@@ -1576,25 +1715,78 @@ class _ChatScreenState extends State<ChatScreen> {
     final tod = TimeOfDay.fromDateTime(now);
     final timeStr = '${tod.hourOfPeriod}:${tod.minute.toString().padLeft(2, '0')} ${tod.period == DayPeriod.am ? 'AM' : 'PM'}';
 
+    final localPath = extra?['path']?.toString();
+    final fileName = extra?['name']?.toString() ?? 'photo_$ts.jpg';
+    final fileSize = extra?['size']?.toString() ?? '52 KB';
+
+    final enrichedExtra = Map<String, dynamic>.from(extra ?? {});
+    enrichedExtra['path'] = localPath;
+    enrichedExtra['size'] = fileSize;
+    enrichedExtra['is_uploading'] = true;
+    enrichedExtra['upload_progress'] = 0.25;
+
+    final messageMap = <String, dynamic>{
+      'id': 'm_$ts',
+      'clientMessageId': clientMessageId,
+      'conversationId': _activeConversationId,
+      'isMe': true,
+      'attachmentType': type.toLowerCase(),
+      'attachmentId': null,
+      'attachmentUrl': null,
+      'attachmentName': fileName,
+      'attachmentSize': null,
+      'text': title,
+      'subtitle': subtitle,
+      'extra': enrichedExtra,
+      'time': timeStr,
+      'timestamp': ts,
+      'status': 'uploading', // Show uploading card immediately!
+      'hasAction': false,
+      'actionAdded': false,
+      'actionDismissed': false,
+      'reactions': <String>[],
+    };
+
+    // 1. Immediately show uploading card in UI (0ms latency!)
+    setState(() {
+      _messages.add(messageMap);
+      _messages.sort((a, b) => ((a['timestamp'] as num?)?.toInt() ?? 0).compareTo((b['timestamp'] as num?)?.toInt() ?? 0));
+      _chatState = ChatState.loaded;
+    });
+    _scrollToBottom();
+
+    // 2. Persist locally and update recent chats immediately
+    ChatService.instance.saveLocalMessagesMulti(
+      conversationId: _activeConversationId,
+      peerNexaId: widget.nexaId,
+      peerHandle: widget.contactName,
+      messages: _messages,
+    );
+    ChatService.instance.updateRecentChat(
+      peerName: _displayName,
+      peerNexaId: widget.nexaId,
+      lastMessage: type.toLowerCase() == 'photo' ? '📷 Photo' : (type.toLowerCase() == 'document' ? '📄 Document' : title),
+      timestamp: ts,
+      unread: 0,
+      conversationId: _activeConversationId,
+    );
+
+    // 3. Background media upload
     String? attachmentId;
     String? attachmentUrl;
     String? attachmentName;
     int? attachmentSize;
-    String? thumbBase64;
 
-    // Check if there is a local file to upload to the server
-    final localPath = extra?['path']?.toString();
     if (localPath != null && File(localPath).existsSync()) {
       try {
         final file = File(localPath);
         final bytes = await file.readAsBytes();
-        final fileName = extra?['name']?.toString() ?? file.uri.pathSegments.last;
         final mediaType = type.toLowerCase() == 'photo' || type.toLowerCase() == 'image'
             ? 'image/jpeg'
             : (type.toLowerCase() == 'document' ? 'application/octet-stream' : 'application/octet-stream');
 
         if (bytes.length < 800000) {
-          thumbBase64 = base64Encode(bytes);
+          enrichedExtra['data_base64'] = base64Encode(bytes);
         }
 
         final uploadResult = await ChatService.instance.uploadAttachment(
@@ -1615,65 +1807,27 @@ class _ChatScreenState extends State<ChatScreen> {
       }
     }
 
-    final enrichedExtra = Map<String, dynamic>.from(extra ?? {});
-    if (thumbBase64 != null) {
-      enrichedExtra['data_base64'] = thumbBase64;
+    if (!mounted) return;
+
+    if (attachmentId == null && (localPath != null && localPath.isNotEmpty)) {
+      // Upload failed
+      setState(() {
+        messageMap['status'] = 'failed';
+        enrichedExtra['is_uploading'] = false;
+      });
+      return;
     }
 
-    final messageMap = <String, dynamic>{
-      'id': 'm_$ts',
-      'clientMessageId': clientMessageId,
-      'conversationId': _activeConversationId,
-      'isMe': true,
-      'attachmentType': type.toLowerCase(),
-      'attachmentId': attachmentId,
-      'attachmentUrl': attachmentUrl,
-      'attachmentName': attachmentName,
-      'attachmentSize': attachmentSize,
-      'text': title,
-      'subtitle': subtitle,
-      'extra': enrichedExtra,
-      'time': timeStr,
-      'timestamp': ts,
-      'status': 'pending', // 1. Pending: saved locally immediately
-      'hasAction': false,
-      'actionAdded': false,
-      'actionDismissed': false,
-      'reactions': <String>[],
-    };
-
-    setState(() {
-      _messages.add(messageMap);
-      _messages.sort((a, b) => ((a['timestamp'] as num?)?.toInt() ?? 0).compareTo((b['timestamp'] as num?)?.toInt() ?? 0));
-      _chatState = ChatState.loaded;
-    });
-
-    _scrollToBottom();
-
-    // 1. Save locally immediately
-    ChatService.instance.saveLocalMessagesMulti(
-      conversationId: _activeConversationId,
-      peerNexaId: widget.nexaId,
-      peerHandle: widget.contactName,
-      messages: _messages,
-    );
-
-    // 2. Retain conversation in recent chats immediately
-    ChatService.instance.updateRecentChat(
-      peerName: _displayName,
-      peerNexaId: widget.nexaId,
-      lastMessage: '$type: $title',
-      timestamp: ts,
-      unread: 0,
-      conversationId: _activeConversationId,
-    );
-
-    // 3. Mark sending
+    // 4. Upload finished! Transition to 'sending' and send to server
     setState(() {
       messageMap['status'] = 'sending';
+      messageMap['attachmentId'] = attachmentId;
+      messageMap['attachmentUrl'] = attachmentUrl;
+      messageMap['attachmentName'] = attachmentName;
+      messageMap['attachmentSize'] = attachmentSize;
+      enrichedExtra['is_uploading'] = false;
     });
 
-    // 4. Send asynchronously without blocking the UI
     ChatService.instance.sendMessage(
       recipientHandle: widget.contactName,
       recipientNexaId: widget.nexaId,
@@ -1708,30 +1862,40 @@ class _ChatScreenState extends State<ChatScreen> {
             _messages[idx]['status'] = 'failed';
           }
         });
-        ChatService.instance.updateRecentChat(
-          peerName: _displayName,
-          peerNexaId: widget.nexaId,
-          lastMessage: '$type: $title',
-          timestamp: ts,
-          unread: 0,
-          conversationId: _activeConversationId,
-        );
         ChatService.instance.saveLocalMessagesMulti(
           conversationId: _activeConversationId,
           peerNexaId: widget.nexaId,
           peerHandle: widget.contactName,
           messages: _messages,
         );
+        ChatService.instance.updateRecentChat(
+          peerName: _displayName,
+          peerNexaId: widget.nexaId,
+          lastMessage: type.toLowerCase() == 'photo' ? '📷 Photo' : (type.toLowerCase() == 'document' ? '📄 Document' : title),
+          timestamp: ts,
+          unread: 0,
+          conversationId: _activeConversationId,
+        );
       }
     }).catchError((e) {
       if (!mounted) return;
-      final localMsgId = 'm_$ts';
-      final idx = _messages.indexWhere((m) => m['id'] == localMsgId);
+      final idx = _messages.indexWhere((m) => m['id'] == 'm_$ts');
       if (idx != -1) {
         setState(() {
           _messages[idx]['status'] = 'failed';
         });
       }
+    });
+
+    // Rapid delivery confirmation background burst polls
+    Future.delayed(const Duration(milliseconds: 80), () {
+      if (mounted) _syncIncomingMessages();
+    });
+    Future.delayed(const Duration(milliseconds: 250), () {
+      if (mounted) _syncIncomingMessages();
+    });
+    Future.delayed(const Duration(milliseconds: 600), () {
+      if (mounted) _syncIncomingMessages();
     });
 
     if (mounted) {
@@ -3301,154 +3465,356 @@ class _ChatScreenState extends State<ChatScreen> {
                         },
                       ),
                     ] else if (attachmentType == 'photo' || attachmentType == 'image') ...[
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(12),
-                            child: GestureDetector(
-                              onTap: () {
-                                final localPath = extra?['path']?.toString();
-                                final rawUrl = (msg['attachmentUrl'] ?? msg['attachment_url'] ?? extra?['url'] ?? extra?['attachment_url'] ?? extra?['attachmentUrl'])?.toString();
-                                final b64 = (extra?['data_base64'] ?? msg['data_base64'] ?? msg['dataBase64'])?.toString();
-                                final fullNetUrl = (rawUrl != null && rawUrl.isNotEmpty)
-                                    ? (rawUrl.startsWith('http') ? rawUrl : '${ChatService.instance.baseUrl}$rawUrl?raw=1')
-                                    : null;
-                                _showFullImageDialog(
-                                  filePath: localPath,
-                                  base64Data: b64,
-                                  networkUrl: fullNetUrl,
-                                  title: text,
-                                  size: extra?['size']?.toString(),
-                                );
-                              },
-                              child: Container(
-                                height: 160,
-                                width: double.infinity,
-                                decoration: const BoxDecoration(
-                                  color: Color(0xFF0F172A),
-                                ),
-                                child: Stack(
-                                  alignment: Alignment.center,
-                                  children: [
-                                    if (extra?['path'] != null &&
-                                        extra!['path'].toString().isNotEmpty &&
-                                        File(extra['path'].toString()).existsSync())
-                                      Positioned.fill(
-                                        child: Image.file(
-                                          File(extra['path'].toString()),
-                                          fit: BoxFit.cover,
-                                          errorBuilder: (context, error, stackTrace) => Center(
-                                            child: Icon(Icons.broken_image, size: 48, color: Colors.white.withValues(alpha: 0.35)),
+                      Builder(
+                        builder: (context) {
+                          final attId = (msg['attachmentId'] ?? msg['attachment_id'] ?? extra?['attachment_id'] ?? extra?['attachmentId'])?.toString();
+                          final attName = (msg['attachmentName'] ?? msg['attachment_name'] ?? extra?['attachment_name'] ?? extra?['name'])?.toString();
+                          final msgId = (msg['id'] ?? '').toString();
+                          final localPath = extra?['path']?.toString();
+                          final localCachePath = extra?['local_cache_path']?.toString();
+                          final b64 = (extra?['data_base64'] ?? msg['data_base64'] ?? msg['dataBase64'])?.toString();
+                          final rawUrl = (msg['attachmentUrl'] ?? msg['attachment_url'] ?? extra?['url'] ?? extra?['attachment_url'] ?? extra?['attachmentUrl'])?.toString();
+                          final fullNetUrl = (rawUrl != null && rawUrl.isNotEmpty)
+                              ? (rawUrl.startsWith('http') ? rawUrl : (rawUrl.contains('?') ? '${ChatService.instance.baseUrl}$rawUrl' : '${ChatService.instance.baseUrl}$rawUrl?raw=1'))
+                              : (attId != null && attId.isNotEmpty ? '${ChatService.instance.baseUrl}/v1/attachments/$attId?raw=1' : null);
+
+                          final isUploading = isMe && (msg['status'] == 'uploading' || extra?['is_uploading'] == true);
+                          final isDownloading = _activeDownloadingMsgIds.contains(msgId);
+
+                          final downloadedFile = _getDownloadedMediaFile(
+                            attId,
+                            attName,
+                            msgId: msgId,
+                            extraPath: localCachePath ?? (isMe ? localPath : null),
+                          );
+                          final isMediaAvailable = downloadedFile != null && downloadedFile.existsSync() && downloadedFile.lengthSync() > 0;
+                          final fileSizeStr = _formatBytes(extra?['size'] ?? extra?['size_bytes'] ?? msg['attachmentSize'] ?? '2.4 MB');
+
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(12),
+                                child: Container(
+                                  height: 175,
+                                  width: double.infinity,
+                                  decoration: const BoxDecoration(
+                                    color: Color(0xFF0F172A),
+                                  ),
+                                  child: Stack(
+                                    alignment: Alignment.center,
+                                    children: [
+                                      // 1. Background image / preview
+                                      if (isMediaAvailable)
+                                        Positioned.fill(
+                                          child: Image.file(
+                                            downloadedFile,
+                                            fit: BoxFit.cover,
+                                            errorBuilder: (context, error, stackTrace) => Center(
+                                              child: Icon(Icons.broken_image, size: 48, color: Colors.white.withValues(alpha: 0.35)),
+                                            ),
+                                          ),
+                                        )
+                                      else if (localPath != null && localPath.isNotEmpty && File(localPath).existsSync())
+                                        Positioned.fill(
+                                          child: Image.file(
+                                            File(localPath),
+                                            fit: BoxFit.cover,
+                                            errorBuilder: (context, error, stackTrace) => Center(
+                                              child: Icon(Icons.broken_image, size: 48, color: Colors.white.withValues(alpha: 0.35)),
+                                            ),
+                                          ),
+                                        )
+                                      else if (b64 != null && b64.isNotEmpty)
+                                        Positioned.fill(
+                                          child: Image.memory(
+                                            base64Decode(b64),
+                                            fit: BoxFit.cover,
+                                            errorBuilder: (context, error, stackTrace) => Center(
+                                              child: Icon(Icons.broken_image, size: 48, color: Colors.white.withValues(alpha: 0.35)),
+                                            ),
+                                          ),
+                                        )
+                                      else
+                                        Positioned.fill(
+                                          child: Container(
+                                            decoration: const BoxDecoration(
+                                              gradient: LinearGradient(
+                                                colors: [Color(0xFF1E293B), Color(0xFF0F172A)],
+                                                begin: Alignment.topLeft,
+                                                end: Alignment.bottomRight,
+                                              ),
+                                            ),
+                                            child: Center(
+                                              child: Icon(Icons.photo_outlined, size: 56, color: Colors.white.withValues(alpha: 0.15)),
+                                            ),
                                           ),
                                         ),
-                                      )
-                                    else if ((extra?['data_base64'] ?? msg['data_base64'] ?? msg['dataBase64']) != null &&
-                                        (extra?['data_base64'] ?? msg['data_base64'] ?? msg['dataBase64']).toString().isNotEmpty)
-                                      Positioned.fill(
-                                        child: Image.memory(
-                                          base64Decode((extra?['data_base64'] ?? msg['data_base64'] ?? msg['dataBase64']).toString()),
-                                          fit: BoxFit.cover,
-                                          errorBuilder: (context, error, stackTrace) => Center(
-                                            child: Icon(Icons.broken_image, size: 48, color: Colors.white.withValues(alpha: 0.35)),
+
+                                      // 2. Sender Uploading Overlay Card
+                                      if (isUploading) ...[
+                                        Positioned.fill(
+                                          child: Container(
+                                            color: Colors.black.withValues(alpha: 0.58),
                                           ),
                                         ),
-                                      )
-                                    else if ((msg['attachmentUrl'] ?? msg['attachment_url'] ?? extra?['url'] ?? extra?['attachment_url'] ?? extra?['attachmentUrl']) != null &&
-                                        (msg['attachmentUrl'] ?? msg['attachment_url'] ?? extra?['url'] ?? extra?['attachment_url'] ?? extra?['attachmentUrl']).toString().isNotEmpty)
-                                      Positioned.fill(
-                                        child: Image.network(
-                                          () {
-                                            final u = (msg['attachmentUrl'] ?? msg['attachment_url'] ?? extra?['url'] ?? extra?['attachment_url'] ?? extra?['attachmentUrl']).toString();
-                                            return u.startsWith('http') ? u : '${ChatService.instance.baseUrl}$u?raw=1';
-                                          }(),
-                                          fit: BoxFit.cover,
-                                          loadingBuilder: (context, child, loadingProgress) {
-                                            if (loadingProgress == null) return child;
-                                            return Center(
-                                              child: SizedBox(
-                                                width: 32,
-                                                height: 32,
-                                                child: CircularProgressIndicator(
-                                                  value: loadingProgress.expectedTotalBytes != null
-                                                      ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
-                                                      : null,
-                                                  color: NexaColors.electricIndigo,
-                                                  strokeWidth: 2.5,
+                                        Center(
+                                          child: Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Container(
+                                                width: 52,
+                                                height: 52,
+                                                decoration: BoxDecoration(
+                                                  shape: BoxShape.circle,
+                                                  color: Colors.black.withValues(alpha: 0.45),
+                                                  border: Border.all(color: Colors.white.withValues(alpha: 0.3), width: 1.5),
+                                                ),
+                                                child: const Stack(
+                                                  alignment: Alignment.center,
+                                                  children: [
+                                                    SizedBox(
+                                                      width: 48,
+                                                      height: 48,
+                                                      child: CircularProgressIndicator(
+                                                        strokeWidth: 3,
+                                                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                                      ),
+                                                    ),
+                                                    Icon(Icons.arrow_upward_rounded, color: Colors.white, size: 24),
+                                                  ],
                                                 ),
                                               ),
-                                            );
-                                          },
-                                          errorBuilder: (context, error, stackTrace) => Center(
-                                            child: Icon(Icons.broken_image, size: 48, color: Colors.white.withValues(alpha: 0.35)),
+                                              const SizedBox(height: 8),
+                                              Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.black.withValues(alpha: 0.7),
+                                                  borderRadius: BorderRadius.circular(12),
+                                                ),
+                                                child: Text(
+                                                  'Uploading • $fileSizeStr',
+                                                  style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                                                ),
+                                              ),
+                                            ],
                                           ),
                                         ),
-                                      )
-                                    else
-                                      Container(
-                                        decoration: const BoxDecoration(
-                                          gradient: LinearGradient(
-                                            colors: [Color(0xFF0284C7), Color(0xFF0369A1)],
-                                            begin: Alignment.topLeft,
-                                            end: Alignment.bottomRight,
-                                          ),
-                                        ),
-                                        child: Center(
-                                          child: Icon(Icons.image, size: 48, color: Colors.white.withValues(alpha: 0.35)),
-                                        ),
-                                      ),
-                                    Positioned(
-                                      top: 6,
-                                      left: 6,
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                        decoration: BoxDecoration(
-                                          color: Colors.black.withValues(alpha: 0.6),
-                                          borderRadius: BorderRadius.circular(6),
-                                        ),
-                                        child: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            const Icon(Icons.lock, color: NexaColors.emeraldSecure, size: 10),
-                                            const SizedBox(width: 4),
-                                            Text(
-                                              extra?['source'] == 'inbuilt_camera'
-                                                  ? 'Inbuilt Camera • AES-GCM'
-                                                  : (extra?['source'] == 'mobile_gallery' ? 'Mobile Gallery • AES-GCM' : 'PointyCastle AES-GCM'),
-                                              style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
+                                        Positioned(
+                                          top: 8,
+                                          left: 8,
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                                            decoration: BoxDecoration(
+                                              color: Colors.black.withValues(alpha: 0.65),
+                                              borderRadius: BorderRadius.circular(8),
                                             ),
-                                          ],
+                                            child: const Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                SizedBox(
+                                                  width: 10,
+                                                  height: 10,
+                                                  child: CircularProgressIndicator(strokeWidth: 1.5, color: NexaColors.electricIndigo),
+                                                ),
+                                                SizedBox(width: 5),
+                                                Text('Encrypting & Uploading...', style: TextStyle(color: Colors.white, fontSize: 9.5, fontWeight: FontWeight.w600)),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+
+                                      // 3. Receiver Downloading Interface (if not yet downloaded)
+                                      if (!isMe && !isMediaAvailable) ...[
+                                        Positioned.fill(
+                                          child: GestureDetector(
+                                            onTap: () => _downloadAttachmentForReceiver(msg),
+                                            behavior: HitTestBehavior.opaque,
+                                            child: Container(
+                                              color: Colors.black.withValues(alpha: 0.52),
+                                              child: Center(
+                                                child: isDownloading
+                                                    ? Column(
+                                                        mainAxisSize: MainAxisSize.min,
+                                                        children: [
+                                                          Container(
+                                                            width: 52,
+                                                            height: 52,
+                                                            decoration: BoxDecoration(
+                                                              shape: BoxShape.circle,
+                                                              color: Colors.black.withValues(alpha: 0.45),
+                                                              border: Border.all(color: Colors.white.withValues(alpha: 0.3), width: 1.5),
+                                                            ),
+                                                            child: const Stack(
+                                                              alignment: Alignment.center,
+                                                              children: [
+                                                                SizedBox(
+                                                                  width: 48,
+                                                                  height: 48,
+                                                                  child: CircularProgressIndicator(
+                                                                    strokeWidth: 3,
+                                                                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                                                  ),
+                                                                ),
+                                                                Icon(Icons.arrow_downward_rounded, color: Colors.white, size: 24),
+                                                              ],
+                                                            ),
+                                                          ),
+                                                          const SizedBox(height: 8),
+                                                          Container(
+                                                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                                            decoration: BoxDecoration(
+                                                              color: Colors.black.withValues(alpha: 0.7),
+                                                              borderRadius: BorderRadius.circular(12),
+                                                            ),
+                                                            child: Text(
+                                                              'Downloading photo • $fileSizeStr',
+                                                              style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      )
+                                                    : Column(
+                                                        mainAxisSize: MainAxisSize.min,
+                                                        children: [
+                                                          Container(
+                                                            width: 52,
+                                                            height: 52,
+                                                            decoration: BoxDecoration(
+                                                              shape: BoxShape.circle,
+                                                              color: NexaColors.electricIndigo.withValues(alpha: 0.9),
+                                                              boxShadow: const [
+                                                                BoxShadow(color: Color(0x334F46E5), blurRadius: 10, offset: Offset(0, 2)),
+                                                              ],
+                                                            ),
+                                                            child: const Center(
+                                                              child: Icon(Icons.arrow_downward_rounded, color: Colors.white, size: 28),
+                                                            ),
+                                                          ),
+                                                          const SizedBox(height: 8),
+                                                          Container(
+                                                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                                            decoration: BoxDecoration(
+                                                              color: Colors.black.withValues(alpha: 0.7),
+                                                              borderRadius: BorderRadius.circular(12),
+                                                              border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
+                                                            ),
+                                                            child: Row(
+                                                              mainAxisSize: MainAxisSize.min,
+                                                              children: [
+                                                                const Icon(Icons.download_rounded, color: Colors.white, size: 13),
+                                                                const SizedBox(width: 5),
+                                                                Text(
+                                                                  'Download Photo • $fileSizeStr',
+                                                                  style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                                                                ),
+                                                              ],
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                        Positioned(
+                                          top: 8,
+                                          left: 8,
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                                            decoration: BoxDecoration(
+                                              color: Colors.black.withValues(alpha: 0.65),
+                                              borderRadius: BorderRadius.circular(8),
+                                            ),
+                                            child: const Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Icon(Icons.lock, color: NexaColors.emeraldSecure, size: 10),
+                                                SizedBox(width: 4),
+                                                Text('PointyCastle AES-GCM', style: TextStyle(color: Colors.white, fontSize: 9.5, fontWeight: FontWeight.bold)),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+
+                                      // 4. Downloaded Photo Gesture Detector for Fullscreen Viewer
+                                      if ((isMediaAvailable || (isMe && !isUploading))) ...[
+                                        Positioned.fill(
+                                          child: Material(
+                                            color: Colors.transparent,
+                                            child: InkWell(
+                                              onTap: () {
+                                                _showFullImageDialog(
+                                                  filePath: downloadedFile?.path ?? (isMe ? localPath : null),
+                                                  base64Data: b64,
+                                                  networkUrl: fullNetUrl,
+                                                  title: text,
+                                                  size: fileSizeStr,
+                                                );
+                                              },
+                                            ),
+                                          ),
+                                        ),
+                                        Positioned(
+                                          top: 8,
+                                          left: 8,
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                                            decoration: BoxDecoration(
+                                              color: Colors.black.withValues(alpha: 0.65),
+                                              borderRadius: BorderRadius.circular(8),
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                const Icon(Icons.lock, color: NexaColors.emeraldSecure, size: 10),
+                                                const SizedBox(width: 4),
+                                                Text(
+                                                  isMe
+                                                      ? (extra?['source'] == 'inbuilt_camera'
+                                                          ? 'Inbuilt Camera • AES-GCM'
+                                                          : (extra?['source'] == 'mobile_gallery' ? 'Mobile Gallery • AES-GCM' : 'PointyCastle AES-GCM'))
+                                                      : 'PointyCastle AES-GCM',
+                                                  style: const TextStyle(color: Colors.white, fontSize: 9.5, fontWeight: FontWeight.bold),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+
+                                      // 5. Size badge in bottom-right
+                                      Positioned(
+                                        bottom: 8,
+                                        right: 8,
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
+                                          decoration: BoxDecoration(
+                                            color: Colors.black.withValues(alpha: 0.65),
+                                            borderRadius: BorderRadius.circular(6),
+                                          ),
+                                          child: Text(fileSizeStr, style: const TextStyle(color: Colors.white, fontSize: 9.5, fontWeight: FontWeight.w600)),
                                         ),
                                       ),
-                                    ),
-                                    Positioned(
-                                      bottom: 6,
-                                      right: 6,
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                        decoration: BoxDecoration(
-                                          color: Colors.black.withValues(alpha: 0.6),
-                                          borderRadius: BorderRadius.circular(6),
-                                        ),
-                                        child: Text((extra?['size'] ?? '2.4 MB').toString(), style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w600)),
-                                      ),
-                                    ),
-                                  ],
+                                    ],
+                                  ),
                                 ),
                               ),
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            text,
-                            style: const TextStyle(color: NexaColors.textPrimary, fontSize: 13, fontWeight: FontWeight.w600),
-                          ),
-                          if (subtitle != null && subtitle.isNotEmpty)
-                            Text(
-                              subtitle,
-                              style: const TextStyle(color: NexaColors.textSecondary, fontSize: 11),
-                            ),
-                        ],
+                              const SizedBox(height: 6),
+                              Text(
+                                text,
+                                style: const TextStyle(color: NexaColors.textPrimary, fontSize: 13, fontWeight: FontWeight.w600),
+                              ),
+                              if (subtitle != null && subtitle.isNotEmpty)
+                                Text(
+                                  subtitle,
+                                  style: const TextStyle(color: NexaColors.textSecondary, fontSize: 11),
+                                ),
+                            ],
+                          );
+                        },
                       ),
                     ] else if (attachmentType == 'document') ...[
                       Row(

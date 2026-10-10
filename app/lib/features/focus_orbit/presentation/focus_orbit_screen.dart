@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../core/network/auth_service.dart';
+import '../../../core/network/nexa_network_service.dart';
 import '../../../core/session/user_session.dart';
 import '../../../core/services/contacts_service.dart';
 import '../../../core/services/chat_service.dart';
@@ -56,11 +57,12 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
     // 0. Load cached recent chats for instant offline render
     _loadCachedChats();
 
-    // 1. Initial message sync & high-speed periodic background polling (1500ms for fast delivery)
+    // 1. Initial message sync & high-speed periodic background polling (800ms for fast delivery)
     _syncInbox();
-    _inboxSyncTimer = Timer.periodic(const Duration(milliseconds: 1500), (_) => _syncInbox());
+    _inboxSyncTimer = Timer.periodic(const Duration(milliseconds: 800), (_) => _syncInbox());
 
-    // 2. Real-time incoming WebSocket message subscription
+    // 2. Real-time incoming WebSocket message subscription & connection
+    NexaNetworkService.instance.connectRealtime();
     _incomingMessageSub = ChatService.instance.onMessageReceived.listen((_) {
       if (mounted) _loadCachedChats();
     });
@@ -176,7 +178,19 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
 
         final rawLastMsg = conv['last_message'];
         if (rawLastMsg is Map) {
-          lastMsg = rawLastMsg['text']?.toString() ?? 'Direct Conversation';
+          final t = rawLastMsg['text']?.toString() ?? '';
+          final type = rawLastMsg['type']?.toString().toLowerCase();
+          if (type == 'photo' || type == 'image') {
+            lastMsg = '📷 Photo';
+          } else if (type == 'voice' || type == 'audio') {
+            lastMsg = '🎤 Voice Note';
+          } else if (type == 'document' || type == 'file') {
+            lastMsg = '📄 Document';
+          } else if (type == 'location') {
+            lastMsg = '📍 Location';
+          } else if (t.isNotEmpty) {
+            lastMsg = t;
+          }
           final tsVal = rawLastMsg['timestamp'];
           if (tsVal is num) lastTs = tsVal.toInt();
         } else if (rawLastMsg is String && rawLastMsg.isNotEmpty) {
@@ -185,12 +199,39 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
           lastMsg = conv['last_message_text'] as String;
         }
 
+        // Check local messages for the real last snippet if available
+        final localThread = ChatService.instance.getCachedMessagesFast(
+          conversationId: convId,
+          peerNexaId: finalNexaId,
+          peerHandle: cleanHandle,
+        );
+        if (localThread.isNotEmpty) {
+          final lastLocal = localThread.last;
+          final localText = (lastLocal['text'] ?? '').toString().trim();
+          final localType = (lastLocal['attachmentType'] ?? (lastLocal['isAudio'] == true ? 'voice' : '')).toString().toLowerCase();
+          final lTs = (lastLocal['timestamp'] as num?)?.toInt() ?? 0;
+          if (lTs >= lastTs || lastMsg == 'Direct Conversation') {
+            if (lTs > 0) lastTs = lTs;
+            if (localType == 'photo' || localType == 'image') {
+              lastMsg = '📷 Photo';
+            } else if (localType == 'voice' || localType == 'audio') {
+              lastMsg = '🎤 Voice Note';
+            } else if (localType == 'document') {
+              lastMsg = '📄 Document';
+            } else if (localType == 'location') {
+              lastMsg = '📍 Location';
+            } else if (localText.isNotEmpty) {
+              lastMsg = localText;
+            }
+          }
+        }
+
         if (conv['last_message_at'] is num) {
-          lastTs = (conv['last_message_at'] as num).toInt();
+          final cTs = (conv['last_message_at'] as num).toInt();
+          if (cTs > lastTs) lastTs = cTs;
         } else if (conv['updated_at'] is num) {
-          lastTs = (conv['updated_at'] as num).toInt();
-        } else if (conv['created_at'] is num) {
-          lastTs = (conv['created_at'] as num).toInt();
+          final uTs = (conv['updated_at'] as num).toInt();
+          if (uTs > lastTs) lastTs = uTs;
         }
 
         final timeStr = _formatTimestamp(lastTs);
@@ -214,13 +255,25 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
           final exUnread = existing['unread'];
           final exTs = (existing['timestamp'] as num?)?.toInt() ?? 0;
 
-          if (exMsg != lastMsg || exUnread != unreadCount || exTime != timeStr || (convId.isNotEmpty && existing['conversationId'] != convId)) {
-            existing['message'] = lastMsg;
-            existing['time'] = timeStr;
-            existing['unread'] = unreadCount;
-            if (convId.isNotEmpty) existing['conversationId'] = convId;
-            if (lastTs > exTs) existing['timestamp'] = lastTs;
-            changed = true;
+          // Never let 'Direct Conversation' clobber an actual previous message snippet
+          if (lastMsg == 'Direct Conversation' && exMsg != null && (exMsg as String).isNotEmpty && exMsg != 'Direct Conversation') {
+            lastMsg = exMsg;
+          }
+
+          if (lastTs >= exTs) {
+            if (exMsg != lastMsg || exUnread != unreadCount || exTime != timeStr || (convId.isNotEmpty && existing['conversationId'] != convId)) {
+              existing['message'] = lastMsg;
+              existing['time'] = timeStr;
+              existing['unread'] = unreadCount;
+              existing['timestamp'] = lastTs;
+              if (convId.isNotEmpty) existing['conversationId'] = convId;
+              changed = true;
+            }
+          } else {
+            if (exUnread != unreadCount) {
+              existing['unread'] = unreadCount;
+              changed = true;
+            }
           }
         } else {
           _chats.add({
@@ -281,7 +334,20 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
 
           final senderHandle = (lastMsg['sender_handle'] as String?) ?? 'Peer';
           final senderNexaId = (lastMsg['sender_nexa_id'] as String?) ?? 'NX-${senderHandle.toUpperCase()}';
-          final text = (lastMsg['text'] as String?) ?? 'Encrypted Memo';
+          final rawText = (lastMsg['text'] as String?)?.trim() ?? '';
+          final rawType = (lastMsg['type'] ?? lastMsg['attachmentType'] ?? '').toString().toLowerCase();
+          String text = rawText;
+          if (rawType == 'photo' || rawType == 'image') {
+            text = '📷 Photo';
+          } else if (rawType == 'voice' || rawType == 'audio') {
+            text = '🎤 Voice Note';
+          } else if (rawType == 'document' || rawType == 'file') {
+            text = '📄 ${lastMsg['attachmentName'] ?? 'Document'}';
+          } else if (rawType == 'location') {
+            text = '📍 Location';
+          } else if (text.isEmpty) {
+            text = 'Encrypted Message';
+          }
           final ts = (lastMsg['timestamp'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch;
           final timeStr = _formatTimestamp(ts);
           final convId = lastMsg['conversation_id'] as String?;
@@ -303,6 +369,7 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
             final formatted = ChatService.formatMessageForUi(raw);
             final id = (formatted['id'] ?? '').toString();
             if (id.isNotEmpty) threadMap[id] = formatted;
+            ChatService.instance.handleRealtimeIncomingMessage(raw);
           }
           final mergedThread = threadMap.values.toList();
           mergedThread.sort((a, b) => ((a['timestamp'] as num?)?.toInt() ?? 0).compareTo((b['timestamp'] as num?)?.toInt() ?? 0));
