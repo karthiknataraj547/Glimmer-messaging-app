@@ -1133,7 +1133,11 @@ const Database = {
 
     let conv = dbState.conversations ? dbState.conversations[conversationId] : null;
     if (requestingUser && conv && Array.isArray(conv.participants)) {
-      const isMember = conv.participants.some(p => (p || '').toLowerCase() === requestingUser.toLowerCase());
+      const isMember = conv.participants.some(p => {
+        const cleanP = (p || '').toLowerCase().replace(/^@+/, '');
+        const reqClean = requestingUser.toLowerCase().replace(/^@+/, '');
+        return cleanP === reqClean || (reqAliases && (reqAliases.has(cleanP) || reqAliases.has((p || '').toLowerCase())));
+      });
       if (!isMember) {
         throw new Error('UNAUTHORIZED_CONVERSATION_MEMBER');
       }
