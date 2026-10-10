@@ -360,14 +360,8 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
     return '${dt.month}/${dt.day}';
   }
 
-  void _openChat(String contactName, String nexaId, {String? conversationId}) async {
-    final canonicalKey = ChatService.getCanonicalKey(nexaId.isNotEmpty ? nexaId : contactName);
-    final now = DateTime.now().millisecondsSinceEpoch;
-    await ChatService.instance.saveReadTimestamp(canonicalKey, now);
-    if (contactName.isNotEmpty) {
-      await ChatService.instance.saveReadTimestamp(ChatService.getCanonicalKey(contactName), now);
-    }
-
+  void _openChat(String contactName, String nexaId, {String? conversationId}) {
+    // 1. Immediate optimistic UI unread reset
     final idx = _chats.indexWhere((c) {
       final n = ((c['name'] as String?) ?? '').toLowerCase().replaceAll('@', '');
       final id = ((c['nexaId'] as String?) ?? '').toLowerCase();
@@ -383,8 +377,16 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
       ChatService.instance.saveRecentChats(_chats);
     }
 
-    if (!mounted) return;
-    await Navigator.push(
+    // 2. Asynchronously record read state without blocking screen transition
+    final canonicalKey = ChatService.getCanonicalKey(nexaId.isNotEmpty ? nexaId : contactName);
+    final now = DateTime.now().millisecondsSinceEpoch;
+    ChatService.instance.saveReadTimestamp(canonicalKey, now);
+    if (contactName.isNotEmpty) {
+      ChatService.instance.saveReadTimestamp(ChatService.getCanonicalKey(contactName), now);
+    }
+
+    // 3. Instant navigation to ChatScreen (<50ms transition)
+    Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => ChatScreen(
@@ -393,9 +395,8 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
           conversationId: conversationId,
         ),
       ),
-    );
-
-    if (mounted) {
+    ).then((_) async {
+      if (!mounted) return;
       final updated = await ChatService.instance.loadRecentChats();
       if (mounted && updated.isNotEmpty) {
         for (final u in updated) {
@@ -419,7 +420,7 @@ class _FocusOrbitScreenState extends State<FocusOrbitScreen> {
         setState(() {});
       }
       _syncInbox();
-    }
+    });
   }
 
   void _startCall({required String contactName, required String nexaId, required bool isVideo}) {

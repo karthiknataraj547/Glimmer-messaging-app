@@ -46,69 +46,159 @@ class ChatService {
     }
   }
 
-  /// Loads locally stored messages for an immediate, flicker-free chat window
-  Future<List<Map<String, dynamic>>> loadLocalMessages(String peerIdOrHandle) async {
-    final key = getCanonicalKey(peerIdOrHandle);
-    if (key.isEmpty) return [];
-
-    if (_memoryThreadCache.containsKey(key) && _memoryThreadCache[key]!.isNotEmpty) {
-      return List<Map<String, dynamic>>.from(_memoryThreadCache[key]!);
+  /// Synchronously retrieve cached messages from memory for instant first frame rendering (<5ms)
+  List<Map<String, dynamic>> getCachedMessagesFast({
+    String? conversationId,
+    String? peerNexaId,
+    String? peerHandle,
+  }) {
+    final candidateKeys = <String>[];
+    if (conversationId != null && conversationId.trim().isNotEmpty) {
+      candidateKeys.add(conversationId.trim());
+    }
+    if (peerNexaId != null && peerNexaId.trim().isNotEmpty) {
+      candidateKeys.add(getCanonicalKey(peerNexaId));
+    }
+    if (peerHandle != null && peerHandle.trim().isNotEmpty) {
+      candidateKeys.add(getCanonicalKey(peerHandle));
     }
 
-    // 1. Native Android Persistent SharedPreferences
-    try {
-      final dynamic raw = await _channel.invokeMethod('loadChatThread', {'key': key});
-      if (raw is String && raw.trim().isNotEmpty) {
-        final decoded = jsonDecode(raw) as List;
-        final list = decoded.map((e) => Map<String, dynamic>.from(e as Map)).toList();
-        _memoryThreadCache[key] = list;
-        return list;
+    for (final k in candidateKeys) {
+      if (_memoryThreadCache.containsKey(k) && _memoryThreadCache[k]!.isNotEmpty) {
+        return List<Map<String, dynamic>>.from(_memoryThreadCache[k]!);
       }
-    } catch (_) {}
-
-    // 2. File-system fallback
-    try {
-      final file = _getThreadFile(key);
-      if (file != null && await file.exists()) {
-        final raw = await file.readAsString();
-        if (raw.trim().isNotEmpty) {
-          final decoded = jsonDecode(raw) as List;
-          final list = decoded.map((e) => Map<String, dynamic>.from(e as Map)).toList();
-          _memoryThreadCache[key] = list;
-          return list;
-        }
-      }
-    } catch (e) {
-      debugPrint('[ChatService] loadLocalMessages fallback error: $e');
     }
     return [];
   }
 
-  /// Saves conversation messages to local persistent storage
-  Future<void> saveLocalMessages(String peerIdOrHandle, List<Map<String, dynamic>> messages) async {
-    final key = getCanonicalKey(peerIdOrHandle);
-    if (key.isEmpty) return;
+  /// Loads locally stored messages with multi-key resolution (conversationId, nexaId, handle)
+  Future<List<Map<String, dynamic>>> loadLocalMessagesMulti({
+    String? conversationId,
+    String? peerNexaId,
+    String? peerHandle,
+  }) async {
+    // 1. Instant check in memory cache
+    final fast = getCachedMessagesFast(
+      conversationId: conversationId,
+      peerNexaId: peerNexaId,
+      peerHandle: peerHandle,
+    );
+    if (fast.isNotEmpty) return fast;
 
+    final candidateKeys = <String>[];
+    if (conversationId != null && conversationId.trim().isNotEmpty) {
+      candidateKeys.add(conversationId.trim());
+    }
+    if (peerNexaId != null && peerNexaId.trim().isNotEmpty) {
+      final k = getCanonicalKey(peerNexaId);
+      if (!candidateKeys.contains(k)) candidateKeys.add(k);
+    }
+    if (peerHandle != null && peerHandle.trim().isNotEmpty) {
+      final k = getCanonicalKey(peerHandle);
+      if (!candidateKeys.contains(k)) candidateKeys.add(k);
+    }
+
+    // 2. Query persistent stores across candidate keys
+    for (final key in candidateKeys) {
+      // 2a. Native Android SharedPreferences
+      try {
+        final dynamic raw = await _channel.invokeMethod('loadChatThread', {'key': key});
+        if (raw is String && raw.trim().isNotEmpty) {
+          final decoded = jsonDecode(raw) as List;
+          final list = decoded.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+          if (list.isNotEmpty) {
+            // Index under all candidate keys for future 0ms lookups
+            for (final k in candidateKeys) {
+              _memoryThreadCache[k] = list;
+            }
+            return list;
+          }
+        }
+      } catch (_) {}
+
+      // 2b. File-system fallback
+      try {
+        final file = _getThreadFile(key);
+        if (file != null && await file.exists()) {
+          final raw = await file.readAsString();
+          if (raw.trim().isNotEmpty) {
+            final decoded = jsonDecode(raw) as List;
+            final list = decoded.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+            if (list.isNotEmpty) {
+              for (final k in candidateKeys) {
+                _memoryThreadCache[k] = list;
+              }
+              return list;
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint('[ChatService] loadLocalMessages fallback error on $key: $e');
+      }
+    }
+
+    return [];
+  }
+
+  /// Loads locally stored messages for an immediate, flicker-free chat window
+  Future<List<Map<String, dynamic>>> loadLocalMessages(String peerIdOrHandle) async {
+    return loadLocalMessagesMulti(peerNexaId: peerIdOrHandle, peerHandle: peerIdOrHandle);
+  }
+
+  /// Saves conversation messages to local persistent storage across all canonical keys
+  Future<void> saveLocalMessagesMulti({
+    String? conversationId,
+    String? peerNexaId,
+    String? peerHandle,
+    required List<Map<String, dynamic>> messages,
+  }) async {
     final copy = messages.map((m) => Map<String, dynamic>.from(m)).toList();
-    // Strictly sort chronologically by timestamp so storage is always ordered
     copy.sort((a, b) => ((a['timestamp'] as num?)?.toInt() ?? 0).compareTo((b['timestamp'] as num?)?.toInt() ?? 0));
-    _memoryThreadCache[key] = copy;
+
+    final candidateKeys = <String>[];
+    if (conversationId != null && conversationId.trim().isNotEmpty) {
+      candidateKeys.add(conversationId.trim());
+    }
+    if (peerNexaId != null && peerNexaId.trim().isNotEmpty) {
+      final k = getCanonicalKey(peerNexaId);
+      if (!candidateKeys.contains(k)) candidateKeys.add(k);
+    }
+    if (peerHandle != null && peerHandle.trim().isNotEmpty) {
+      final k = getCanonicalKey(peerHandle);
+      if (!candidateKeys.contains(k)) candidateKeys.add(k);
+    }
+
+    if (candidateKeys.isEmpty) return;
+
+    // Cache in memory across all keys
+    for (final k in candidateKeys) {
+      _memoryThreadCache[k] = copy;
+    }
+
     final jsonStr = jsonEncode(copy);
 
-    // 1. Native Android Persistent SharedPreferences
-    try {
-      await _channel.invokeMethod('saveChatThread', {'key': key, 'data': jsonStr});
-    } catch (_) {}
+    // Persist to disk/SharedPreferences across all candidate keys
+    for (final key in candidateKeys) {
+      try {
+        await _channel.invokeMethod('saveChatThread', {'key': key, 'data': jsonStr});
+      } catch (_) {}
 
-    // 2. File-system fallback
-    try {
-      final file = _getThreadFile(key);
-      if (file != null) {
-        await file.writeAsString(jsonStr, flush: true);
-      }
-    } catch (e) {
-      debugPrint('[ChatService] saveLocalMessages fallback error: $e');
+      try {
+        final file = _getThreadFile(key);
+        if (file != null) {
+          await file.writeAsString(jsonStr, flush: true);
+        }
+      } catch (_) {}
     }
+  }
+
+  /// Saves conversation messages to local persistent storage
+  Future<void> saveLocalMessages(String peerIdOrHandle, List<Map<String, dynamic>> messages) async {
+    return saveLocalMessagesMulti(
+      peerNexaId: peerIdOrHandle,
+      peerHandle: peerIdOrHandle,
+      messages: messages,
+    );
   }
 
   /// Loads recent chat list from local storage

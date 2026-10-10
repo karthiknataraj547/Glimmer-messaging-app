@@ -69,13 +69,31 @@ class _ChatScreenState extends State<ChatScreen> {
   // Message list (Starts empty with zero mock accounts or fake messages)
   final List<Map<String, dynamic>> _messages = [];
 
+  String get _displayName {
+    if (widget.contactName.trim().isNotEmpty) return widget.contactName.trim();
+    if (widget.nexaId.trim().isNotEmpty) return widget.nexaId.trim();
+    return 'Chat';
+  }
+
+  String get _contactInitial {
+    final name = _displayName.replaceAll('@', '').trim();
+    if (name.isNotEmpty) return name.substring(0, 1).toUpperCase();
+    return '?';
+  }
+
   String get _threadKey => widget.nexaId.trim().isNotEmpty
       ? widget.nexaId
       : widget.contactName;
 
+  bool _isBackgroundSyncing = false;
+
   @override
   void initState() {
     super.initState();
+    if (widget.conversationId != null && widget.conversationId!.isNotEmpty) {
+      _activeConversationId = widget.conversationId;
+    }
+
     _messageController.addListener(() {
       final composing = _messageController.text.trim().isNotEmpty;
       if (composing != _isComposing) {
@@ -83,14 +101,28 @@ class _ChatScreenState extends State<ChatScreen> {
       }
     });
 
-    // 0. Instant offline/cached chat history restore for zero flicker
+    // 0. Synchronous Frame-0 Memory Cache lookup (0ms latency, zero white screen)
+    final fastCached = ChatService.instance.getCachedMessagesFast(
+      conversationId: _activeConversationId ?? widget.conversationId,
+      peerNexaId: widget.nexaId,
+      peerHandle: widget.contactName,
+    );
+    if (fastCached.isNotEmpty) {
+      _messages.addAll(fastCached);
+      _messages.sort((a, b) => ((a['timestamp'] as num?)?.toInt() ?? 0).compareTo((b['timestamp'] as num?)?.toInt() ?? 0));
+      _chatState = ChatState.loaded;
+    } else {
+      _chatState = ChatState.empty;
+    }
+
+    // 1. Instant offline persistent storage restore
     _loadLocalThread();
 
-    // 1. Initial thread load from server
-    _loadThread();
+    // 2. Non-blocking background sync with server
+    _startBackgroundSync();
 
-    // 2. High-speed periodic sync (1000ms) to ensure zero delay in live message delivery
-    _pollingTimer = Timer.periodic(const Duration(milliseconds: 1000), (_) {
+    // 3. High-speed periodic background sync (1500ms) for real-time live message delivery
+    _pollingTimer = Timer.periodic(const Duration(milliseconds: 1500), (_) {
       if (mounted) _syncIncomingMessages();
     });
   }
@@ -107,34 +139,56 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _loadLocalThread() async {
-    List<Map<String, dynamic>> cached = await ChatService.instance.loadLocalMessages(_threadKey);
-    if (cached.isEmpty && widget.contactName.isNotEmpty) {
-      cached = await ChatService.instance.loadLocalMessages(widget.contactName);
-    }
-    if (!mounted || cached.isEmpty) return;
+    try {
+      final cached = await ChatService.instance.loadLocalMessagesMulti(
+        conversationId: _activeConversationId ?? widget.conversationId,
+        peerNexaId: widget.nexaId,
+        peerHandle: widget.contactName,
+      );
+      if (!mounted || cached.isEmpty) return;
 
-    cached.sort((a, b) => ((a['timestamp'] as num?)?.toInt() ?? 0).compareTo((b['timestamp'] as num?)?.toInt() ?? 0));
+      cached.sort((a, b) => ((a['timestamp'] as num?)?.toInt() ?? 0).compareTo((b['timestamp'] as num?)?.toInt() ?? 0));
 
-    if (_messages.isEmpty) {
+      final Map<String, Map<String, dynamic>> byId = {};
+      for (final m in _messages) {
+        final id = (m['id'] ?? '').toString();
+        if (id.isNotEmpty) byId[id] = m;
+      }
+      for (final m in cached) {
+        final id = (m['id'] ?? '').toString();
+        if (id.isNotEmpty && !byId.containsKey(id)) {
+          byId[id] = m;
+        }
+      }
+      final merged = byId.values.toList();
+      merged.sort((a, b) => ((a['timestamp'] as num?)?.toInt() ?? 0).compareTo((b['timestamp'] as num?)?.toInt() ?? 0));
+
       setState(() {
-        _messages.addAll(cached);
+        _messages.clear();
+        _messages.addAll(merged);
+        _chatState = _messages.isNotEmpty ? ChatState.loaded : ChatState.empty;
       });
       _scrollToBottom();
+    } catch (e) {
+      debugPrint('[ChatScreen] _loadLocalThread error: $e');
     }
   }
 
-  Future<void> _loadThread() async {
-    if (_messages.isEmpty) {
-      setState(() => _chatState = ChatState.loading);
-    }
+
+  Future<void> _startBackgroundSync() async {
+    if (_isBackgroundSyncing) return;
+    _isBackgroundSyncing = true;
 
     try {
-      // 1. Resolve or establish canonical direct conversation atomically
-      if (_activeConversationId == null) {
+      // 1. Resolve canonical direct conversation in background if not set
+      if (_activeConversationId == null || _activeConversationId!.isEmpty) {
         if (widget.conversationId != null && widget.conversationId!.isNotEmpty) {
           _activeConversationId = widget.conversationId;
         } else {
-          final conv = await ChatService.instance.getOrCreateDirectConversation(widget.contactName, peerNexaId: widget.nexaId);
+          final conv = await ChatService.instance.getOrCreateDirectConversation(
+            widget.contactName,
+            peerNexaId: widget.nexaId,
+          );
           if (conv != null && conv['id'] != null) {
             _activeConversationId = conv['id'] as String;
           }
@@ -143,14 +197,14 @@ class _ChatScreenState extends State<ChatScreen> {
 
       // 2. Fetch conversation messages
       List<Map<String, dynamic>> history = [];
-      if (_activeConversationId != null) {
+      if (_activeConversationId != null && _activeConversationId!.isNotEmpty) {
         final res = await ChatService.instance.fetchConversationMessages(_activeConversationId!);
         if (res != null && res['messages'] is List) {
           history = List<Map<String, dynamic>>.from(res['messages'] as List);
         }
       }
 
-      // Fallback to thread query if conversation endpoint was empty
+      // Fallback to thread query if conversation endpoint had no messages
       if (history.isEmpty) {
         history = await ChatService.instance.fetchThread(widget.contactName, peerNexaId: widget.nexaId);
       }
@@ -185,7 +239,7 @@ class _ChatScreenState extends State<ChatScreen> {
             ? Map<String, dynamic>.from(m['location_data'] as Map)
             : (m['extra'] is Map ? Map<String, dynamic>.from(m['extra'] as Map) : null);
 
-        // Deduplicate unconfirmed outgoing message
+        // Deduplicate local in-flight outgoing message
         if (isMe) {
           final localKeys = merged.entries
               .where((e) => e.value['isMe'] == true && e.value['text'] == text && e.key.startsWith('m_'))
@@ -196,12 +250,21 @@ class _ChatScreenState extends State<ChatScreen> {
           }
         }
 
+        // Determine delivery status
+        String deliveryStatus = 'sent';
+        if (m['read'] == true || m['status'] == 'read') {
+          deliveryStatus = 'read';
+        } else if (m['delivered'] == true || m['status'] == 'delivered') {
+          deliveryStatus = 'delivered';
+        }
+
         merged[msgId] = {
           'id': msgId,
           'isMe': isMe,
           'text': text,
           'time': timeStr,
           'timestamp': ts,
+          'status': deliveryStatus,
           'isAudio': m['type'] == 'voice',
           'attachmentId': attId,
           'attachmentUrl': attUrl,
@@ -227,26 +290,34 @@ class _ChatScreenState extends State<ChatScreen> {
         _chatState = _messages.isEmpty ? ChatState.empty : ChatState.loaded;
       });
       _scrollToBottom();
+
       final now = DateTime.now().millisecondsSinceEpoch;
       ChatService.instance.saveReadTimestamp(_threadKey, now);
-      ChatService.instance.saveLocalMessages(_threadKey, _messages);
-      if (widget.contactName.isNotEmpty) {
-        ChatService.instance.saveReadTimestamp(widget.contactName, now);
-        ChatService.instance.saveLocalMessages(widget.contactName, _messages);
-      }
+      ChatService.instance.saveLocalMessagesMulti(
+        conversationId: _activeConversationId,
+        peerNexaId: widget.nexaId,
+        peerHandle: widget.contactName,
+        messages: _messages,
+      );
     } catch (e) {
+      debugPrint('[ChatScreen] _startBackgroundSync error: $e');
       if (mounted) {
         setState(() {
           _errorMessage = e.toString();
-          if (_messages.isEmpty) _chatState = ChatState.error;
+          // Never switch to error screen if we already have local cached messages!
+          if (_messages.isEmpty) {
+            _chatState = ChatState.error;
+          }
         });
       }
+    } finally {
+      _isBackgroundSyncing = false;
     }
   }
 
   Future<void> _syncIncomingMessages() async {
     List<Map<String, dynamic>> history = [];
-    if (_activeConversationId != null) {
+    if (_activeConversationId != null && _activeConversationId!.isNotEmpty) {
       final res = await ChatService.instance.fetchConversationMessages(_activeConversationId!);
       if (res != null && res['messages'] is List) {
         history = List<Map<String, dynamic>>.from(res['messages'] as List);
@@ -286,7 +357,9 @@ class _ChatScreenState extends State<ChatScreen> {
               loc['text'] == msgText);
           if (localIdx >= 0) {
             _messages[localIdx]['id'] = msgId;
+            _messages[localIdx]['status'] = m['read'] == true ? 'read' : (m['delivered'] == true ? 'delivered' : 'sent');
             existingIds.add(msgId);
+            addedAny = true;
             continue;
           }
         }
@@ -295,12 +368,20 @@ class _ChatScreenState extends State<ChatScreen> {
         final dt = DateTime.fromMillisecondsSinceEpoch(ts);
         final timeStr = '${dt.hour > 12 ? dt.hour - 12 : (dt.hour == 0 ? 12 : dt.hour)}:${dt.minute.toString().padLeft(2, '0')} ${dt.hour >= 12 ? 'PM' : 'AM'}';
 
+        String deliveryStatus = 'sent';
+        if (m['read'] == true || m['status'] == 'read') {
+          deliveryStatus = 'read';
+        } else if (m['delivered'] == true || m['status'] == 'delivered') {
+          deliveryStatus = 'delivered';
+        }
+
         _messages.add({
           'id': msgId,
           'isMe': isMe,
           'text': msgText,
           'time': timeStr,
           'timestamp': ts,
+          'status': deliveryStatus,
           'isAudio': m['type'] == 'voice',
           'attachmentId': attId,
           'attachmentUrl': attUrl,
@@ -328,15 +409,16 @@ class _ChatScreenState extends State<ChatScreen> {
       _scrollToBottom();
       final now = DateTime.now().millisecondsSinceEpoch;
       ChatService.instance.saveReadTimestamp(_threadKey, now);
-      ChatService.instance.saveLocalMessages(_threadKey, _messages);
-      if (widget.contactName.isNotEmpty) {
-        ChatService.instance.saveReadTimestamp(widget.contactName, now);
-        ChatService.instance.saveLocalMessages(widget.contactName, _messages);
-      }
+      ChatService.instance.saveLocalMessagesMulti(
+        conversationId: _activeConversationId,
+        peerNexaId: widget.nexaId,
+        peerHandle: widget.contactName,
+        messages: _messages,
+      );
       if (_messages.isNotEmpty) {
         final lastMsg = _messages.last;
         ChatService.instance.updateRecentChat(
-          peerName: widget.contactName,
+          peerName: _displayName,
           peerNexaId: widget.nexaId,
           lastMessage: (lastMsg['text'] ?? '').toString(),
           timestamp: (lastMsg['timestamp'] as num?)?.toInt() ?? now,
@@ -367,35 +449,44 @@ class _ChatScreenState extends State<ChatScreen> {
     final ts = now.millisecondsSinceEpoch;
     final tod = TimeOfDay.fromDateTime(now);
     final timeStr = '${tod.hourOfPeriod}:${tod.minute.toString().padLeft(2, '0')} ${tod.period == DayPeriod.am ? 'AM' : 'PM'}';
+    final localMsgId = 'm_$ts';
+    final clientMessageId = 'cl_$ts';
+
+    final newMsg = <String, dynamic>{
+      'id': localMsgId,
+      'clientMessageId': clientMessageId,
+      'isMe': true,
+      'text': text,
+      'time': timeStr,
+      'timestamp': ts,
+      'status': 'pending', // 1. Pending: Saved locally and renders immediately
+      'hasAction': false,
+      'actionAdded': false,
+      'actionDismissed': false,
+      'reactions': <String>[],
+    };
 
     setState(() {
-      _messages.add({
-        'id': 'm_$ts',
-        'isMe': true,
-        'text': text,
-        'time': timeStr,
-        'timestamp': ts,
-        'hasAction': false,
-        'actionAdded': false,
-        'actionDismissed': false,
-        'reactions': <String>[],
-      });
+      _messages.add(newMsg);
       _messages.sort((a, b) => ((a['timestamp'] as num?)?.toInt() ?? 0).compareTo((b['timestamp'] as num?)?.toInt() ?? 0));
+      _chatState = ChatState.loaded;
       _messageController.clear();
       _isComposing = false;
     });
 
     _scrollToBottom();
 
-    // 1. Persist immediately to local storage
-    ChatService.instance.saveLocalMessages(_threadKey, _messages);
-    if (widget.contactName.isNotEmpty) {
-      ChatService.instance.saveLocalMessages(widget.contactName, _messages);
-    }
+    // 1. Persist immediately to local storage before waiting for server response
+    ChatService.instance.saveLocalMessagesMulti(
+      conversationId: _activeConversationId,
+      peerNexaId: widget.nexaId,
+      peerHandle: widget.contactName,
+      messages: _messages,
+    );
 
-    // 2. Retain conversation in recent chats immediately even before peer replies!
+    // 2. Retain conversation in recent chats immediately
     ChatService.instance.updateRecentChat(
-      peerName: widget.contactName,
+      peerName: _displayName,
       peerNexaId: widget.nexaId,
       lastMessage: text,
       timestamp: ts,
@@ -403,23 +494,103 @@ class _ChatScreenState extends State<ChatScreen> {
       conversationId: _activeConversationId,
     );
 
-    final clientMessageId = 'cl_$ts';
+    // 3. Status is now Sending: Background worker sends the message to backend
+    setState(() {
+      newMsg['status'] = 'sending';
+    });
 
-    // 3. Transmit to server relay so recipient receives message in real time
+    // 4. Send asynchronously without blocking the UI
     ChatService.instance.sendMessage(
       recipientHandle: widget.contactName,
       recipientNexaId: widget.nexaId,
       text: text,
       conversationId: _activeConversationId,
       clientMessageId: clientMessageId,
-    );
+    ).then((serverMsg) {
+      if (!mounted) return;
+      final idx = _messages.indexWhere((m) => m['id'] == localMsgId || m['clientMessageId'] == clientMessageId);
+      if (idx != -1) {
+        setState(() {
+          if (serverMsg != null) {
+            _messages[idx]['status'] = 'sent';
+            if (serverMsg['id'] != null) {
+              _messages[idx]['id'] = serverMsg['id'].toString();
+            }
+          } else {
+            _messages[idx]['status'] = 'failed';
+          }
+        });
+        ChatService.instance.saveLocalMessagesMulti(
+          conversationId: _activeConversationId,
+          peerNexaId: widget.nexaId,
+          peerHandle: widget.contactName,
+          messages: _messages,
+        );
+      }
+    }).catchError((e) {
+      if (!mounted) return;
+      final idx = _messages.indexWhere((m) => m['id'] == localMsgId);
+      if (idx != -1) {
+        setState(() {
+          _messages[idx]['status'] = 'failed';
+        });
+      }
+    });
 
-    // Accelerated delivery confirmation polls
-    Future.delayed(const Duration(milliseconds: 200), () {
+    // Delivery confirmation background polls
+    Future.delayed(const Duration(milliseconds: 300), () {
       if (mounted) _syncIncomingMessages();
     });
-    Future.delayed(const Duration(milliseconds: 600), () {
+    Future.delayed(const Duration(milliseconds: 800), () {
       if (mounted) _syncIncomingMessages();
+    });
+  }
+
+  void _retrySendMessage(Map<String, dynamic> msg) {
+    final clientMsgId = (msg['clientMessageId'] ?? 'cl_${DateTime.now().millisecondsSinceEpoch}').toString();
+    final text = (msg['text'] ?? '').toString();
+    final type = (msg['attachmentType'] ?? (msg['isAudio'] == true ? 'voice' : 'text')).toString();
+
+    setState(() {
+      msg['status'] = 'sending';
+    });
+
+    ChatService.instance.sendMessage(
+      recipientHandle: widget.contactName,
+      recipientNexaId: widget.nexaId,
+      text: text,
+      type: type,
+      conversationId: _activeConversationId,
+      clientMessageId: clientMsgId,
+      attachmentId: msg['attachmentId']?.toString(),
+      attachmentUrl: msg['attachmentUrl']?.toString(),
+      attachmentType: msg['attachmentType']?.toString(),
+      attachmentName: msg['attachmentName']?.toString(),
+      attachmentSize: msg['attachmentSize'] is num ? (msg['attachmentSize'] as num).toInt() : null,
+      locationData: msg['extra'] is Map ? Map<String, dynamic>.from(msg['extra'] as Map) : null,
+    ).then((serverMsg) {
+      if (!mounted) return;
+      setState(() {
+        if (serverMsg != null) {
+          msg['status'] = 'sent';
+          if (serverMsg['id'] != null) {
+            msg['id'] = serverMsg['id'].toString();
+          }
+        } else {
+          msg['status'] = 'failed';
+        }
+      });
+      ChatService.instance.saveLocalMessagesMulti(
+        conversationId: _activeConversationId,
+        peerNexaId: widget.nexaId,
+        peerHandle: widget.contactName,
+        messages: _messages,
+      );
+    }).catchError((e) {
+      if (!mounted) return;
+      setState(() {
+        msg['status'] = 'failed';
+      });
     });
   }
 
@@ -660,41 +831,69 @@ class _ChatScreenState extends State<ChatScreen> {
 
     final now = TimeOfDay.now();
     final timeStr = '${now.hourOfPeriod}:${now.minute.toString().padLeft(2, '0')} ${now.period == DayPeriod.am ? 'AM' : 'PM'}';
+    final ts = DateTime.now().millisecondsSinceEpoch;
+    final localMsgId = 'm_$ts';
+    final clientMessageId = 'cl_$ts';
+
+    final voiceMsg = <String, dynamic>{
+      'id': localMsgId,
+      'clientMessageId': clientMessageId,
+      'isMe': true,
+      'isAudio': true,
+      'attachmentType': 'voice',
+      'audioDuration': durationStr,
+      'durationSeconds': durationSeconds,
+      'waveformData': recordedWave,
+      'extra': {
+        'path': nativeAudioInfo?['path'],
+        'size': nativeAudioInfo?['size'] ?? '320 KB',
+        'source': 'microphone_hardware',
+      },
+      'text': 'Voice memo ($durationStr)',
+      'time': timeStr,
+      'timestamp': ts,
+      'status': 'pending', // 1. Pending: saved locally immediately
+      'hasAction': false,
+      'actionAdded': false,
+      'actionDismissed': false,
+      'reactions': <String>[],
+    };
 
     setState(() {
       _isRecordingVoice = false;
       _recordingSeconds = 0;
-      _messages.add({
-        'id': 'm_${DateTime.now().millisecondsSinceEpoch}',
-        'isMe': true,
-        'isAudio': true,
-        'attachmentType': 'voice',
-        'audioDuration': durationStr,
-        'durationSeconds': durationSeconds,
-        'waveformData': recordedWave,
-        'extra': {
-          'path': nativeAudioInfo?['path'],
-          'size': nativeAudioInfo?['size'] ?? '320 KB',
-          'source': 'microphone_hardware',
-        },
-        'text': 'Voice memo ($durationStr)',
-        'time': timeStr,
-        'hasAction': false,
-        'actionAdded': false,
-        'actionDismissed': false,
-        'reactions': <String>[],
-      });
+      _messages.add(voiceMsg);
+      _chatState = ChatState.loaded;
+    });
+
+    _scrollToBottom();
+
+    // 1. Persist locally immediately
+    ChatService.instance.saveLocalMessagesMulti(
+      conversationId: _activeConversationId,
+      peerNexaId: widget.nexaId,
+      peerHandle: widget.contactName,
+      messages: _messages,
+    );
+
+    // 2. Retain conversation in recent chats
+    ChatService.instance.updateRecentChat(
+      peerName: _displayName,
+      peerNexaId: widget.nexaId,
+      lastMessage: 'Voice memo ($durationStr)',
+      timestamp: ts,
+      unread: 0,
+      conversationId: _activeConversationId,
+    );
+
+    // 3. Mark sending
+    setState(() {
+      voiceMsg['status'] = 'sending';
     });
 
     HapticFeedback.mediumImpact();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Voice note ($durationStr) encrypted with AES-256-GCM and sent.'),
-        duration: const Duration(seconds: 2),
-      ),
-    );
 
-    // Transmit voice memo to server relay
+    // 4. Send asynchronously without blocking
     ChatService.instance.sendMessage(
       recipientHandle: widget.contactName,
       recipientNexaId: widget.nexaId,
@@ -702,18 +901,40 @@ class _ChatScreenState extends State<ChatScreen> {
       type: 'voice',
       audioPath: nativeAudioInfo?['path']?.toString(),
       audioDuration: durationSeconds,
-    );
+      conversationId: _activeConversationId,
+      clientMessageId: clientMessageId,
+    ).then((serverMsg) {
+      if (!mounted) return;
+      final idx = _messages.indexWhere((m) => m['id'] == localMsgId || m['clientMessageId'] == clientMessageId);
+      if (idx != -1) {
+        setState(() {
+          if (serverMsg != null) {
+            _messages[idx]['status'] = 'sent';
+            if (serverMsg['id'] != null) {
+              _messages[idx]['id'] = serverMsg['id'].toString();
+            }
+          } else {
+            _messages[idx]['status'] = 'failed';
+          }
+        });
+        ChatService.instance.saveLocalMessagesMulti(
+          conversationId: _activeConversationId,
+          peerNexaId: widget.nexaId,
+          peerHandle: widget.contactName,
+          messages: _messages,
+        );
+      }
+    }).catchError((e) {
+      if (!mounted) return;
+      final idx = _messages.indexWhere((m) => m['id'] == localMsgId);
+      if (idx != -1) {
+        setState(() {
+          _messages[idx]['status'] = 'failed';
+        });
+      }
+    });
 
-    _scrollToBottom();
-
-    // Persist to local storage
-    ChatService.instance.saveLocalMessages(_threadKey, _messages);
-    if (widget.contactName.isNotEmpty) {
-      ChatService.instance.saveLocalMessages(widget.contactName, _messages);
-    }
-
-    // Accelerated delivery confirmation
-    Future.delayed(const Duration(milliseconds: 250), () {
+    Future.delayed(const Duration(milliseconds: 300), () {
       if (mounted) _syncIncomingMessages();
     });
   }
@@ -1279,7 +1500,7 @@ class _ChatScreenState extends State<ChatScreen> {
       }
     }
 
-    final messageMap = {
+    final messageMap = <String, dynamic>{
       'id': 'm_$ts',
       'clientMessageId': clientMessageId,
       'conversationId': _activeConversationId,
@@ -1294,6 +1515,7 @@ class _ChatScreenState extends State<ChatScreen> {
       'extra': extra,
       'time': timeStr,
       'timestamp': ts,
+      'status': 'pending', // 1. Pending: saved locally immediately
       'hasAction': false,
       'actionAdded': false,
       'actionDismissed': false,
@@ -1303,19 +1525,22 @@ class _ChatScreenState extends State<ChatScreen> {
     setState(() {
       _messages.add(messageMap);
       _messages.sort((a, b) => ((a['timestamp'] as num?)?.toInt() ?? 0).compareTo((b['timestamp'] as num?)?.toInt() ?? 0));
+      _chatState = ChatState.loaded;
     });
 
     _scrollToBottom();
 
     // 1. Save locally immediately
-    ChatService.instance.saveLocalMessages(_threadKey, _messages);
-    if (widget.contactName.isNotEmpty) {
-      ChatService.instance.saveLocalMessages(widget.contactName, _messages);
-    }
+    ChatService.instance.saveLocalMessagesMulti(
+      conversationId: _activeConversationId,
+      peerNexaId: widget.nexaId,
+      peerHandle: widget.contactName,
+      messages: _messages,
+    );
 
     // 2. Retain conversation in recent chats immediately
     ChatService.instance.updateRecentChat(
-      peerName: widget.contactName,
+      peerName: _displayName,
       peerNexaId: widget.nexaId,
       lastMessage: '$type: $title',
       timestamp: ts,
@@ -1323,7 +1548,12 @@ class _ChatScreenState extends State<ChatScreen> {
       conversationId: _activeConversationId,
     );
 
-    // 3. Send over relay
+    // 3. Mark sending
+    setState(() {
+      messageMap['status'] = 'sending';
+    });
+
+    // 4. Send asynchronously without blocking the UI
     ChatService.instance.sendMessage(
       recipientHandle: widget.contactName,
       recipientNexaId: widget.nexaId,
@@ -1337,7 +1567,38 @@ class _ChatScreenState extends State<ChatScreen> {
       attachmentName: attachmentName,
       attachmentSize: attachmentSize,
       locationData: (type.toLowerCase() == 'location' ? extra : null),
-    );
+    ).then((serverMsg) {
+      if (!mounted) return;
+      final localMsgId = 'm_$ts';
+      final idx = _messages.indexWhere((m) => m['id'] == localMsgId || m['clientMessageId'] == clientMessageId);
+      if (idx != -1) {
+        setState(() {
+          if (serverMsg != null) {
+            _messages[idx]['status'] = 'sent';
+            if (serverMsg['id'] != null) {
+              _messages[idx]['id'] = serverMsg['id'].toString();
+            }
+          } else {
+            _messages[idx]['status'] = 'failed';
+          }
+        });
+        ChatService.instance.saveLocalMessagesMulti(
+          conversationId: _activeConversationId,
+          peerNexaId: widget.nexaId,
+          peerHandle: widget.contactName,
+          messages: _messages,
+        );
+      }
+    }).catchError((e) {
+      if (!mounted) return;
+      final localMsgId = 'm_$ts';
+      final idx = _messages.indexWhere((m) => m['id'] == localMsgId);
+      if (idx != -1) {
+        setState(() {
+          _messages[idx]['status'] = 'failed';
+        });
+      }
+    });
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1885,7 +2146,10 @@ class _ChatScreenState extends State<ChatScreen> {
                         child: ListTile(
                           leading: CircleAvatar(
                             backgroundColor: NexaColors.elevatedLight,
-                            child: Text(c['name']!.substring(0, 1), style: const TextStyle(fontWeight: FontWeight.bold, color: NexaColors.primary)),
+                            child: Text(
+                              (c['name'] != null && c['name']!.isNotEmpty) ? c['name']!.substring(0, 1).toUpperCase() : '?',
+                              style: const TextStyle(fontWeight: FontWeight.bold, color: NexaColors.primary),
+                            ),
                           ),
                           title: Text(c['name']!, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                           subtitle: Text('${c['nexaId']} • ${c['role']}', style: const TextStyle(fontSize: 12)),
@@ -2265,7 +2529,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 CircleAvatar(
                   backgroundColor: const Color(0xFF00E5FF).withValues(alpha: 0.15),
                   child: Text(
-                    widget.contactName.substring(0, 1).toUpperCase(),
+                    _contactInitial,
                     style: const TextStyle(color: Color(0xFF00E5FF), fontWeight: FontWeight.bold),
                   ),
                 ),
@@ -2278,7 +2542,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         children: [
                           Flexible(
                             child: Text(
-                              widget.contactName,
+                              _displayName,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
                                 fontSize: 16,
@@ -2298,7 +2562,7 @@ class _ChatScreenState extends State<ChatScreen> {
                           const Icon(Icons.lock, color: NexaColors.emeraldSecure, size: 10),
                           const SizedBox(width: 4),
                           Text(
-                            widget.nexaId,
+                            widget.nexaId.trim().isNotEmpty ? widget.nexaId : 'E2E Encrypted',
                             style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
                           ),
                         ],
@@ -2437,38 +2701,47 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           ),
 
-          // Message Stream
+          // Message Stream - Local-first rendering
           Expanded(
-            child: _chatState == ChatState.loading
-                ? const Center(
-                    child: CircularProgressIndicator(),
+            child: _messages.isNotEmpty
+                ? ListView.builder(
+                    controller: _scrollController,
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    itemCount: _messages.length,
+                    itemBuilder: (context, index) {
+                      final msg = _messages[index];
+                      return _buildMessageItem(msg);
+                    },
                   )
-                : _chatState == ChatState.error
-                    ? Center(
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 32),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.cloud_off, size: 48, color: NexaColors.rubyDestructive),
-                              const SizedBox(height: 12),
-                              Text(
-                                _errorMessage ?? 'Failed to load conversation history',
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(color: NexaColors.textPrimary, fontSize: 14),
-                              ),
-                              const SizedBox(height: 16),
-                              ElevatedButton.icon(
-                                icon: const Icon(Icons.refresh, size: 18),
-                                label: const Text('Retry Connection'),
-                                onPressed: () => _loadThread(),
-                              ),
-                            ],
-                          ),
-                        ),
+                : _chatState == ChatState.loading
+                    ? const Center(
+                        child: CircularProgressIndicator(),
                       )
-                    : _messages.isEmpty
+                    : _chatState == ChatState.error
                         ? Center(
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 32),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.cloud_off, size: 48, color: NexaColors.rubyDestructive),
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    _errorMessage ?? 'Failed to load conversation history',
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(color: NexaColors.textPrimary, fontSize: 14),
+                                  ),
+                                  const SizedBox(height: 16),
+                                  ElevatedButton.icon(
+                                    icon: const Icon(Icons.refresh, size: 18),
+                                    label: const Text('Retry Connection'),
+                                    onPressed: () => _startBackgroundSync(),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          )
+                        : Center(
                             child: Padding(
                               padding: const EdgeInsets.symmetric(horizontal: 32),
                               child: Column(
@@ -2489,22 +2762,13 @@ class _ChatScreenState extends State<ChatScreen> {
                                   ),
                                   const SizedBox(height: 8),
                                   Text(
-                                    'Messages and calls with ${widget.contactName} are end-to-end encrypted with Double Ratchet & hardware isolated keys. No one outside of this chat can read or listen to them.',
+                                    'Messages and calls with $_displayName are end-to-end encrypted with Double Ratchet & hardware isolated keys. No one outside of this chat can read or listen to them.',
                                     textAlign: TextAlign.center,
                                     style: const TextStyle(fontSize: 13, color: NexaColors.textSecondary, height: 1.4),
                                   ),
                                 ],
                               ),
                             ),
-                          )
-                        : ListView.builder(
-                            controller: _scrollController,
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                            itemCount: _messages.length,
-                            itemBuilder: (context, index) {
-                              final msg = _messages[index];
-                              return _buildMessageItem(msg);
-                            },
                           ),
           ),
 
@@ -3001,7 +3265,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         ),
                         if (isMe) ...[
                           const SizedBox(width: 4),
-                          const Icon(Icons.done_all, color: Color(0xFF00E5FF), size: 14),
+                          _buildDeliveryStatusWidget(msg),
                         ],
                       ],
                     ),
@@ -3121,6 +3385,60 @@ class _ChatScreenState extends State<ChatScreen> {
         ],
       ),
     );
+  }
+
+  Widget _buildDeliveryStatusWidget(Map<String, dynamic> msg) {
+    final status = (msg['status'] ?? 'sent').toString();
+    switch (status) {
+      case 'pending':
+        return const Padding(
+          padding: EdgeInsets.only(left: 3),
+          child: Icon(Icons.access_time_rounded, size: 12, color: Colors.white60),
+        );
+      case 'sending':
+        return const Padding(
+          padding: EdgeInsets.only(left: 3),
+          child: SizedBox(
+            width: 10,
+            height: 10,
+            child: CircularProgressIndicator(
+              strokeWidth: 1.5,
+              valueColor: AlwaysStoppedAnimation<Color>(Colors.white70),
+            ),
+          ),
+        );
+      case 'failed':
+        return InkWell(
+          onTap: () => _retrySendMessage(msg),
+          child: const Padding(
+            padding: EdgeInsets.only(left: 3),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.error_outline_rounded, size: 13, color: NexaColors.rubyDestructive),
+                SizedBox(width: 2),
+                Text('Retry', style: TextStyle(color: NexaColors.rubyDestructive, fontSize: 10, fontWeight: FontWeight.bold)),
+              ],
+            ),
+          ),
+        );
+      case 'read':
+        return const Padding(
+          padding: EdgeInsets.only(left: 3),
+          child: Icon(Icons.done_all_rounded, size: 14, color: Color(0xFF00E5FF)),
+        );
+      case 'delivered':
+        return const Padding(
+          padding: EdgeInsets.only(left: 3),
+          child: Icon(Icons.done_all_rounded, size: 14, color: Colors.white70),
+        );
+      case 'sent':
+      default:
+        return const Padding(
+          padding: EdgeInsets.only(left: 3),
+          child: Icon(Icons.check_rounded, size: 14, color: Colors.white70),
+        );
+    }
   }
 
   Widget _buildInputBar() {
@@ -3331,7 +3649,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                 radius: 44,
                                 backgroundColor: NexaColors.primary.withValues(alpha: 0.15),
                                 child: Text(
-                                  widget.contactName.substring(0, 1),
+                                  _contactInitial,
                                   style: const TextStyle(fontSize: 34, fontWeight: FontWeight.bold, color: NexaColors.primary),
                                 ),
                               ),
@@ -3357,7 +3675,7 @@ class _ChatScreenState extends State<ChatScreen> {
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               Text(
-                                widget.contactName,
+                                _displayName,
                                 style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: NexaColors.textPrimary),
                               ),
                               if (_isSafetyNumberVerified) ...[

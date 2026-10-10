@@ -73,8 +73,8 @@ class UpdateEngine {
   static final UpdateEngine instance = UpdateEngine._internal();
   UpdateEngine._internal();
 
-  static const String currentVersion = '1.2.9';
-  static const int currentBuildNumber = 13;
+  static const String currentVersion = '1.3.0';
+  static const int currentBuildNumber = 14;
   static const String defaultDownloadUrl = 'https://glimmer-messaging-app-web.vercel.app/nexa-release.apk';
   static const String fallbackDownloadUrl = 'https://raw.githubusercontent.com/karthiknataraj547/Glimmer-messaging-app/master/public/nexa-release.apk';
   static const MethodChannel _channel = MethodChannel('com.nexa.media_picker');
@@ -239,7 +239,7 @@ class UpdateEngine {
 
         client = http.Client();
         final request = http.Request('GET', uri);
-        request.headers['User-Agent'] = 'NEXA-Updater/1.2.9';
+        request.headers['User-Agent'] = 'NEXA-Updater/1.3.0';
         request.headers['Accept-Encoding'] = 'identity';
         request.headers['Cache-Control'] = 'no-cache';
 
